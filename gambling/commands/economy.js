@@ -328,9 +328,9 @@ async function handleInventory(interaction) {
   const total = Math.ceil(w.inventory.length / perPage);
   const items = w.inventory.slice(page * perPage, (page + 1) * perPage);
   let text = `**${username}'s Inventory** (${w.inventory.length} items) - Page ${page + 1}/${total}\n\n`;
-  const counts = { common: 0, uncommon: 0, rare: 0, legendary: 0, mythic: 0, divine: 0 };
+  const counts = { common: 0, uncommon: 0, rare: 0, legendary: 0, epic: 0, mythic: 0, divine: 0 };
   w.inventory.forEach(i => { if (counts[i.rarity] !== undefined) counts[i.rarity]++; });
-  text += `⬜ ${counts.common} common | 🟩 ${counts.uncommon} uncommon | 🟦 ${counts.rare} rare | 🟨 ${counts.legendary} legendary | 🟪 ${counts.mythic} mythic | 🩵 ${counts.divine} divine\n\n`;
+  text += `⬜ ${counts.common} common | 🟩 ${counts.uncommon} uncommon | 🟦 ${counts.rare} rare | 🟨 ${counts.legendary} legendary | 🟪 ${counts.epic} epic | 🩷 ${counts.mythic} mythic | 🩵 ${counts.divine} divine\n\n`;
   items.forEach(it => { text += `${it.emoji} ${it.name}\n`; });
   return interaction.reply(text);
 }
