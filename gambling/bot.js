@@ -28,42 +28,43 @@ const commands = [
   new SlashCommandBuilder().setName('balance').setDescription('Check your coin balance'),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily coins'),
   new SlashCommandBuilder().setName('flip').setDescription('Flip coins, instant 50/50')
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount per flip').setRequired(true).setMinValue(1))
+    .addStringOption(o => o.setName('amount').setDescription('Bet per flip (e.g. 1000, 1k, all)').setRequired(true))
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of flips (1-10)').setMinValue(1).setMaxValue(10)),
   new SlashCommandBuilder().setName('dice').setDescription('Roll dice, win on 4-6')
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('blackjack').setDescription('Play blackjack')
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('roulette').setDescription('Play roulette')
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('allin17black').setDescription('Go ALL IN on 17 black in roulette'),
   new SlashCommandBuilder().setName('mines').setDescription('Navigate a minefield for multiplied rewards')
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount').setRequired(true).setMinValue(1))
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true))
     .addIntegerOption(o => o.setName('mines').setDescription('Number of mines (1-15)').setRequired(true).setMinValue(1).setMaxValue(15)),
   new SlashCommandBuilder().setName('leaderboard').setDescription('See the richest players'),
   new SlashCommandBuilder().setName('give').setDescription('Give coins to someone')
     .addUserOption(o => o.setName('user').setDescription('Who to give to').setRequired(true))
-    .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('trade').setDescription('Start a trade with someone')
     .addUserOption(o => o.setName('user').setDescription('Who to trade with').setRequired(true)),
   new SlashCommandBuilder().setName('duel').setDescription('Challenge someone to a coin flip duel')
     .addUserOption(o => o.setName('opponent').setDescription('Who to challenge').setRequired(true))
-    .addIntegerOption(o => o.setName('amount').setDescription('Bet amount').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('letitride').setDescription('Win and keep doubling')
-    .addIntegerOption(o => o.setName('amount').setDescription('Starting bet').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Starting bet (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('deposit').setDescription('Deposit coins to your bank')
-    .addIntegerOption(o => o.setName('amount').setDescription('Amount to deposit').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to deposit (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('invest').setDescription('Deposit coins to your bank (alias)')
-    .addIntegerOption(o => o.setName('amount').setDescription('Amount to invest').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to invest (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
-    .addIntegerOption(o => o.setName('amount').setDescription('Amount to withdraw').setRequired(true).setMinValue(1)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to withdraw (e.g. 1000, 1k, all)').setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
   new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades'),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
     .addIntegerOption(o => o.setName('page').setDescription('Page number').setMinValue(1)),
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
-  new SlashCommandBuilder().setName('mysterybox').setDescription('Buy a mystery box for 5,000 coins'),
+  new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
+    .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
     .addStringOption(o => o.setName('topic').setDescription('Help topic')
       .addChoices(

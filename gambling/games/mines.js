@@ -64,7 +64,14 @@ function gridToString(game, hitIdx) {
 
 async function handleCommand(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const mc = interaction.options.getInteger('mines');
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);

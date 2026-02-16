@@ -95,11 +95,18 @@ function resolveStandard(interaction, uid, game, doubled) {
 // ─── Slash command handler ───
 async function handleCommand(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
-  // Deduct bet upfront
+  // Deduct bet upfront to hold the money
   store.setBalance(userId, bal - bet);
 
   const deck = createDeck();
@@ -115,12 +122,12 @@ async function handleCommand(interaction) {
     if (dvv === 21) {
       // Push, return bet
       store.setBalance(userId, bal);
-      return interaction.reply(`🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
+      return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit)
     const profit = Math.floor(bet * 1.5);
     store.setBalance(userId, bal + profit); store.addToUniversalPool(profit);
-    return interaction.reply(`🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(profit)}**! Balance: **${store.formatNumber(bal + profit)}**`);
+    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(profit)}**! Balance: **${store.formatNumber(bal + profit)}**`);
   }
 
   // Check if player can afford to double (they already paid bet, so they need another bet in balance)

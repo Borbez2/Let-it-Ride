@@ -27,7 +27,8 @@ const RARITIES = {
   uncommon:  { emoji: '🟩', color: null },
   rare:      { emoji: '🟦', color: null },
   legendary: { emoji: '🟨', color: null },
-  mythic:    { emoji: '🟪', color: null },
+  epic:      { emoji: '🟪', color: null },
+  mythic:    { emoji: '🩷', color: null },
   divine:    { emoji: '🩵', color: null },
 };
 
@@ -38,7 +39,8 @@ for (let i = 1; i <= 120; i++) {
   else if (i <= 65)  rarity = 'uncommon';
   else if (i <= 85)  rarity = 'rare';
   else if (i <= 100) rarity = 'legendary';
-  else if (i <= 112) rarity = 'mythic';
+  else if (i <= 110) rarity = 'epic';
+  else if (i <= 115) rarity = 'mythic';
   else               rarity = 'divine';
 
   COLLECTIBLES.push({
@@ -50,12 +52,13 @@ for (let i = 1; i <= 120; i++) {
 }
 
 const MYSTERY_BOX_POOLS = {
-  common:    { weight: 40, items: COLLECTIBLES.filter(c => c.rarity === 'common') },
-  uncommon:  { weight: 25, items: COLLECTIBLES.filter(c => c.rarity === 'uncommon') },
-  rare:      { weight: 18, items: COLLECTIBLES.filter(c => c.rarity === 'rare') },
-  legendary: { weight: 10, items: COLLECTIBLES.filter(c => c.rarity === 'legendary') },
-  mythic:    { weight: 5,  items: COLLECTIBLES.filter(c => c.rarity === 'mythic') },
-  divine:    { weight: 2,  items: COLLECTIBLES.filter(c => c.rarity === 'divine') },
+  common:    { weight: 50, items: COLLECTIBLES.filter(c => c.rarity === 'common') },
+  uncommon:  { weight: 30, items: COLLECTIBLES.filter(c => c.rarity === 'uncommon') },
+  rare:      { weight: 12, items: COLLECTIBLES.filter(c => c.rarity === 'rare') },
+  legendary: { weight: 5,  items: COLLECTIBLES.filter(c => c.rarity === 'legendary') },
+  epic:      { weight: 2,  items: COLLECTIBLES.filter(c => c.rarity === 'epic') },
+  mythic:    { weight: 0.8, items: COLLECTIBLES.filter(c => c.rarity === 'mythic') },
+  divine:    { weight: 0.2, items: COLLECTIBLES.filter(c => c.rarity === 'divine') },
 };
 
 module.exports = {

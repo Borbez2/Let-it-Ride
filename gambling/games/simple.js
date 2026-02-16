@@ -8,7 +8,14 @@ const activeDuels = new Map();
 // ═══════ FLIP ═══════
 async function handleFlip(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const qty = interaction.options.getInteger('quantity') || 1;
   const bal = store.getBalance(userId);
   if (bet * qty > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
@@ -32,8 +39,8 @@ async function handleFlip(interaction) {
   }
 
   if (qty === 1) {
-    if (wins) return interaction.reply(`**Flip: WIN** +**${store.formatNumber(bet)}**\nBalance: **${store.formatNumber(bal + net)}**`);
-    return interaction.reply(`**Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+    if (wins) return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(bet)}**\nBalance: **${store.formatNumber(bal + net)}**`);
+    return interaction.reply(`❌ **Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
   return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${net >= 0 ? '+' : ''}${store.formatNumber(net)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
@@ -41,7 +48,14 @@ async function handleFlip(interaction) {
 // ═══════ DICE ═══════
 async function handleDice(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
@@ -63,12 +77,12 @@ async function handleDiceButton(interaction, parts) {
 
   if (won) {
     store.setBalance(uid, bal + game.bet); store.addToUniversalPool(game.bet);
-    await interaction.update({ content: `**Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet)}**`, components: [] });
+    await interaction.update({ content: `✅ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet)}**`, components: [] });
   } else {
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
-    await interaction.update({ content: `**Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Lost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
+    await interaction.update({ content: `❌ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Lost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   }
   activeGames.delete(uid);
 }
@@ -78,7 +92,14 @@ const REDS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
 
 async function handleRoulette(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
@@ -139,7 +160,14 @@ async function handleAllIn17(interaction) {
 // ═══════ LET IT RIDE ═══════
 async function handleLetItRide(interaction) {
   const userId = interaction.user.id;
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
@@ -193,13 +221,23 @@ async function handleRideButton(interaction, parts) {
 async function handleDuel(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
   const opp = interaction.options.getUser('opponent');
-  const bet = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
+  const balance = store.getBalance(userId);
+  
+  const bet = store.parseAmount(rawAmount, balance);
+  if (!bet || bet <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   const bal = store.getBalance(userId);
   if (opp.id === userId) return interaction.reply("Can't duel yourself");
   if (opp.bot) return interaction.reply("Can't duel a bot");
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
-  activeDuels.set(`${userId}_${opp.id}`, { bet, challengerName: username, opponentName: opp.username });
+  // Hold the money to prevent the user from spending it elsewhere
+  store.setBalance(userId, bal - bet);
+  
+  activeDuels.set(`${userId}_${opp.id}`, { bet, challengerName: username, opponentName: opp.username, challengerBalance: bal - bet });
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`duel_accept_${userId}_${opp.id}`).setLabel('Accept').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`duel_decline_${userId}_${opp.id}`).setLabel('Decline').setStyle(ButtonStyle.Danger),
@@ -214,22 +252,40 @@ async function handleDuelButton(interaction, parts) {
   if (interaction.user.id !== oid) return interaction.reply({ content: "Not your duel!", ephemeral: true });
 
   if (action === 'decline') {
+    // Refund the challenger's money
+    store.setBalance(cid, store.getBalance(cid) + duel.bet);
     activeDuels.delete(dk);
     return interaction.update({ content: `**${duel.opponentName}** declined.`, components: [] });
   }
 
   if (action === 'accept') {
-    if (store.getBalance(cid) < duel.bet) { activeDuels.delete(dk); return interaction.update({ content: "Challenger broke.", components: [] }); }
-    if (store.getBalance(oid) < duel.bet) { activeDuels.delete(dk); return interaction.update({ content: "You can't afford it!", components: [] }); }
+    const oppBal = store.getBalance(oid);
+    
+    // Check if opponent still has enough (the challenger's money was already held)
+    if (oppBal < duel.bet) { 
+      // Refund challenger
+      store.setBalance(cid, store.getBalance(cid) + duel.bet);
+      activeDuels.delete(dk); 
+      return interaction.update({ content: "You can't afford it!", components: [] }); 
+    }
+    
+    // Hold opponent's money
+    store.setBalance(oid, oppBal - duel.bet);
+    
     const w = Math.random() < 0.5 ? cid : oid;
     const wn = w === cid ? duel.challengerName : duel.opponentName;
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;
-    store.setBalance(w, store.getBalance(w) + duel.bet);
-    store.setBalance(li, store.getBalance(li) - duel.bet);
-    store.addToUniversalPool(duel.bet); store.addToLossPool(duel.bet);
+    
+    // Winner gets both bets
+    store.setBalance(w, store.getBalance(w) + (duel.bet * 2));
+    
+    store.addToUniversalPool(duel.bet);
+    store.addToLossPool(duel.bet);
     activeDuels.delete(dk);
-    return interaction.update({ content: `**DUEL** — **${wn}** wins ${store.formatNumber(duel.bet)} from **${ln}**!`, components: [] });
+    
+    const emoji = w === cid ? '✅' : '❌';
+    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** wins **${store.formatNumber(duel.bet * 2)}** from **${ln}**!`, components: [] });
   }
 }
 

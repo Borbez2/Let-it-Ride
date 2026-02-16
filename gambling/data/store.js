@@ -174,15 +174,32 @@ function claimDaily(userId) {
 function rollMysteryBox() {
   const totalW = Object.values(MYSTERY_BOX_POOLS).reduce((s, p) => s + p.weight, 0);
   let roll = Math.random() * totalW;
-  for (const [, pool] of Object.entries(MYSTERY_BOX_POOLS)) {
+  for (const [rarity, pool] of Object.entries(MYSTERY_BOX_POOLS)) {
     roll -= pool.weight;
     if (roll <= 0) {
       const it = pool.items;
-      return { ...it[Math.floor(Math.random() * it.length)] };
+      const item = it[Math.floor(Math.random() * it.length)];
+      return { ...item, _rarity: rarity };
     }
   }
   const c = MYSTERY_BOX_POOLS.common.items;
-  return { ...c[Math.floor(Math.random() * c.length)] };
+  const item = c[Math.floor(Math.random() * c.length)];
+  return { ...item, _rarity: 'common' };
+}
+
+// Calculate compensation for duplicate placeholders
+function getDuplicateCompensation(itemId, rarity) {
+  const { MYSTERY_BOX_COST, MYSTERY_BOX_POOLS } = require('../config');
+  const pool = MYSTERY_BOX_POOLS[rarity];
+  
+  if (!pool || !pool.weight) return 0;
+  
+  // Weight is proportional to drop chance
+  const totalWeight = Object.values(MYSTERY_BOX_POOLS).reduce((s, p) => s + p.weight, 0);
+  const dropChance = pool.weight / totalWeight;
+  
+  // Return 50% of mystery box cost, scaled by drop chance
+  return Math.floor((MYSTERY_BOX_COST * 0.5) * dropChance);
 }
 
 // ─── Formatting ───
@@ -197,6 +214,33 @@ function formatNumberShort(num) {
   return formatNumber(num);
 }
 
+// ─── Parse abbreviated amounts ───
+function parseAmount(str, maxValue = null) {
+  if (!str) return null;
+  const trimmed = str.toLowerCase().trim();
+  
+  // Handle "all"
+  if (trimmed === 'all') {
+    return maxValue !== null ? maxValue : null;
+  }
+  
+  // Parse number with abbreviations (1k, 1m, 1b)
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kmb]?)$/);
+  if (!match) return null;
+  
+  let num = parseFloat(match[1]);
+  const suffix = match[2];
+  
+  if (suffix === 'k') num *= 1000;
+  else if (suffix === 'm') num *= 1000000;
+  else if (suffix === 'b') num *= 1000000000;
+  
+  num = Math.floor(num);
+  if (maxValue !== null && num > maxValue) num = maxValue;
+  
+  return num > 0 ? num : null;
+}
+
 module.exports = {
   getPoolData, savePool,
   addToUniversalPool, addToLossPool,
@@ -205,7 +249,7 @@ module.exports = {
   getInterestRate, getCashbackRate, applyCashback,
   getSpinWeight, processBank,
   checkDaily, claimDaily,
-  rollMysteryBox,
-  formatNumber, formatNumberShort,
+  rollMysteryBox, getDuplicateCompensation,
+  formatNumber, formatNumberShort, parseAmount,
   saveWallets,
 };

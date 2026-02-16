@@ -23,7 +23,7 @@ function renderUpgradesPage(userId) {
   text += cCost ? `Next: ${(cRate + 0.1).toFixed(1)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
   text += `**Daily Spin Mult** Lv ${sLvl}/10 — ${sW}x weight\n`;
   text += sCost ? `Next: ${sW + 1}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
-  text += `**Mystery Box** — ${store.formatNumber(MYSTERY_BOX_COST)} coins each\n`;
+  text += `Use **/mysterybox** to buy collectible boxes!\n`;
 
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
@@ -38,9 +38,6 @@ function renderUpgradesPage(userId) {
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
       .setLabel(sCost ? `Spin Mult (${store.formatNumberShort(sCost)})` : 'Spin Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
-    new ButtonBuilder().setCustomId(`upgrade_mysterybox_${userId}`)
-      .setLabel(`Mystery Box (${store.formatNumberShort(MYSTERY_BOX_COST)})`)
-      .setStyle(ButtonStyle.Primary).setDisabled(w.balance < MYSTERY_BOX_COST),
     new ButtonBuilder().setCustomId(`upgrade_coming1_${userId}`)
       .setLabel('Lucky Bonus - Soon').setStyle(ButtonStyle.Secondary).setDisabled(true),
   ));
@@ -142,8 +139,18 @@ async function handleDaily(interaction) {
 
 async function handleDeposit(interaction) {
   const userId = interaction.user.id;
-  const amount = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
   const bal = store.getBalance(userId);
+  
+  // Parse the amount (supports "all", "1k", "1m", etc.)
+  const amount = rawAmount && typeof rawAmount === 'string' 
+    ? store.parseAmount(rawAmount, bal)
+    : interaction.options.getInteger('amount');
+  
+  if (!amount || amount <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
   const w = store.getWallet(userId);
   w.balance -= amount; w.bank += amount;
@@ -155,8 +162,18 @@ async function handleDeposit(interaction) {
 
 async function handleWithdraw(interaction) {
   const userId = interaction.user.id;
-  const amount = interaction.options.getInteger('amount');
+  const rawAmount = interaction.options.getString('amount');
   const w = store.getWallet(userId);
+  
+  // Parse the amount (supports "all", "1k", "1m", etc.)
+  const amount = rawAmount && typeof rawAmount === 'string'
+    ? store.parseAmount(rawAmount, w.bank)
+    : interaction.options.getInteger('amount');
+  
+  if (!amount || amount <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   if (amount > w.bank) return interaction.reply(`Only **${store.formatNumber(w.bank)}** in bank`);
   w.bank -= amount; w.balance += amount; store.saveWallets();
   return interaction.reply(`Withdrew **${store.formatNumber(amount)}**\nBank: **${store.formatNumber(w.bank)}** | Purse: **${store.formatNumber(w.balance)}**`);
@@ -178,8 +195,15 @@ async function handleBank(interaction) {
 
 async function handleGive(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
-  const target = interaction.options.getUser('user'), amount = interaction.options.getInteger('amount');
+  const target = interaction.options.getUser('user');
+  const rawAmount = interaction.options.getString('amount');
   const bal = store.getBalance(userId);
+  
+  const amount = store.parseAmount(rawAmount, bal);
+  if (!amount || amount <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
   if (target.id === userId) return interaction.reply("Can't give to yourself");
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
   store.setBalance(userId, bal - amount);
@@ -230,13 +254,69 @@ async function handleUpgrades(interaction) {
 
 async function handleMysteryBox(interaction) {
   const userId = interaction.user.id;
+  const quantity = interaction.options.getInteger('quantity') || 1;
   const w = store.getWallet(userId);
-  if (w.balance < MYSTERY_BOX_COST) return interaction.reply(`Need **${store.formatNumber(MYSTERY_BOX_COST)}** coins (you have ${store.formatNumber(w.balance)})`);
-  w.balance -= MYSTERY_BOX_COST;
-  const item = store.rollMysteryBox();
-  w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
+  const totalCost = quantity * MYSTERY_BOX_COST;
+  
+  if (w.balance < totalCost) {
+    return interaction.reply(`Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`);
+  }
+  
+  w.balance -= totalCost;
+  const items = [];
+  let totalCompensation = 0;
+  
+  for (let i = 0; i < quantity; i++) {
+    const item = store.rollMysteryBox();
+    
+    // Check if this is a duplicate placeholder
+    if (item.id && item.id.startsWith('placeholder_')) {
+      const isDuplicate = w.inventory.some(inv => inv.id === item.id);
+      if (isDuplicate) {
+        // Give compensation instead of duplicate
+        const compensation = store.getDuplicateCompensation(item.id, item._rarity);
+        w.balance += compensation;
+        totalCompensation += compensation;
+        items.push({ ...item, isDuplicate: true, compensation });
+        continue;
+      }
+    }
+    
+    w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
+    items.push(item);
+  }
+  
   store.saveWallets();
-  return interaction.reply(`${item.emoji} **Mystery Box**\n\nYou got: **${item.name}** (${item.rarity})\nBalance: **${store.formatNumber(w.balance)}**`);
+  
+  if (quantity === 1) {
+    const item = items[0];
+    if (item.isDuplicate) {
+      return interaction.reply(`${item.emoji} **Mystery Box - DUPLICATE**\n\nYou already have: **${item.name}**\nCompensation: **${store.formatNumber(item.compensation)}** coins\nNew Balance: **${store.formatNumber(w.balance)}**`);
+    }
+    return interaction.reply(`${item.emoji} **Mystery Box**\n\nYou got: **${item.name}** (${item.rarity})\nBalance: **${store.formatNumber(w.balance)}**`);
+  }
+  
+  // Group by rarity for bulk display
+  const byRarity = {};
+  let duplicateCount = 0;
+  for (const item of items) {
+    if (item.isDuplicate) {
+      duplicateCount++;
+    } else {
+      if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
+      byRarity[item.rarity].push(item);
+    }
+  }
+  
+  let summary = `**Mystery Boxes x${quantity}**\n\n`;
+  for (const [rarity, rarityItems] of Object.entries(byRarity)) {
+    summary += `${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}\n`;
+  }
+  if (duplicateCount > 0) {
+    summary += `\n⚠️ Duplicates: x${duplicateCount}\n💰 Compensation: **${store.formatNumber(totalCompensation)}**\n`;
+  }
+  summary += `\nBalance: **${store.formatNumber(w.balance)}**`;
+  return interaction.reply(summary);
 }
 
 async function handleInventory(interaction) {
@@ -323,15 +403,6 @@ async function handleUpgradeButton(interaction, parts) {
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
     return interaction.update({ content: text + `\n✅ Spin Mult → Lv ${w.spinMultLevel} (${1 + w.spinMultLevel}x)`, components: rows });
-  }
-  if (action === 'mysterybox') {
-    if (w.balance < MYSTERY_BOX_COST) return interaction.reply({ content: `Need ${store.formatNumber(MYSTERY_BOX_COST)}`, ephemeral: true });
-    w.balance -= MYSTERY_BOX_COST;
-    const item = store.rollMysteryBox();
-    w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
-    store.saveWallets();
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n${item.emoji} Mystery Box: **${item.name}** (${item.rarity})!`, components: rows });
   }
 }
 
@@ -449,9 +520,16 @@ async function handleTradeSelectMenu(interaction) {
     const item = inv[idx];
     offer.items.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, _idx: idx });
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
-    // Update the main trade message and dismiss the ephemeral
-    await interaction.update({ content: `Added **${item.name}** to your offer!`, components: [] });
-    // We can't edit the original from here easily, so the next button press will refresh it
+    
+    // Find the original trade message in the channel and update it
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      // Send confirmation to user
+      await interaction.followUp({ content: `Added **${item.name}** to your offer!`, ephemeral: true });
+    } catch (e) {
+      // Fallback if message can't be found
+      await interaction.reply({ content: `Added **${item.name}** to your offer!`, ephemeral: true });
+    }
     return;
   }
 
@@ -460,7 +538,12 @@ async function handleTradeSelectMenu(interaction) {
     if (offerIdx >= offer.items.length) return interaction.reply({ content: "Invalid!", ephemeral: true });
     const removed = offer.items.splice(offerIdx, 1)[0];
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
-    await interaction.update({ content: `Removed **${removed.name}** from your offer!`, components: [] });
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.followUp({ content: `Removed **${removed.name}** from your offer!`, ephemeral: true });
+    } catch (e) {
+      await interaction.reply({ content: `Removed **${removed.name}** from your offer!`, ephemeral: true });
+    }
     return;
   }
 }
