@@ -1,7 +1,0 @@
-.env
-.env.bak
-wallets.json
-pool.json
-bot.log
-node_modules/
-*.bak
