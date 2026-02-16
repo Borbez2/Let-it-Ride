@@ -9,7 +9,7 @@ async function handleHelp(interaction) {
     const totalWeight = poolEntries.reduce((s, [, p]) => s + p.weight, 0);
 
     let text = `**Collectibles Guide**\n\n`;
-    text += `There are **120 collectibles** to collect, split across 6 rarities. `;
+    text += `There are **120 collectibles** to collect, split across 7 rarities. `;
     text += `You get them from mystery boxes which cost **${store.formatNumber(MYSTERY_BOX_COST)}** coins each.\n\n`;
 
     text += `**Rarities and Drop Rates**\n\n`;
