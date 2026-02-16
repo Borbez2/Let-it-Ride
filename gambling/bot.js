@@ -9,7 +9,7 @@ const economy = require('./commands/economy');
 const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 
-// ─── Env ───
+// Environment, create and .env file and edit it there with your values
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
