@@ -1,4 +1,4 @@
-# Gambling Bot
+# Let it Ride
 
 A Discord gambling and economy bot with blackjack, roulette, mines, and daily pool events.
 
