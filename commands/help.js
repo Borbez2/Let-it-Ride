@@ -5,7 +5,10 @@ async function handleHelp(interaction) {
   const topic = interaction.options.getString('topic');
 
   if (topic === 'collectibles') {
-    const poolEntries = Object.entries(MYSTERY_BOX_POOLS);
+    const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine'];
+    const poolEntries = rarityOrder
+      .map((rarity) => [rarity, MYSTERY_BOX_POOLS[rarity]])
+      .filter(([, pool]) => !!pool);
     const totalWeight = poolEntries.reduce((s, [, p]) => s + p.weight, 0);
 
     let text = `**Collectibles Guide**\n\n`;

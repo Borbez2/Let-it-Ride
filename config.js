@@ -55,8 +55,8 @@ const MYSTERY_BOX_POOLS = {
   common:    { weight: 50, items: COLLECTIBLES.filter(c => c.rarity === 'common') },
   uncommon:  { weight: 30, items: COLLECTIBLES.filter(c => c.rarity === 'uncommon') },
   rare:      { weight: 12, items: COLLECTIBLES.filter(c => c.rarity === 'rare') },
-  legendary: { weight: 5,  items: COLLECTIBLES.filter(c => c.rarity === 'legendary') },
-  epic:      { weight: 2,  items: COLLECTIBLES.filter(c => c.rarity === 'epic') },
+  legendary: { weight: 2,  items: COLLECTIBLES.filter(c => c.rarity === 'legendary') },
+  epic:      { weight: 5,  items: COLLECTIBLES.filter(c => c.rarity === 'epic') },
   mythic:    { weight: 0.8, items: COLLECTIBLES.filter(c => c.rarity === 'mythic') },
   divine:    { weight: 0.2, items: COLLECTIBLES.filter(c => c.rarity === 'divine') },
 };

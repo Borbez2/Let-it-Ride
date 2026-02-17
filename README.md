@@ -201,8 +201,8 @@ Rarities used:
 - common
 - uncommon
 - rare
-- legendary
 - epic
+- legendary
 - mythic
 - divine
 
