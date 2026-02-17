@@ -1,25 +1,199 @@
 const fs = require('fs');
+const path = require('path');
+const Database = require('better-sqlite3');
 const {
   STARTING_COINS, BASE_INVEST_RATE,
   POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS,
 } = require('../config');
 
-const DATA_FILE = './wallets.json';
-const POOL_FILE = './pool.json';
+// ─── Database Setup ───
+const DB_PATH = path.join(__dirname, 'gambling.db');
+const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
 
-// ─── Pool ───
-function loadPool() {
-  try {
-    if (fs.existsSync(POOL_FILE))
-      return JSON.parse(fs.readFileSync(POOL_FILE, 'utf8'));
-  } catch (e) { /* ignore */ }
-  return { universalPool: 0, lossPool: 0, lastHourlyPayout: Date.now(), lastDailySpin: 0 };
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wallets (
+    user_id TEXT PRIMARY KEY,
+    balance INTEGER NOT NULL DEFAULT ${STARTING_COINS},
+    last_daily INTEGER NOT NULL DEFAULT 0,
+    streak INTEGER NOT NULL DEFAULT 0,
+    bank INTEGER NOT NULL DEFAULT 0,
+    last_bank_payout INTEGER NOT NULL DEFAULT 0,
+    interest_level INTEGER NOT NULL DEFAULT 0,
+    cashback_level INTEGER NOT NULL DEFAULT 0,
+    spin_mult_level INTEGER NOT NULL DEFAULT 0,
+    inventory TEXT NOT NULL DEFAULT '[]',
+    stats TEXT NOT NULL DEFAULT '{}'
+  );
+
+  CREATE TABLE IF NOT EXISTS pool (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    universal_pool INTEGER NOT NULL DEFAULT 0,
+    loss_pool INTEGER NOT NULL DEFAULT 0,
+    last_hourly_payout INTEGER NOT NULL DEFAULT 0,
+    last_daily_spin INTEGER NOT NULL DEFAULT 0
+  );
+
+  INSERT OR IGNORE INTO pool (id, last_hourly_payout) VALUES (1, ${Date.now()});
+`);
+
+// ─── Default Stats Template ───
+const DEFAULT_STATS = () => ({
+  flip: { wins: 0, losses: 0 },
+  dice: { wins: 0, losses: 0 },
+  roulette: { wins: 0, losses: 0 },
+  blackjack: { wins: 0, losses: 0 },
+  mines: { wins: 0, losses: 0 },
+  letitride: { wins: 0, losses: 0 },
+  duel: { wins: 0, losses: 0 },
+  giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
+  dailySpin: { won: 0, amountWon: 0 },
+  interest: { totalEarned: 0 },
+  universalIncome: { totalEarned: 0 },
+  eventBetting: { wins: 0, losses: 0, amountWon: 0, amountLost: 0 },
+  lifetimeEarnings: 0,
+  lifetimeLosses: 0,
+});
+
+// ─── Prepared Statements ───
+const stmts = {
+  getAllWallets: db.prepare('SELECT * FROM wallets'),
+  upsertWallet: db.prepare(`
+    INSERT OR REPLACE INTO wallets
+    (user_id, balance, last_daily, streak, bank, last_bank_payout,
+     interest_level, cashback_level, spin_mult_level, inventory, stats)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  deleteWallet: db.prepare('DELETE FROM wallets WHERE user_id = ?'),
+  getPool: db.prepare('SELECT * FROM pool WHERE id = 1'),
+  updatePool: db.prepare(`
+    UPDATE pool SET universal_pool = ?, loss_pool = ?, last_hourly_payout = ?, last_daily_spin = ?
+    WHERE id = 1
+  `),
+};
+
+// ─── Row → wallet object (matches old JSON shape) ───
+function rowToWallet(row) {
+  let stats;
+  try { stats = JSON.parse(row.stats); } catch { stats = DEFAULT_STATS(); }
+  let inventory;
+  try { inventory = JSON.parse(row.inventory); } catch { inventory = []; }
+  return {
+    balance: row.balance,
+    lastDaily: row.last_daily,
+    streak: row.streak,
+    bank: row.bank,
+    lastBankPayout: row.last_bank_payout,
+    interestLevel: row.interest_level,
+    cashbackLevel: row.cashback_level,
+    spinMultLevel: row.spin_mult_level,
+    inventory,
+    stats,
+  };
 }
 
-let poolData = loadPool();
+// ─── Migrate from JSON (one-time, on first run) ───
+function migrateFromJson() {
+  const OLD_WALLETS = path.resolve('./wallets.json');
+  const OLD_POOL = path.resolve('./pool.json');
+  const walletCount = db.prepare('SELECT COUNT(*) as cnt FROM wallets').get().cnt;
 
+  if (walletCount === 0 && fs.existsSync(OLD_WALLETS)) {
+    console.log('Migrating wallets from JSON → SQLite …');
+    try {
+      const jsonWallets = JSON.parse(fs.readFileSync(OLD_WALLETS, 'utf8'));
+      const migrate = db.transaction(() => {
+        for (const [userId, w] of Object.entries(jsonWallets)) {
+          const stats = w.stats || DEFAULT_STATS();
+          // Ensure all game types exist
+          for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
+            if (!stats[g]) stats[g] = { wins: 0, losses: 0 };
+          }
+          if (stats.lifetimeEarnings === undefined) stats.lifetimeEarnings = 0;
+          if (stats.lifetimeLosses === undefined) stats.lifetimeLosses = 0;
+          stmts.upsertWallet.run(
+            userId,
+            w.balance ?? STARTING_COINS,
+            w.lastDaily || 0,
+            w.streak || 0,
+            w.bank || 0,
+            w.lastBankPayout || Date.now(),
+            w.interestLevel || 0,
+            w.cashbackLevel || 0,
+            w.spinMultLevel || 0,
+            JSON.stringify(w.inventory || []),
+            JSON.stringify(stats)
+          );
+        }
+      });
+      migrate();
+      console.log(`  ✓ ${Object.keys(jsonWallets).length} wallets migrated.`);
+    } catch (e) { console.error('Wallet migration error:', e); }
+  }
+
+  const poolRow = db.prepare('SELECT * FROM pool WHERE id = 1').get();
+  if (poolRow.universal_pool === 0 && poolRow.loss_pool === 0 && fs.existsSync(OLD_POOL)) {
+    console.log('Migrating pool from JSON → SQLite …');
+    try {
+      const jp = JSON.parse(fs.readFileSync(OLD_POOL, 'utf8'));
+      stmts.updatePool.run(
+        jp.universalPool || 0, jp.lossPool || 0,
+        jp.lastHourlyPayout || Date.now(), jp.lastDailySpin || 0
+      );
+      console.log('  ✓ Pool migrated.');
+    } catch (e) { console.error('Pool migration error:', e); }
+  }
+}
+migrateFromJson();
+
+// ─── Load into memory ───
+function loadWalletsFromDb() {
+  const rows = stmts.getAllWallets.all();
+  const result = {};
+  for (const row of rows) result[row.user_id] = rowToWallet(row);
+  return result;
+}
+
+function loadPoolFromDb() {
+  const row = stmts.getPool.get();
+  return {
+    universalPool: row.universal_pool,
+    lossPool: row.loss_pool,
+    lastHourlyPayout: row.last_hourly_payout,
+    lastDailySpin: row.last_daily_spin,
+  };
+}
+
+let wallets = loadWalletsFromDb();
+let poolData = loadPoolFromDb();
+
+// Migrate any missing fields on existing wallets
+for (const id in wallets) {
+  const w = wallets[id];
+  if (!w.inventory) w.inventory = [];
+  if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
+  if (w.lastBankPayout === undefined) w.lastBankPayout = Date.now();
+  if (!w.stats) w.stats = DEFAULT_STATS();
+  for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
+    if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
+  }
+  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
+  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
+  if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
+  if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
+  if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
+}
+saveWallets();
+console.log('Wallets loaded from SQLite. Fields migrated.');
+
+// ─── Pool ───
 function savePool() {
-  fs.writeFileSync(POOL_FILE, JSON.stringify(poolData, null, 2));
+  stmts.updatePool.run(
+    poolData.universalPool, poolData.lossPool,
+    poolData.lastHourlyPayout, poolData.lastDailySpin
+  );
 }
 
 function getPoolData() { return poolData; }
@@ -37,28 +211,20 @@ function addToLossPool(amount) {
 }
 
 // ─── Wallets ───
-function loadWallets() {
-  try {
-    if (fs.existsSync(DATA_FILE))
-      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch (e) { /* ignore */ }
-  return {};
-}
-
-let wallets = loadWallets();
-
-// Migrate any missing fields on existing wallets
-for (const id in wallets) {
-  const w = wallets[id];
-  if (!w.inventory) w.inventory = [];
-  if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
-  if (w.lastBankPayout === undefined) w.lastBankPayout = Date.now();
-}
-saveWallets();
-console.log('Wallets loaded (no reset). New fields migrated.');
-
 function saveWallets() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(wallets, null, 2));
+  const upsertAll = db.transaction(() => {
+    for (const [userId, w] of Object.entries(wallets)) {
+      stmts.upsertWallet.run(
+        userId,
+        w.balance, w.lastDaily || 0, w.streak || 0,
+        w.bank || 0, w.lastBankPayout || 0,
+        w.interestLevel || 0, w.cashbackLevel || 0, w.spinMultLevel || 0,
+        JSON.stringify(w.inventory || []),
+        JSON.stringify(w.stats || DEFAULT_STATS())
+      );
+    }
+  });
+  upsertAll();
 }
 
 function getAllWallets() { return wallets; }
@@ -70,17 +236,7 @@ function getWallet(userId) {
       bank: 0, lastBankPayout: Date.now(),
       interestLevel: 0, cashbackLevel: 0, spinMultLevel: 0,
       inventory: [],
-      stats: {
-        flip: { wins: 0, losses: 0 },
-        dice: { wins: 0, losses: 0 },
-        roulette: { wins: 0, losses: 0 },
-        blackjack: { wins: 0, losses: 0 },
-        mines: { wins: 0, losses: 0 },
-        letitride: { wins: 0, losses: 0 },
-        duel: { wins: 0, losses: 0 },
-        lifetimeEarnings: 0,
-        lifetimeLosses: 0,
-      },
+      stats: DEFAULT_STATS(),
     };
     saveWallets();
   }
@@ -91,23 +247,23 @@ function getWallet(userId) {
   if (w.cashbackLevel === undefined) w.cashbackLevel = 0;
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
   if (!w.inventory) w.inventory = [];
-  if (!w.stats) w.stats = {
-    flip: { wins: 0, losses: 0 },
-    dice: { wins: 0, losses: 0 },
-    roulette: { wins: 0, losses: 0 },
-    blackjack: { wins: 0, losses: 0 },
-    mines: { wins: 0, losses: 0 },
-    letitride: { wins: 0, losses: 0 },
-    duel: { wins: 0, losses: 0 },
-    lifetimeEarnings: 0,
-    lifetimeLosses: 0,
-  };
+  if (!w.stats) w.stats = DEFAULT_STATS();
+  for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
+    if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
+  }
+  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
+  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
+  if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
+  if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
+  if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
   return w;
 }
 
 function deleteWallet(userId) {
   delete wallets[userId];
-  saveWallets();
+  stmts.deleteWallet.run(userId);
 }
 
 function getBalance(userId) { return getWallet(userId).balance; }
@@ -156,6 +312,11 @@ function processBank(userId) {
     const totalPayout = current - w.bank;
     w.bank = current;
     w.lastBankPayout = last + (hoursPassed * hourMs);
+    if (totalPayout > 0) {
+      if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
+      w.stats.interest.totalEarned += totalPayout;
+      w.stats.lifetimeEarnings += totalPayout;
+    }
     saveWallets();
     return totalPayout;
   }
@@ -271,7 +432,7 @@ function createGiveaway(initiatorId, amount, durationMs) {
   const id = `giveaway_${++giveawayCounter}`;
   const giveaway = {
     id, initiatorId, amount,
-    participants: [initiatorId],
+    participants: [],
     expiresAt: Date.now() + durationMs,
     createdAt: Date.now(),
   };
@@ -296,10 +457,11 @@ function removeGiveaway(id) { delete activeGiveaways[id]; }
 let activeEvents = {};
 let eventCounter = 0;
 
-function createEvent(creatorId, description, durationMs) {
+function createEvent(creatorId, description, durationMs, bettingType = 'yesno', parameter = null) {
   const id = `event_${++eventCounter}`;
   const event = {
     id, creatorId, description,
+    bettingType, parameter,
     participants: {},
     outcome: null,
     expiresAt: Date.now() + durationMs,
@@ -353,18 +515,125 @@ function recordLoss(userId, gameName, amount) {
   saveWallets();
 }
 
+// ─── Extended Stats Tracking ───
+function hasWallet(userId) {
+  return !!wallets[userId];
+}
+
+function resetStats(userId) {
+  const w = getWallet(userId);
+  const totalBalance = (w.balance || 0) + (w.bank || 0);
+  w.stats = DEFAULT_STATS();
+  w.stats.lifetimeEarnings = totalBalance;
+  w.stats.lifetimeLosses = 0;
+  saveWallets();
+}
+
+function trackGiveawayWin(userId, amount) {
+  const w = getWallet(userId);
+  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  w.stats.giveaway.won += 1;
+  w.stats.giveaway.amountWon += amount;
+  w.stats.lifetimeEarnings += amount;
+}
+
+function trackGiveawayCreated(userId, amount) {
+  const w = getWallet(userId);
+  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  w.stats.giveaway.created += 1;
+  w.stats.giveaway.amountGiven += amount;
+  w.stats.lifetimeLosses += amount;
+}
+
+function trackDailySpinWin(userId, amount) {
+  const w = getWallet(userId);
+  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
+  w.stats.dailySpin.won += 1;
+  w.stats.dailySpin.amountWon += amount;
+  w.stats.lifetimeEarnings += amount;
+}
+
+function trackUniversalIncome(userId, amount) {
+  const w = getWallet(userId);
+  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
+  w.stats.universalIncome.totalEarned += amount;
+  w.stats.lifetimeEarnings += amount;
+}
+
+function resolveEventBetting(eventId, outcome) {
+  const event = activeEvents[eventId];
+  if (!event || event.outcome !== null) return null;
+
+  event.outcome = outcome;
+  event.completedAt = Date.now();
+
+  const participants = event.participants;
+  const winningBets = [];
+  const losingBets = [];
+  let losingPool = 0;
+
+  for (const [uid, bets] of Object.entries(participants)) {
+    for (const bet of bets) {
+      if (bet.prediction.toLowerCase() === outcome.toLowerCase()) {
+        winningBets.push({ userId: uid, amount: bet.amount });
+      } else {
+        losingBets.push({ userId: uid, amount: bet.amount });
+        losingPool += bet.amount;
+      }
+    }
+  }
+
+  const totalWinningBets = winningBets.reduce((s, b) => s + b.amount, 0);
+  const winnerIds = new Set();
+  const loserIds = new Set();
+
+  for (const wb of winningBets) {
+    const share = totalWinningBets > 0 ? Math.floor((wb.amount / totalWinningBets) * losingPool) : 0;
+    const payout = wb.amount + share;
+    const w = getWallet(wb.userId);
+    w.balance += payout;
+    if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
+    w.stats.eventBetting.wins += 1;
+    w.stats.eventBetting.amountWon += share;
+    w.stats.lifetimeEarnings += share;
+    winnerIds.add(wb.userId);
+  }
+
+  for (const lb of losingBets) {
+    const w = getWallet(lb.userId);
+    if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
+    w.stats.eventBetting.losses += 1;
+    w.stats.eventBetting.amountLost += lb.amount;
+    w.stats.lifetimeLosses += lb.amount;
+    loserIds.add(lb.userId);
+  }
+
+  saveWallets();
+  delete activeEvents[eventId];
+
+  return {
+    winners: winnerIds.size,
+    losers: loserIds.size,
+    losingPool,
+    description: event.description,
+    outcome,
+  };
+}
+
 module.exports = {
   getPoolData, savePool,
   addToUniversalPool, addToLossPool,
-  getAllWallets, getWallet, deleteWallet,
+  getAllWallets, getWallet, hasWallet, deleteWallet,
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback,
   getSpinWeight, processBank,
   checkDaily, claimDaily,
   rollMysteryBox, getDuplicateCompensation,
   formatNumber, formatNumberShort, parseAmount,
-  recordWin, recordLoss,
+  recordWin, recordLoss, resetStats,
   saveWallets,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
   createEvent, getEvent, getAllEvents, joinEvent, setEventOutcome, removeEvent,
+  resolveEventBetting,
+  trackGiveawayWin, trackGiveawayCreated, trackDailySpinWin, trackUniversalIncome,
 };

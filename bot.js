@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 const store = require('./data/store');
@@ -16,6 +16,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim());
+const EVENT_RESOLVER_ID = process.env.EVENT_RESOLVER_ID || '705758720847773803';
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
   console.error("Missing env vars.");
@@ -64,7 +65,8 @@ const commands = [
     .addIntegerOption(o => o.setName('page').setDescription('Page number').setMinValue(1)),
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
-  new SlashCommandBuilder().setName('stats').setDescription('View your gaming stats and lifetime earnings/losses'),
+  new SlashCommandBuilder().setName('stats').setDescription('View your gaming stats and lifetime earnings/losses')
+    .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
@@ -86,6 +88,8 @@ const commands = [
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
     .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
     .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
+    .addSubcommand(s => s.setName('resetstats').setDescription('[ADMIN] Reset a user\'s stats')
+      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
     .addSubcommand(s => s.setName('eventoutcome').setDescription('[ADMIN] Set event outcome')
       .addStringOption(o => o.setName('eventid').setDescription('Event ID').setRequired(true))
       .addStringOption(o => o.setName('outcome').setDescription('Winning prediction (e.g., "Yes", "Option A")').setRequired(true))),
@@ -94,6 +98,12 @@ const commands = [
     .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
   new SlashCommandBuilder().setName('eventbet').setDescription('Start event betting')
     .addStringOption(o => o.setName('description').setDescription('Event description').setRequired(true).setMaxLength(100))
+    .addStringOption(o => o.setName('type').setDescription('Betting type: yes/no or over/under').setRequired(true)
+      .addChoices(
+        { name: 'Yes/No', value: 'yesno' },
+        { name: 'Over/Under', value: 'overunder' }
+      ))
+    .addStringOption(o => o.setName('parameter').setDescription('For over/under: the threshold number').setRequired(false))
     .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
 ].map(c => c.toJSON());
 
@@ -114,7 +124,10 @@ function distributeUniversalPool() {
   if (ids.length === 0 || poolData.universalPool <= 0) return;
   const share = Math.floor(poolData.universalPool / ids.length);
   if (share <= 0) return;
-  for (const id of ids) store.getWallet(id).balance += share;
+  for (const id of ids) {
+    store.getWallet(id).balance += share;
+    store.trackUniversalIncome(id, share);
+  }
   poolData.universalPool -= share * ids.length;
   poolData.lastHourlyPayout = Date.now();
   store.savePool(); store.saveWallets();
@@ -142,6 +155,7 @@ async function runDailySpin() {
     for (const e of entries) { roll -= e.weight; if (roll <= 0) { winner = e; break; } }
 
     store.getWallet(winner.id).balance += prize;
+    store.trackDailySpinWin(winner.id, prize);
     poolData.lossPool = 0;
     poolData.lastDailySpin = Date.now();
     store.savePool(); store.saveWallets();
@@ -181,20 +195,20 @@ async function checkExpiredGiveawaysAndEvents() {
     const giveaways = store.getAllGiveaways();
     for (const giveaway of giveaways) {
       if (Date.now() > giveaway.expiresAt) {
-        if (giveaway.participants.length > 1) {
+        if (giveaway.participants.length > 0) {
           // Select winner
           const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
           store.getWallet(winner).balance += giveaway.amount;
+          store.trackGiveawayWin(winner, giveaway.amount);
+          store.trackGiveawayCreated(giveaway.initiatorId, giveaway.amount);
           store.saveWallets();
           
-          const winnerUser = await client.users.fetch(winner).catch(() => null);
-          const winnerName = winnerUser ? winnerUser.username : 'Unknown';
           const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
           const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
           
           await channel.send(
             `🎉 **GIVEAWAY ENDED!**\n\n` +
-            `**${winnerName}** won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
+            `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
             `Participants: ${giveaway.participants.length}`
           );
         } else {
@@ -211,27 +225,52 @@ async function checkExpiredGiveawaysAndEvents() {
     const events = store.getAllEvents();
     for (const event of events) {
       if (Date.now() > event.expiresAt && event.outcome === null) {
-        // Event expired without outcome - refund all participants
-        const participants = event.participants;
-        for (const [userId, bets] of Object.entries(participants)) {
-          let totalBet = 0;
-          for (const bet of bets) {
-            totalBet += bet.amount;
+        if (!event.notified) {
+          // Notify the resolver to make the final call
+          event.notified = true;
+          event.notifiedAt = Date.now();
+          
+          let buttons;
+          if (event.bettingType === 'yesno') {
+            buttons = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`eventresolve_Yes_${event.id}`).setLabel('Yes Won').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId(`eventresolve_No_${event.id}`).setLabel('No Won').setStyle(ButtonStyle.Danger),
+            );
+          } else {
+            buttons = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`eventresolve_Over_${event.id}`).setLabel('Over Won').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId(`eventresolve_Under_${event.id}`).setLabel('Under Won').setStyle(ButtonStyle.Danger),
+            );
           }
-          store.setBalance(userId, store.getBalance(userId) + totalBet);
+          
+          const totalBets = Object.values(event.participants).reduce((s, bets) => s + bets.reduce((ss, b) => ss + b.amount, 0), 0);
+          
+          await channel.send({
+            content: `📊 **EVENT BETTING CLOSED**\n\n` +
+              `Event: **${event.description}**\n` +
+              `Total bets: **${store.formatNumber(totalBets)}**\n\n` +
+              `<@${EVENT_RESOLVER_ID}> — Please resolve this event by selecting the winning outcome below.`,
+            components: [buttons],
+          });
+        } else if (event.notifiedAt && Date.now() > event.notifiedAt + 86400000) {
+          // 24h timeout - refund all participants
+          const participants = event.participants;
+          for (const [userId, bets] of Object.entries(participants)) {
+            let totalBet = 0;
+            for (const bet of bets) {
+              totalBet += bet.amount;
+            }
+            store.setBalance(userId, store.getBalance(userId) + totalBet);
+          }
+          store.saveWallets();
+          
+          await channel.send(
+            `📊 **EVENT EXPIRED** — **${event.description}**\n` +
+            `No outcome set after 24 hours. All participants have been refunded.`
+          );
+          
+          store.removeEvent(event.id);
         }
-        store.saveWallets();
-        
-        const creatorUser = await client.users.fetch(event.creatorId).catch(() => null);
-        const creatorName = creatorUser ? creatorUser.username : 'Unknown';
-        
-        await channel.send(
-          `📊 **EVENT BETTING EXPIRED**\n\n` +
-          `Event: **${event.description}**\nCreator: <@${event.creatorId}>\n\n` +
-          `⚠️ No outcome was set. All participants have been refunded!`
-        );
-        
-        store.removeEvent(event.id);
       }
     }
   } catch (err) { console.error("Giveaway/Event check error:", err); }
@@ -325,12 +364,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('roulette_')) return await simple.handleRouletteButton(interaction, parts);
       if (interaction.customId.startsWith('dice_'))     return await simple.handleDiceButton(interaction, parts);
       if (interaction.customId.startsWith('giveaway_join_')) {
-        const giveawayId = interaction.customId.split('_')[2];
+        const giveawayId = interaction.customId.slice('giveaway_join_'.length);
         return await economy.handleGiveawayJoin(interaction, giveawayId);
       }
       if (interaction.customId.startsWith('eventbet_predict_')) {
-        const eventId = interaction.customId.split('_')[2];
+        const eventId = interaction.customId.slice('eventbet_predict_'.length);
         return await economy.handleEventBetPredict(interaction, eventId);
+      }
+      if (interaction.customId.startsWith('eventresolve_')) {
+        const resParts = interaction.customId.split('_');
+        const outcome = resParts[1];
+        const eventId = resParts.slice(2).join('_');
+        const resUserId = interaction.user.id;
+        
+        if (resUserId !== EVENT_RESOLVER_ID && !ADMIN_IDS.includes(resUserId)) {
+          return interaction.reply({ content: "You're not authorized to resolve events!", ephemeral: true });
+        }
+        
+        const result = store.resolveEventBetting(eventId, outcome);
+        if (!result) {
+          return interaction.reply({ content: '❌ Event not found or already resolved.', ephemeral: true });
+        }
+        
+        return interaction.update({
+          content: `📊 **EVENT RESOLVED**\n\nEvent: **${result.description}**\nOutcome: **${result.outcome}**\nWinners: ${result.winners} | Losers: ${result.losers}`,
+          components: [],
+        });
       }
     } catch (e) { console.error(e); }
     return;

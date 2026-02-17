@@ -116,14 +116,19 @@ async function handleButton(interaction, parts) {
 
   // Hit a mine
   if (game.grid[ti]) {
+    const potentialCashout = Math.floor(game.bet * game.multiplier);
     store.recordLoss(uid, 'mines', game.bet);
     const cb = store.applyCashback(uid, game.bet);
     store.addToLossPool(game.bet);
     activeMines.delete(uid);
     const gr = gridToString(game, ti);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
+    let lossText = `Lost **${store.formatNumber(game.bet)}** (initial bet)`;
+    if (game.revealedCount > 0) {
+      lossText += `\nMissed cashout: **${store.formatNumber(potentialCashout)}** (${game.multiplier.toFixed(2)}x)`;
+    }
     return interaction.update({
-      content: `**Mines - BOOM**\n\`\`\`\n${gr}\`\`\`\nLost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - BOOM**\n\`\`\`\n${gr}\`\`\`\n${lossText}${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }

@@ -5,3 +5,8 @@ pool.json
 bot.log
 node_modules/
 *.bak
+
+# Player data (SQLite database)
+data/gambling.db
+data/gambling.db-wal
+data/gambling.db-shm
