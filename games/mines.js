@@ -99,6 +99,7 @@ async function handleButton(interaction, parts) {
   // Cashout
   if (parts[1] === 'cashout') {
     const win = Math.floor(game.bet * game.multiplier);
+    if (win > game.bet) store.recordWin(uid, 'mines', win - game.bet);
     store.setBalance(uid, store.getBalance(uid) + win);
     if (win > game.bet) store.addToUniversalPool(win - game.bet);
     activeMines.delete(uid);
@@ -115,6 +116,7 @@ async function handleButton(interaction, parts) {
 
   // Hit a mine
   if (game.grid[ti]) {
+    store.recordLoss(uid, 'mines', game.bet);
     const cb = store.applyCashback(uid, game.bet);
     store.addToLossPool(game.bet);
     activeMines.delete(uid);
@@ -134,6 +136,7 @@ async function handleButton(interaction, parts) {
   // Perfect clear
   if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
     const win = Math.floor(game.bet * game.multiplier);
+    store.recordWin(uid, 'mines', win - game.bet);
     store.setBalance(uid, store.getBalance(uid) + win);
     if (win > game.bet) store.addToUniversalPool(win - game.bet);
     activeMines.delete(uid);

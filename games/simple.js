@@ -39,9 +39,15 @@ async function handleFlip(interaction) {
   }
 
   if (qty === 1) {
-    if (wins) return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(bet)}**\nBalance: **${store.formatNumber(bal + net)}**`);
+    if (wins) {
+      store.recordWin(userId, 'flip', bet);
+      return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(bet)}**\nBalance: **${store.formatNumber(bal + net)}**`);
+    }
+    store.recordLoss(userId, 'flip', bet);
     return interaction.reply(`❌ **Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
+  if (wins > 0) store.recordWin(userId, 'flip', wins * bet);
+  if (qty - wins > 0) store.recordLoss(userId, 'flip', (qty - wins) * bet);
   return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${net >= 0 ? '+' : ''}${store.formatNumber(net)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
@@ -76,9 +82,11 @@ async function handleDiceButton(interaction, parts) {
   const bal = store.getBalance(uid), won = (choice === 'high' && hi) || (choice === 'low' && !hi);
 
   if (won) {
+    store.recordWin(uid, 'dice', game.bet);
     store.setBalance(uid, bal + game.bet); store.addToUniversalPool(game.bet);
     await interaction.update({ content: `✅ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet)}**`, components: [] });
   } else {
+    store.recordLoss(uid, 'dice', game.bet);
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
@@ -128,9 +136,11 @@ async function handleRouletteButton(interaction, parts) {
 
   const bal = store.getBalance(uid);
   if (profit > 0) {
+    store.recordWin(uid, 'roulette', profit);
     store.setBalance(uid, bal + profit); store.addToUniversalPool(profit);
     await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(bal + profit)}**`, components: [] });
   } else {
+    store.recordLoss(uid, 'roulette', game.bet);
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
@@ -150,9 +160,11 @@ async function handleAllIn17(interaction) {
 
   if (num === 17) {
     const win = bal * 36;
+    store.recordWin(userId, 'roulette', win - bal);
     store.setBalance(userId, win); store.addToUniversalPool(win - bal);
     return interaction.reply(`🎰 **ALL IN 17 BLACK** 🎰\nBall: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\n${store.formatNumber(bal)} → **${store.formatNumber(win)}**`);
   }
+  store.recordLoss(userId, 'roulette', bal);
   store.setBalance(userId, 0); store.applyCashback(userId, bal); store.addToLossPool(bal);
   return interaction.reply(`🎰 **ALL IN 17 BLACK** 🎰\nBall: **${num} (${col.toUpperCase()})**\n\n💀 Lost **${store.formatNumber(bal)}**. Balance: **0**`);
 }
@@ -173,6 +185,7 @@ async function handleLetItRide(interaction) {
 
   store.setBalance(userId, bal - bet);
   if (Math.random() >= 0.5) {
+    store.recordLoss(userId, 'letitride', bet);
     const cb = store.applyCashback(userId, bet); store.addToLossPool(bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
     return interaction.reply(`**Let It Ride**\nBust on first flip! -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
@@ -194,6 +207,7 @@ async function handleRideButton(interaction, parts) {
   const action = parts[1];
 
   if (action === 'cashout') {
+    if (ride.current > ride.original) store.recordWin(uid, 'letitride', ride.current - ride.original);
     store.setBalance(uid, store.getBalance(uid) + ride.current);
     if (ride.current > ride.original) store.addToUniversalPool(ride.current - ride.original);
     activeRides.delete(uid);
@@ -209,6 +223,7 @@ async function handleRideButton(interaction, parts) {
       );
       return interaction.update({ content: `**Let It Ride**\nWIN! Pot: **${store.formatNumber(ride.current)}**\n🔥 ${ride.wins}`, components: [row] });
     } else {
+      store.recordLoss(uid, 'letitride', ride.current);
       const cb = store.applyCashback(uid, ride.current); store.addToLossPool(ride.current);
       activeRides.delete(uid);
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
@@ -278,6 +293,8 @@ async function handleDuelButton(interaction, parts) {
     const li = w === cid ? oid : cid;
     
     // Winner gets both bets
+    store.recordWin(w, 'duel', duel.bet);
+    store.recordLoss(li, 'duel', duel.bet);
     store.setBalance(w, store.getBalance(w) + (duel.bet * 2));
     
     store.addToUniversalPool(duel.bet);

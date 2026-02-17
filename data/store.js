@@ -70,6 +70,17 @@ function getWallet(userId) {
       bank: 0, lastBankPayout: Date.now(),
       interestLevel: 0, cashbackLevel: 0, spinMultLevel: 0,
       inventory: [],
+      stats: {
+        flip: { wins: 0, losses: 0 },
+        dice: { wins: 0, losses: 0 },
+        roulette: { wins: 0, losses: 0 },
+        blackjack: { wins: 0, losses: 0 },
+        mines: { wins: 0, losses: 0 },
+        letitride: { wins: 0, losses: 0 },
+        duel: { wins: 0, losses: 0 },
+        lifetimeEarnings: 0,
+        lifetimeLosses: 0,
+      },
     };
     saveWallets();
   }
@@ -80,6 +91,17 @@ function getWallet(userId) {
   if (w.cashbackLevel === undefined) w.cashbackLevel = 0;
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
   if (!w.inventory) w.inventory = [];
+  if (!w.stats) w.stats = {
+    flip: { wins: 0, losses: 0 },
+    dice: { wins: 0, losses: 0 },
+    roulette: { wins: 0, losses: 0 },
+    blackjack: { wins: 0, losses: 0 },
+    mines: { wins: 0, losses: 0 },
+    letitride: { wins: 0, losses: 0 },
+    duel: { wins: 0, losses: 0 },
+    lifetimeEarnings: 0,
+    lifetimeLosses: 0,
+  };
   return w;
 }
 
@@ -241,6 +263,96 @@ function parseAmount(str, maxValue = null) {
   return num > 0 ? num : null;
 }
 
+// ─── Giveaways ───
+let activeGiveaways = {};
+let giveawayCounter = 0;
+
+function createGiveaway(initiatorId, amount, durationMs) {
+  const id = `giveaway_${++giveawayCounter}`;
+  const giveaway = {
+    id, initiatorId, amount,
+    participants: [initiatorId],
+    expiresAt: Date.now() + durationMs,
+    createdAt: Date.now(),
+  };
+  activeGiveaways[id] = giveaway;
+  return giveaway;
+}
+
+function getGiveaway(id) { return activeGiveaways[id] || null; }
+
+function getAllGiveaways() { return Object.values(activeGiveaways); }
+
+function joinGiveaway(giveawayId, userId) {
+  const g = activeGiveaways[giveawayId];
+  if (!g || g.participants.includes(userId)) return false;
+  g.participants.push(userId);
+  return true;
+}
+
+function removeGiveaway(id) { delete activeGiveaways[id]; }
+
+// ─── Event Betting ───
+let activeEvents = {};
+let eventCounter = 0;
+
+function createEvent(creatorId, description, durationMs) {
+  const id = `event_${++eventCounter}`;
+  const event = {
+    id, creatorId, description,
+    participants: {},
+    outcome: null,
+    expiresAt: Date.now() + durationMs,
+    createdAt: Date.now(),
+  };
+  activeEvents[id] = event;
+  return event;
+}
+
+function getEvent(id) { return activeEvents[id] || null; }
+
+function getAllEvents() { return Object.values(activeEvents); }
+
+function joinEvent(eventId, userId, prediction, amount) {
+  const e = activeEvents[eventId];
+  if (!e) return false;
+  if (!e.participants[userId]) {
+    e.participants[userId] = [];
+  }
+  e.participants[userId].push({ prediction, amount });
+  return true;
+}
+
+function setEventOutcome(eventId, outcome) {
+  const e = activeEvents[eventId];
+  if (e) {
+    e.outcome = outcome;
+    e.completedAt = Date.now();
+  }
+  return e;
+}
+
+function removeEvent(id) { delete activeEvents[id]; }
+
+// ─── Stats tracking ───
+function recordWin(userId, gameName, amount) {
+  const w = getWallet(userId);
+  if (w.stats[gameName]) {
+    w.stats[gameName].wins += 1;
+  }
+  w.stats.lifetimeEarnings += amount;
+  saveWallets();
+}
+
+function recordLoss(userId, gameName, amount) {
+  const w = getWallet(userId);
+  if (w.stats[gameName]) {
+    w.stats[gameName].losses += 1;
+  }
+  w.stats.lifetimeLosses += amount;
+  saveWallets();
+}
+
 module.exports = {
   getPoolData, savePool,
   addToUniversalPool, addToLossPool,
@@ -251,5 +363,8 @@ module.exports = {
   checkDaily, claimDaily,
   rollMysteryBox, getDuplicateCompensation,
   formatNumber, formatNumberShort, parseAmount,
+  recordWin, recordLoss,
   saveWallets,
+  createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
+  createEvent, getEvent, getAllEvents, joinEvent, setEventOutcome, removeEvent,
 };

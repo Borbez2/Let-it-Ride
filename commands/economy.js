@@ -174,7 +174,7 @@ async function handleWithdraw(interaction) {
     return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
   }
   
-  if (amount > w.bank) return interaction.reply(`Only **${store.formatNumber(w.bank)}** in bank`);
+  if (amount > w.bank) return interaction.reply(`❌ Insufficient bank funds. You only have **${store.formatNumber(w.bank)}** in your bank (you tried to withdraw **${store.formatNumber(amount)}**).`);
   w.bank -= amount; w.balance += amount; store.saveWallets();
   return interaction.reply(`Withdrew **${store.formatNumber(amount)}**\nBank: **${store.formatNumber(w.bank)}** | Purse: **${store.formatNumber(w.balance)}**`);
 }
@@ -574,6 +574,161 @@ async function handleTradeModal(interaction) {
   return interaction.update({ content: renderTradeView(trade), components: renderTradeButtons(trade) });
 }
 
+// ═══════ GIVEAWAY HANDLERS ═══════
+
+async function handleGiveawayStart(interaction) {
+  const userId = interaction.user.id;
+  const rawAmount = interaction.options.getString('amount');
+  const durationMinutes = interaction.options.getInteger('duration');
+  const bal = store.getBalance(userId);
+  
+  const amount = store.parseAmount(rawAmount, bal);
+  if (!amount || amount <= 0) {
+    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+  }
+  
+  if (amount > bal) {
+    return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
+  }
+  
+  if (durationMinutes < 1 || durationMinutes > 1440) {
+    return interaction.reply('Duration must be between 1 and 1440 minutes (1 day)');
+  }
+  
+  // Deduct the amount from user balance
+  store.setBalance(userId, bal - amount);
+  
+  // Create the giveaway
+  const durationMs = durationMinutes * 60 * 1000;
+  const giveaway = store.createGiveaway(userId, amount, durationMs);
+  
+  const endTime = Math.floor((Date.now() + durationMs) / 1000);
+  const rows = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`giveaway_join_${giveaway.id}`).setLabel('Join Giveaway').setStyle(ButtonStyle.Success),
+  );
+  
+  return interaction.reply({
+    content: `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${userId}>\nPrize Pool: **${store.formatNumber(amount)}** coins\nParticipants: 1\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
+    components: [rows],
+  });
+}
+
+async function handleGiveawayJoin(interaction, giveawayId) {
+  const userId = interaction.user.id;
+  const giveaway = store.getGiveaway(giveawayId);
+  
+  if (!giveaway) {
+    return interaction.reply({ content: '❌ Giveaway not found or has already ended.', ephemeral: true });
+  }
+  
+  if (Date.now() > giveaway.expiresAt) {
+    return interaction.reply({ content: '❌ Giveaway has ended.', ephemeral: true });
+  }
+  
+  if (giveaway.participants.includes(userId)) {
+    return interaction.reply({ content: '⚠️ You already joined this giveaway!', ephemeral: true });
+  }
+  
+  store.joinGiveaway(giveawayId, userId);
+  return interaction.reply({
+    content: `✅ You joined the giveaway! Participants: ${giveaway.participants.length + 1}`,
+    ephemeral: true,
+  });
+}
+
+// ═══════ EVENT BETTING HANDLERS ═══════
+
+async function handleEventBetStart(interaction) {
+  const userId = interaction.user.id;
+  const description = interaction.options.getString('description');
+  const durationMinutes = interaction.options.getInteger('duration');
+  
+  if (durationMinutes < 1 || durationMinutes > 1440) {
+    return interaction.reply('Duration must be between 1 and 1440 minutes (1 day)');
+  }
+  
+  // Create the event
+  const durationMs = durationMinutes * 60 * 1000;
+  const event = store.createEvent(userId, description, durationMs);
+  
+  const endTime = Math.floor((Date.now() + durationMs) / 1000);
+  const rows = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`eventbet_predict_${event.id}`).setLabel('Make Prediction').setStyle(ButtonStyle.Primary),
+  );
+  
+  return interaction.reply({
+    content: `📊 **EVENT BETTING OPENED**\n\n**${description}**\nCreator: <@${userId}>\nEnds: <t:${endTime}:R>\n\nClick to make your prediction!`,
+    components: [rows],
+  });
+}
+
+async function handleEventBetPredict(interaction, eventId) {
+  const userId = interaction.user.id;
+  const event = store.getEvent(eventId);
+  
+  if (!event) {
+    return interaction.reply({ content: '❌ Event not found or has ended.', ephemeral: true });
+  }
+  
+  if (Date.now() > event.expiresAt) {
+    return interaction.reply({ content: '❌ Event betting has ended.', ephemeral: true });
+  }
+  
+  // Create modal for prediction and amount
+  const modal = new ModalBuilder()
+    .setCustomId(`eventbet_modal_${eventId}_${userId}`)
+    .setTitle('Make Prediction')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('prediction')
+          .setLabel('Your Prediction (e.g., "Yes", "Option A")')
+          .setPlaceholder('Enter your prediction')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('amount')
+          .setLabel('Bet Amount (e.g., 1000, 1k, all)')
+          .setPlaceholder('5000')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
+      ),
+    );
+  
+  return interaction.showModal(modal);
+}
+
+async function handleEventBetModal(interaction, eventId, userId) {
+  const event = store.getEvent(eventId);
+  if (!event) {
+    return interaction.reply({ content: '❌ Event not found.', ephemeral: true });
+  }
+  
+  const prediction = interaction.fields.getTextInputValue('prediction').trim();
+  const rawAmount = interaction.fields.getTextInputValue('amount').trim();
+  const bal = store.getBalance(userId);
+  
+  const amount = store.parseAmount(rawAmount, bal);
+  if (!amount || amount <= 0) {
+    return interaction.reply({ content: 'Invalid amount.', ephemeral: true });
+  }
+  
+  if (amount > bal) {
+    return interaction.reply({ content: `You only have **${store.formatNumber(bal)}**`, ephemeral: true });
+  }
+  
+  // Deduct amount from user balance (they're betting)
+  store.setBalance(userId, bal - amount);
+  store.joinEvent(eventId, userId, prediction, amount);
+  
+  return interaction.reply({
+    content: `✅ Placed **${store.formatNumber(amount)}** on: **${prediction}**\n\nHope you're right about the outcome!`,
+    ephemeral: true,
+  });
+}
+
 module.exports = {
   activeTrades,
   handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
@@ -581,4 +736,6 @@ module.exports = {
   handleMysteryBox, handleInventory, handleCollection, handlePool,
   handleUpgradeButton, handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
+  handleGiveawayStart, handleGiveawayJoin,
+  handleEventBetStart, handleEventBetPredict, handleEventBetModal,
 };

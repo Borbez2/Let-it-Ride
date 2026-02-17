@@ -8,6 +8,7 @@ const simple = require('./games/simple');
 const economy = require('./commands/economy');
 const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
+const statsCmd = require('./commands/stats');
 
 // Environment, create and .env file and edit it there with your values
 const TOKEN = process.env.TOKEN;
@@ -63,6 +64,7 @@ const commands = [
     .addIntegerOption(o => o.setName('page').setDescription('Page number').setMinValue(1)),
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
+  new SlashCommandBuilder().setName('stats').setDescription('View your gaming stats and lifetime earnings/losses'),
   new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
@@ -83,7 +85,16 @@ const commands = [
     .addSubcommand(s => s.setName('resetupgrades').setDescription('[ADMIN] Reset upgrades')
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
     .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
-    .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout')),
+    .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
+    .addSubcommand(s => s.setName('eventoutcome').setDescription('[ADMIN] Set event outcome')
+      .addStringOption(o => o.setName('eventid').setDescription('Event ID').setRequired(true))
+      .addStringOption(o => o.setName('outcome').setDescription('Winning prediction (e.g., "Yes", "Option A")').setRequired(true))),
+  new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway')
+    .addStringOption(o => o.setName('amount').setDescription('Prize pool amount (e.g. 1000, 1k, all)').setRequired(true))
+    .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
+  new SlashCommandBuilder().setName('eventbet').setDescription('Start event betting')
+    .addStringOption(o => o.setName('description').setDescription('Event description').setRequired(true).setMaxLength(100))
+    .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -159,6 +170,73 @@ async function runDailySpin() {
   } catch (err) { console.error("Daily spin error:", err); }
 }
 
+// ─── Giveaway & Event Expiration ───
+async function checkExpiredGiveawaysAndEvents() {
+  if (!ANNOUNCE_CHANNEL_ID) return;
+  try {
+    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
+    if (!channel) return;
+    
+    // Check expired giveaways
+    const giveaways = store.getAllGiveaways();
+    for (const giveaway of giveaways) {
+      if (Date.now() > giveaway.expiresAt) {
+        if (giveaway.participants.length > 1) {
+          // Select winner
+          const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
+          store.getWallet(winner).balance += giveaway.amount;
+          store.saveWallets();
+          
+          const winnerUser = await client.users.fetch(winner).catch(() => null);
+          const winnerName = winnerUser ? winnerUser.username : 'Unknown';
+          const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
+          const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
+          
+          await channel.send(
+            `🎉 **GIVEAWAY ENDED!**\n\n` +
+            `**${winnerName}** won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
+            `Participants: ${giveaway.participants.length}`
+          );
+        } else {
+          // Refund if no participants
+          store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
+          store.saveWallets();
+        }
+        
+        store.removeGiveaway(giveaway.id);
+      }
+    }
+    
+    // Check expired events
+    const events = store.getAllEvents();
+    for (const event of events) {
+      if (Date.now() > event.expiresAt && event.outcome === null) {
+        // Event expired without outcome - refund all participants
+        const participants = event.participants;
+        for (const [userId, bets] of Object.entries(participants)) {
+          let totalBet = 0;
+          for (const bet of bets) {
+            totalBet += bet.amount;
+          }
+          store.setBalance(userId, store.getBalance(userId) + totalBet);
+        }
+        store.saveWallets();
+        
+        const creatorUser = await client.users.fetch(event.creatorId).catch(() => null);
+        const creatorName = creatorUser ? creatorUser.username : 'Unknown';
+        
+        await channel.send(
+          `📊 **EVENT BETTING EXPIRED**\n\n` +
+          `Event: **${event.description}**\nCreator: <@${event.creatorId}>\n\n` +
+          `⚠️ No outcome was set. All participants have been refunded!`
+        );
+        
+        store.removeEvent(event.id);
+      }
+    }
+  } catch (err) { console.error("Giveaway/Event check error:", err); }
+}
+
 // ─── Daily Leaderboard ───
 async function postDailyLeaderboard() {
   if (!ANNOUNCE_CHANNEL_ID) return;
@@ -187,6 +265,7 @@ async function postDailyLeaderboard() {
 // ─── Scheduling ───
 function scheduleAll() {
   setInterval(distributeUniversalPool, 3600000);
+  setInterval(checkExpiredGiveawaysAndEvents, 30000); // Check every 30 seconds for expired giveaways/events
   const now = new Date();
   const target = new Date(); target.setHours(12, 0, 0, 0);
   if (now >= target) target.setDate(target.getDate() + 1);
@@ -213,6 +292,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isModalSubmit()) {
     try {
       if (interaction.customId.startsWith('trade_coinmodal_')) return await economy.handleTradeModal(interaction);
+      if (interaction.customId.startsWith('eventbet_modal_')) {
+        const parts = interaction.customId.split('_');
+        const eventId = parts[2];
+        const userId = parts[3];
+        return await economy.handleEventBetModal(interaction, eventId, userId);
+      }
     } catch (e) { console.error(e); }
     return;
   }
@@ -239,6 +324,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('bj_'))       return await blackjack.handleButton(interaction, parts);
       if (interaction.customId.startsWith('roulette_')) return await simple.handleRouletteButton(interaction, parts);
       if (interaction.customId.startsWith('dice_'))     return await simple.handleDiceButton(interaction, parts);
+      if (interaction.customId.startsWith('giveaway_join_')) {
+        const giveawayId = interaction.customId.split('_')[2];
+        return await economy.handleGiveawayJoin(interaction, giveawayId);
+      }
+      if (interaction.customId.startsWith('eventbet_predict_')) {
+        const eventId = interaction.customId.split('_')[2];
+        return await economy.handleEventBetPredict(interaction, eventId);
+      }
     } catch (e) { console.error(e); }
     return;
   }
@@ -275,7 +368,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'inventory':    return await economy.handleInventory(interaction);
       case 'collection':   return await economy.handleCollection(interaction, client);
       case 'pool':         return await economy.handlePool(interaction);
+      case 'stats':        return await statsCmd.handleStats(interaction);
       case 'help':         return await helpCmd.handleHelp(interaction);
+      case 'giveaway':     return await economy.handleGiveawayStart(interaction);
+      case 'eventbet':     return await economy.handleEventBetStart(interaction);
       case 'admin':        return await adminCmd.handleAdmin(interaction, client, ADMIN_IDS, runDailySpin, distributeUniversalPool);
     }
   } catch (err) {

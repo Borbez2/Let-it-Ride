@@ -45,8 +45,15 @@ function resolveSplitGame(interaction, uid, game) {
   }
 
   store.setBalance(uid, store.getBalance(uid) + net);
-  if (net > 0) store.addToUniversalPool(net);
-  if (net < 0) { store.applyCashback(uid, Math.abs(net)); store.addToLossPool(Math.abs(net)); }
+  if (net > 0) {
+    store.recordWin(uid, 'blackjack', net);
+    store.addToUniversalPool(net);
+  }
+  if (net < 0) {
+    store.recordLoss(uid, 'blackjack', Math.abs(net));
+    store.applyCashback(uid, Math.abs(net));
+    store.addToLossPool(Math.abs(net));
+  }
   activeSplitGames.delete(uid);
 
   return interaction.update({
@@ -68,12 +75,15 @@ function resolveStandard(interaction, uid, game, doubled) {
 
   let res;
   if (dv > 21) {
+    store.recordWin(uid, 'blackjack', game.bet);
     store.setBalance(uid, bal + game.bet * 2); store.addToUniversalPool(game.bet);
     res = `Dealer busts! +**${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet * 2)}**`;
   } else if (pv > dv) {
+    store.recordWin(uid, 'blackjack', game.bet);
     store.setBalance(uid, bal + game.bet * 2); store.addToUniversalPool(game.bet);
     res = `Win! ${pv}>${dv} +**${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet * 2)}**`;
   } else if (dv > pv) {
+    store.recordLoss(uid, 'blackjack', game.bet);
     // bet already deducted, no further deduction needed
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
@@ -125,8 +135,7 @@ async function handleCommand(interaction) {
       return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit)
-    const profit = Math.floor(bet * 1.5);
-    store.setBalance(userId, bal + profit); store.addToUniversalPool(profit);
+    const profit = Math.floor(bet * 1.5);    store.recordWin(userId, 'blackjack', profit);    store.setBalance(userId, bal + profit); store.addToUniversalPool(profit);
     return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(profit)}**! Balance: **${store.formatNumber(bal + profit)}**`);
   }
 
@@ -209,8 +218,7 @@ async function handleButton(interaction, parts) {
     game.playerHand.push(game.deck.pop());
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
-      // Bust after double, bet was already fully deducted
-      const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
+      // Bust after double, bet was already fully deducted      store.recordLoss(uid, 'blackjack', game.bet);      const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
       activeGames.delete(uid);
       return interaction.update({
@@ -225,8 +233,7 @@ async function handleButton(interaction, parts) {
     game.playerHand.push(game.deck.pop());
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
-      // Bust, bet was already deducted at game start
-      const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
+      // Bust, bet was already deducted at game start      store.recordLoss(uid, 'blackjack', game.bet);      const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
       activeGames.delete(uid);
       return interaction.update({
