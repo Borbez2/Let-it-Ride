@@ -5,7 +5,31 @@ const activeGames = new Map();   // shared for dice + roulette
 const activeRides = new Map();
 const activeDuels = new Map();
 
-// ═══════ FLIP ═══════
+function persistSimpleSessions() {
+  store.setRuntimeState('session:simple', {
+    activeGames: Object.fromEntries(activeGames),
+    activeRides: Object.fromEntries(activeRides),
+    activeDuels: Object.fromEntries(activeDuels),
+  });
+}
+
+function restoreSimpleSessions() {
+  const state = store.getRuntimeState('session:simple', null);
+  if (!state || typeof state !== 'object') return;
+  if (state.activeGames && typeof state.activeGames === 'object') {
+    for (const [k, v] of Object.entries(state.activeGames)) activeGames.set(k, v);
+  }
+  if (state.activeRides && typeof state.activeRides === 'object') {
+    for (const [k, v] of Object.entries(state.activeRides)) activeRides.set(k, v);
+  }
+  if (state.activeDuels && typeof state.activeDuels === 'object') {
+    for (const [k, v] of Object.entries(state.activeDuels)) activeDuels.set(k, v);
+  }
+}
+
+restoreSimpleSessions();
+
+// Coin flip command.
 async function handleFlip(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
@@ -51,7 +75,7 @@ async function handleFlip(interaction) {
   return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${net >= 0 ? '+' : ''}${store.formatNumber(net)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
-// ═══════ DICE ═══════
+// Dice command.
 async function handleDice(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
@@ -66,6 +90,7 @@ async function handleDice(interaction) {
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
   activeGames.set(userId, { bet, game: 'dice' });
+  persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`dice_high_${userId}`).setLabel('High (4-6)').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`dice_low_${userId}`).setLabel('Low (1-3)').setStyle(ButtonStyle.Danger),
@@ -93,9 +118,10 @@ async function handleDiceButton(interaction, parts) {
     await interaction.update({ content: `❌ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Lost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   }
   activeGames.delete(uid);
+  persistSimpleSessions();
 }
 
-// ═══════ ROULETTE ═══════
+// Roulette command.
 const REDS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
 
 async function handleRoulette(interaction) {
@@ -112,6 +138,7 @@ async function handleRoulette(interaction) {
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
   activeGames.set(userId, { bet, game: 'roulette' });
+  persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`roulette_red_${userId}`).setLabel('Red (2x)').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`roulette_black_${userId}`).setLabel('Black (2x)').setStyle(ButtonStyle.Secondary),
@@ -147,9 +174,10 @@ async function handleRouletteButton(interaction, parts) {
     await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nLost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   }
   activeGames.delete(uid);
+  persistSimpleSessions();
 }
 
-// ═══════ ALL IN 17 BLACK ═══════
+// All-in roulette shortcut on 17 black.
 async function handleAllIn17(interaction) {
   const userId = interaction.user.id;
   const bal = store.getBalance(userId);
@@ -169,7 +197,7 @@ async function handleAllIn17(interaction) {
   return interaction.reply(`🎰 **ALL IN 17 BLACK** 🎰\nBall: **${num} (${col.toUpperCase()})**\n\n💀 Lost **${store.formatNumber(bal)}**. Balance: **0**`);
 }
 
-// ═══════ LET IT RIDE ═══════
+// Let It Ride command.
 async function handleLetItRide(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
@@ -192,6 +220,7 @@ async function handleLetItRide(interaction) {
   }
   const pot = bet * 2;
   activeRides.set(userId, { current: pot, original: bet, wins: 1 });
+  persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`ride_ride_${userId}`).setLabel(`Ride (${store.formatNumberShort(pot * 2)})`).setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`ride_cashout_${userId}`).setLabel(`Cash Out (${store.formatNumberShort(pot)})`).setStyle(ButtonStyle.Primary),
@@ -211,28 +240,31 @@ async function handleRideButton(interaction, parts) {
     store.setBalance(uid, store.getBalance(uid) + ride.current);
     if (ride.current > ride.original) store.addToUniversalPool(ride.current - ride.original);
     activeRides.delete(uid);
+    persistSimpleSessions();
     return interaction.update({ content: `**Let It Ride - Cashed Out**\n${store.formatNumber(ride.current)} coins after ${ride.wins} wins!`, components: [] });
   }
 
   if (action === 'ride') {
     if (Math.random() < 0.5) {
       ride.current *= 2; ride.wins++;
+      persistSimpleSessions();
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`ride_ride_${uid}`).setLabel(`Ride (${store.formatNumberShort(ride.current * 2)})`).setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`ride_cashout_${uid}`).setLabel(`Cash Out (${store.formatNumberShort(ride.current)})`).setStyle(ButtonStyle.Primary),
       );
       return interaction.update({ content: `**Let It Ride**\nWIN! Pot: **${store.formatNumber(ride.current)}**\n🔥 ${ride.wins}`, components: [row] });
     } else {
-      store.recordLoss(uid, 'letitride', ride.current);
-      const cb = store.applyCashback(uid, ride.current); store.addToLossPool(ride.current);
+      store.recordLoss(uid, 'letitride', ride.original);
+      const cb = store.applyCashback(uid, ride.original); store.addToLossPool(ride.original);
       activeRides.delete(uid);
+      persistSimpleSessions();
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
-      return interaction.update({ content: `**Let It Ride - Bust**\nLost **${store.formatNumber(ride.current)}** after ${ride.wins} wins${cbm}`, components: [] });
+      return interaction.update({ content: `**Let It Ride - Bust**\nLost **${store.formatNumber(ride.original)}** after ${ride.wins} wins${cbm}`, components: [] });
     }
   }
 }
 
-// ═══════ DUEL ═══════
+// Duel command.
 async function handleDuel(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
   const opp = interaction.options.getUser('opponent');
@@ -253,6 +285,7 @@ async function handleDuel(interaction) {
   store.setBalance(userId, bal - bet);
   
   activeDuels.set(`${userId}_${opp.id}`, { bet, challengerName: username, opponentName: opp.username, challengerBalance: bal - bet });
+  persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`duel_accept_${userId}_${opp.id}`).setLabel('Accept').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`duel_decline_${userId}_${opp.id}`).setLabel('Decline').setStyle(ButtonStyle.Danger),
@@ -270,6 +303,7 @@ async function handleDuelButton(interaction, parts) {
     // Refund the challenger's money
     store.setBalance(cid, store.getBalance(cid) + duel.bet);
     activeDuels.delete(dk);
+    persistSimpleSessions();
     return interaction.update({ content: `**${duel.opponentName}** declined.`, components: [] });
   }
 
@@ -281,6 +315,7 @@ async function handleDuelButton(interaction, parts) {
       // Refund challenger
       store.setBalance(cid, store.getBalance(cid) + duel.bet);
       activeDuels.delete(dk); 
+      persistSimpleSessions();
       return interaction.update({ content: "You can't afford it!", components: [] }); 
     }
     
@@ -300,6 +335,7 @@ async function handleDuelButton(interaction, parts) {
     store.addToUniversalPool(duel.bet);
     store.addToLossPool(duel.bet);
     activeDuels.delete(dk);
+    persistSimpleSessions();
     
     const emoji = w === cid ? '✅' : '❌';
     return interaction.update({ content: `${emoji} **DUEL** — **${wn}** wins **${store.formatNumber(duel.bet * 2)}** from **${ln}**!`, components: [] });

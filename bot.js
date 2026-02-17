@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 const store = require('./data/store');
@@ -10,12 +10,18 @@ const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
 
-// Environment, create and .env file and edit it there with your values
+// Load required environment values from .env.
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
-const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim());
+const DAILY_EVENTS_CHANNEL_ID = '1467976012645269676';
+const HOURLY_PAYOUT_CHANNEL_ID = '1473346239146889391';
+const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+const STATS_RESET_ADMIN_IDS = (process.env.STATS_RESET_ADMIN_IDS || process.env.ADMIN_IDS || '')
+  .split(',')
+  .map(id => id.trim())
+  .filter(Boolean);
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
   console.error("Missing env vars.");
@@ -25,7 +31,7 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let isBotActive = true;
 
-// ─── Command definitions ───
+// Register all slash command definitions.
 const commands = [
   new SlashCommandBuilder().setName('balance').setDescription('Check your coin balance'),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily coins'),
@@ -90,12 +96,10 @@ const commands = [
     .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
     .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
     .addSubcommand(s => s.setName('start').setDescription('[ADMIN] Start the bot for everyone'))
-    .addSubcommand(s => s.setName('stop').setDescription('[ADMIN] Stop the bot for non-admin users'))
+    .addSubcommand(s => s.setName('stop').setDescription('[ADMIN] Stop the bot'))
     .addSubcommand(s => s.setName('resetstats').setDescription('[ADMIN] Reset a user\'s stats')
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))),
-  new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway')
-    .addStringOption(o => o.setName('amount').setDescription('Prize pool amount (e.g. 1000, 1k, all)').setRequired(true))
-    .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
+  new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form'),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -107,7 +111,7 @@ async function registerCommands() {
   } catch (err) { console.error("Failed:", err); }
 }
 
-// ─── Hourly interest + Universal Pool distribution ───
+// Distribute hourly bank interest and universal pool shares.
 async function distributeUniversalPool() {
   const wallets = store.getAllWallets();
   const poolData = store.getPoolData();
@@ -128,7 +132,7 @@ async function distributeUniversalPool() {
 
   if (share > 0) {
     for (const id of ids) {
-      store.getWallet(id).balance += share;
+      store.getWallet(id).bank += share;
       store.trackUniversalIncome(id, share);
     }
     poolData.universalPool -= share * ids.length;
@@ -138,36 +142,34 @@ async function distributeUniversalPool() {
   store.savePool();
   store.saveWallets();
 
-  if (ANNOUNCE_CHANNEL_ID) {
-    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(() => null);
-    if (channel) {
-      const rows = [];
-      for (const row of interestRows) {
-        const u = await client.users.fetch(row.id).catch(() => null);
-        const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
-        rows.push(`${name} ${store.formatNumber(row.interest).padStart(11)}`);
-      }
-
-      let table = '**Hourly Bank Interest**\n```\nPlayer          Interest\n-------------- -----------\n';
-      table += rows.join('\n');
-      table += '\n```';
-
-      await channel.send(
-        `${table}\nUniversal payout: **${store.formatNumber(share)}** coins per player (${ids.length} players).`
-      ).catch(() => {});
+  const channel = await client.channels.fetch(HOURLY_PAYOUT_CHANNEL_ID).catch(() => null);
+  if (channel) {
+    const rows = [];
+    for (const row of interestRows) {
+      const u = await client.users.fetch(row.id).catch(() => null);
+      const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
+      rows.push(`${name} ${store.formatNumber(row.interest).padStart(11)}`);
     }
+
+    let table = '**Hourly Bank Interest (paid to bank)**\n```\nPlayer          Interest\n-------------- -----------\n';
+    table += rows.join('\n');
+    table += '\n```';
+
+    await channel.send(table).catch(() => {});
+    await channel.send(
+      `Universal income paid to bank: **${store.formatNumber(share)}** coins per player this hour (${ids.length} players).`
+    ).catch(() => {});
   }
 
   console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}`);
 }
 
-// ─── Daily Spin ───
+// Run the daily spin payout.
 async function runDailySpin() {
-  if (!ANNOUNCE_CHANNEL_ID) return;
   const poolData = store.getPoolData();
   if (poolData.lossPool <= 0) return;
   try {
-    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
+    const channel = await client.channels.fetch(DAILY_EVENTS_CHANNEL_ID).catch(() => null);
     if (!channel) return;
     const wallets = store.getAllWallets();
     const entries = Object.entries(wallets)
@@ -211,10 +213,10 @@ async function runDailySpin() {
   } catch (err) { console.error("Daily spin error:", err); }
 }
 
-// ─── Giveaway Expiration ───
+// End giveaways once their timers expire.
 async function checkExpiredGiveaways() {
   try {
-    // Check expired giveaways
+    // Loop through giveaways and process anything that expired.
     const giveaways = store.getAllGiveaways();
     for (const giveaway of giveaways) {
       if (Date.now() > giveaway.expiresAt) {
@@ -222,9 +224,16 @@ async function checkExpiredGiveaways() {
         const channel = announceChannelId
           ? await client.channels.fetch(announceChannelId).catch(() => null)
           : null;
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`giveaway_ended_${giveaway.id}`)
+            .setLabel('Giveaway Ended')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(true),
+        );
 
         if (giveaway.participants.length > 0) {
-          // Select winner
+          // Pick a random winner from participants.
           const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
           store.getWallet(winner).balance += giveaway.amount;
           store.trackGiveawayWin(winner, giveaway.amount);
@@ -234,6 +243,18 @@ async function checkExpiredGiveaways() {
           const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
           const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
 
+          if (channel && giveaway.messageId) {
+            const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+            if (originalMessage) {
+              await originalMessage.edit({
+                content:
+                  `🎉 **GIVEAWAY ENDED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
+                  `Participants: ${giveaway.participants.length}\nEnds: **ENDED**\nWinner: <@${winner}>`,
+                components: [disabledRow],
+              }).catch(() => {});
+            }
+          }
+
           if (channel) {
             await channel.send(
               `🎉 **GIVEAWAY ENDED!**\n\n` +
@@ -242,9 +263,21 @@ async function checkExpiredGiveaways() {
             ).catch(() => {});
           }
         } else {
-          // Refund if no participants
+          // Refund the host if nobody joined.
           store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
           store.saveWallets();
+
+          if (channel && giveaway.messageId) {
+            const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+            if (originalMessage) {
+              await originalMessage.edit({
+                content:
+                  `🎉 **GIVEAWAY ENDED**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
+                  `Participants: 0\nEnds: **ENDED**\nNo participants joined. Host refunded.`,
+                components: [disabledRow],
+              }).catch(() => {});
+            }
+          }
 
           if (channel) {
             await channel.send(
@@ -260,11 +293,10 @@ async function checkExpiredGiveaways() {
   } catch (err) { console.error("Giveaway check error:", err); }
 }
 
-// ─── Daily Leaderboard ───
+// Post a daily leaderboard snapshot.
 async function postDailyLeaderboard() {
-  if (!ANNOUNCE_CHANNEL_ID) return;
   try {
-    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
+    const channel = await client.channels.fetch(DAILY_EVENTS_CHANNEL_ID).catch(() => null);
     if (!channel) return;
     const wallets = store.getAllWallets();
     const entries = Object.entries(wallets)
@@ -285,14 +317,25 @@ async function postDailyLeaderboard() {
   } catch (err) { console.error("Leaderboard post error:", err); }
 }
 
-// ─── Scheduling ───
+// Schedule recurring jobs and daily timers.
 function scheduleAll() {
-  setInterval(() => { distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err)); }, 3600000);
+  const nowForHourly = new Date();
+  const nextUtcHour = new Date(nowForHourly);
+  nextUtcHour.setUTCMinutes(0, 0, 0);
+  nextUtcHour.setUTCHours(nextUtcHour.getUTCHours() + 1);
+  const hourlyMs = nextUtcHour - nowForHourly;
+  setTimeout(() => {
+    distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err));
+    setInterval(() => {
+      distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err));
+    }, 3600000);
+  }, hourlyMs);
+
   setInterval(checkExpiredGiveaways, 30000);
 
   const now = new Date();
   const nextSpin = new Date();
-  nextSpin.setHours(23, 15, 0, 0);
+  nextSpin.setHours(11, 15, 0, 0);
   if (now >= nextSpin) nextSpin.setDate(nextSpin.getDate() + 1);
   const spinMs = nextSpin - now;
   setTimeout(() => {
@@ -301,24 +344,24 @@ function scheduleAll() {
   }, spinMs);
 
   const leaderboardNow = new Date();
-  const target = new Date(); target.setHours(12, 0, 0, 0);
+  const target = new Date(); target.setHours(11, 15, 0, 0);
   if (leaderboardNow >= target) target.setDate(target.getDate() + 1);
   const ms = target - leaderboardNow;
   setTimeout(() => {
     postDailyLeaderboard();
     setInterval(postDailyLeaderboard, 86400000);
   }, ms);
-  console.log(`Daily leaderboard in ${Math.round(ms / 60000)} min. Daily spin in ${Math.round(spinMs / 60000)} min. Hourly distribution active.`);
+  console.log(`Daily leaderboard in ${Math.round(ms / 60000)} min. Daily spin in ${Math.round(spinMs / 60000)} min. Hourly payout in ${Math.round(hourlyMs / 60000)} min (next UTC hour).`);
 }
 
-// ─── Bot Ready ───
+// Run startup logic when the bot is ready.
 client.once(Events.ClientReady, async () => {
   console.log(`Bot online: ${client.user.tag}`);
   await registerCommands();
   scheduleAll();
 });
 
-// ─── Interaction Handler ───
+// Route every incoming Discord interaction.
 client.on(Events.InteractionCreate, async (interaction) => {
 
   const isAdminUser = ADMIN_IDS.includes(interaction.user.id);
@@ -326,15 +369,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return interaction.reply({ content: 'Ask admin to start the bot.', ephemeral: true }).catch(() => {});
   }
 
-  // ══════ MODALS ══════
+  // Handle modal submissions.
   if (interaction.isModalSubmit()) {
     try {
       if (interaction.customId.startsWith('trade_coinmodal_')) return await economy.handleTradeModal(interaction);
+      if (interaction.customId === 'giveaway_create_modal') return await economy.handleGiveawayModal(interaction);
     } catch (e) { console.error(e); }
     return;
   }
 
-  // ══════ SELECT MENUS ══════
+  // Handle select menu interactions.
   if (interaction.isStringSelectMenu()) {
     try {
       if (interaction.customId.startsWith('trade_selectitem_') || interaction.customId.startsWith('trade_unselectitem_'))
@@ -343,7 +387,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // ══════ BUTTONS ══════
+  // Handle button interactions.
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     try {
@@ -364,7 +408,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // ══════ SLASH COMMANDS ══════
+  // Handle slash commands.
   if (!interaction.isChatInputCommand()) return;
   const cmd = interaction.commandName;
   const userId = interaction.user.id;
@@ -375,7 +419,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   try {
-    // Process bank interest on every command
+    // Apply pending bank interest whenever a user runs a command.
     store.processBank(userId);
 
     switch (cmd) {
@@ -408,6 +452,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         interaction,
         client,
         ADMIN_IDS,
+        STATS_RESET_ADMIN_IDS,
         runDailySpin,
         distributeUniversalPool,
         () => isBotActive,

@@ -1,7 +1,7 @@
 {
   "name": "gambling",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "bot.js",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "discord.js": "^14.25.1",

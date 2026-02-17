@@ -4,10 +4,29 @@ const {
   BASE_INVEST_RATE, RARITIES,
 } = require('../config');
 const store = require('../data/store');
+const GIVEAWAY_CHANNEL_ID = '1467976012645269676';
 
 const activeTrades = new Map();
 
-// ─── Upgrades page ───
+function persistTradeSessions() {
+  store.setRuntimeState('session:trades', {
+    activeTrades: Object.fromEntries(activeTrades),
+  });
+}
+
+function restoreTradeSessions() {
+  const state = store.getRuntimeState('session:trades', null);
+  if (!state || typeof state !== 'object') return;
+  if (state.activeTrades && typeof state.activeTrades === 'object') {
+    for (const [tradeKey, trade] of Object.entries(state.activeTrades)) {
+      activeTrades.set(tradeKey, trade);
+    }
+  }
+}
+
+restoreTradeSessions();
+
+// Build the upgrades page text and buttons.
 function renderUpgradesPage(userId) {
   const w = store.getWallet(userId);
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0;
@@ -47,7 +66,7 @@ function renderUpgradesPage(userId) {
   return { text, rows };
 }
 
-// ─── Trade rendering ───
+// Render trade UI components and message content.
 function renderTradeButtons(trade) {
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
@@ -115,7 +134,7 @@ function buildRemoveSelectMenu(userId, trade, isInit) {
   return new ActionRowBuilder().addComponents(menu);
 }
 
-// ═══════ SLASH COMMAND HANDLERS ═══════
+// Slash command handlers.
 
 async function handleBalance(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
@@ -205,6 +224,7 @@ async function handleGive(interaction) {
   }
   
   if (target.id === userId) return interaction.reply("Can't give to yourself");
+  if (target.bot) return interaction.reply("Can't give to a bot");
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
   store.setBalance(userId, bal - amount);
   store.setBalance(target.id, store.getBalance(target.id) + amount);
@@ -222,6 +242,7 @@ async function handleTrade(interaction) {
     initiatorConfirmed: false, targetConfirmed: false,
   };
   activeTrades.set(userId, trade);
+  persistTradeSessions();
   return interaction.reply({
     content: renderTradeView(trade) + `\n\nBoth players can set coins, add/remove items, then both confirm.`,
     components: renderTradeButtons(trade),
@@ -327,8 +348,9 @@ async function handleInventory(interaction) {
   const perPage = 15;
   if (!w.inventory.length) return interaction.reply("Your inventory is empty. Buy a /mysterybox!");
   const total = Math.ceil(w.inventory.length / perPage);
-  const items = w.inventory.slice(page * perPage, (page + 1) * perPage);
-  let text = `**${username}'s Inventory** (${w.inventory.length} items) - Page ${page + 1}/${total}\n\n`;
+  const safePage = Math.max(0, Math.min(page, total - 1));
+  const items = w.inventory.slice(safePage * perPage, (safePage + 1) * perPage);
+  let text = `**${username}'s Inventory** (${w.inventory.length} items) - Page ${safePage + 1}/${total}\n\n`;
   const counts = { common: 0, uncommon: 0, rare: 0, legendary: 0, epic: 0, mythic: 0, divine: 0 };
   w.inventory.forEach(i => { if (counts[i.rarity] !== undefined) counts[i.rarity]++; });
   text += `⬜ ${counts.common} common | 🟩 ${counts.uncommon} uncommon | 🟦 ${counts.rare} rare | 🟨 ${counts.legendary} legendary | 🟪 ${counts.epic} epic | 🩷 ${counts.mythic} mythic | 🩵 ${counts.divine} divine\n\n`;
@@ -367,7 +389,7 @@ async function handlePool(interaction) {
   return interaction.reply(text);
 }
 
-// ═══════ BUTTON HANDLERS ═══════
+// Button handlers.
 
 async function handleUpgradeButton(interaction, parts) {
   const action = parts[1], uid = parts[2];
@@ -445,22 +467,26 @@ async function handleTradeButton(interaction, parts) {
   if (action === 'confirm') {
     if (isInit) trade.initiatorConfirmed = true;
     if (isTgt) trade.targetConfirmed = true;
+    persistTradeSessions();
     if (trade.initiatorConfirmed && trade.targetConfirmed) {
       const iw = store.getWallet(trade.initiatorId), tw = store.getWallet(trade.targetId);
       if (iw.balance < trade.initiatorOffer.coins || tw.balance < trade.targetOffer.coins) {
         activeTrades.delete(tradeKey);
+        persistTradeSessions();
         return interaction.update({ content: "Trade failed, not enough coins.", components: [] });
       }
       // Validate all offered items still exist in inventories
       for (const item of trade.initiatorOffer.items) {
         if (item._idx >= iw.inventory.length || iw.inventory[item._idx].id !== item.id) {
           activeTrades.delete(tradeKey);
+          persistTradeSessions();
           return interaction.update({ content: "Trade failed, inventory changed.", components: [] });
         }
       }
       for (const item of trade.targetOffer.items) {
         if (item._idx >= tw.inventory.length || tw.inventory[item._idx].id !== item.id) {
           activeTrades.delete(tradeKey);
+          persistTradeSessions();
           return interaction.update({ content: "Trade failed, inventory changed.", components: [] });
         }
       }
@@ -488,18 +514,19 @@ async function handleTradeButton(interaction, parts) {
       for (const item of tgtItemsToGive) iw.inventory.push(item);
       for (const item of initItemsToGive) tw.inventory.push(item);
 
-      store.saveWallets(); activeTrades.delete(tradeKey);
+      store.saveWallets(); activeTrades.delete(tradeKey); persistTradeSessions();
       return interaction.update({ content: `**Trade Complete!** <@${trade.initiatorId}> ↔ <@${trade.targetId}>`, components: [] });
     }
     return interaction.update({ content: renderTradeView(trade), components: renderTradeButtons(trade) });
   }
   if (action === 'cancel') {
     activeTrades.delete(tradeKey);
+    persistTradeSessions();
     return interaction.update({ content: "Trade cancelled.", components: [] });
   }
 }
 
-// Handle the select menu interactions for trades
+// Handle trade select menu interactions.
 async function handleTradeSelectMenu(interaction) {
   const parts = interaction.customId.split('_');
   // trade_selectitem_{tradeKey}_{userId} or trade_unselectitem_{tradeKey}_{userId}
@@ -521,6 +548,7 @@ async function handleTradeSelectMenu(interaction) {
     const item = inv[idx];
     offer.items.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, _idx: idx });
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
+    persistTradeSessions();
     
     // Find the original trade message in the channel and update it
     try {
@@ -539,6 +567,7 @@ async function handleTradeSelectMenu(interaction) {
     if (offerIdx >= offer.items.length) return interaction.reply({ content: "Invalid!", ephemeral: true });
     const removed = offer.items.splice(offerIdx, 1)[0];
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
+    persistTradeSessions();
     try {
       await interaction.deferReply({ ephemeral: true });
       await interaction.followUp({ content: `Removed **${removed.name}** from your offer!`, ephemeral: true });
@@ -549,7 +578,7 @@ async function handleTradeSelectMenu(interaction) {
   }
 }
 
-// Handle the modal submission for setting coin amounts
+// Handle trade modal submissions for coin amounts.
 async function handleTradeModal(interaction) {
   const parts = interaction.customId.split('_');
   // trade_coinmodal_{tradeKey}_{userId}
@@ -571,47 +600,85 @@ async function handleTradeModal(interaction) {
   if (isInit) trade.initiatorOffer.coins = amount;
   else trade.targetOffer.coins = amount;
   trade.initiatorConfirmed = false; trade.targetConfirmed = false;
+  persistTradeSessions();
 
   return interaction.update({ content: renderTradeView(trade), components: renderTradeButtons(trade) });
 }
 
-// ═══════ GIVEAWAY HANDLERS ═══════
+// Giveaway handlers.
 
 async function handleGiveawayStart(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId('giveaway_create_modal')
+    .setTitle('Start Giveaway');
+
+  const amountInput = new TextInputBuilder()
+    .setCustomId('giveaway_amount')
+    .setLabel('Prize amount (e.g. 1000, 1k, all)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(20)
+    .setPlaceholder('e.g. 10000 or 10k or all');
+
+  const durationInput = new TextInputBuilder()
+    .setCustomId('giveaway_duration')
+    .setLabel('Duration in minutes (1-1440)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(4)
+    .setPlaceholder('e.g. 60');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(amountInput),
+    new ActionRowBuilder().addComponents(durationInput),
+  );
+
+  return interaction.showModal(modal);
+}
+
+async function handleGiveawayModal(interaction) {
   const userId = interaction.user.id;
-  const rawAmount = interaction.options.getString('amount');
-  const durationMinutes = interaction.options.getInteger('duration');
+  const rawAmount = interaction.fields.getTextInputValue('giveaway_amount');
+  const rawDuration = interaction.fields.getTextInputValue('giveaway_duration');
   const bal = store.getBalance(userId);
-  
+
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply({ content: 'Invalid amount. Use a number, "1k", "1m", or "all".', ephemeral: true });
   }
-  
+
   if (amount > bal) {
-    return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
+    return interaction.reply({ content: `You only have **${store.formatNumber(bal)}**`, ephemeral: true });
   }
-  
-  if (durationMinutes < 1 || durationMinutes > 1440) {
-    return interaction.reply('Duration must be between 1 and 1440 minutes (1 day)');
+
+  const durationMinutes = parseInt((rawDuration || '').trim(), 10);
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
+    return interaction.reply({ content: 'Duration must be between 1 and 1440 minutes (1 day).', ephemeral: true });
   }
-  
-  // Deduct the amount from user balance
+
+  const giveawayChannel = await interaction.client.channels.fetch(GIVEAWAY_CHANNEL_ID).catch(() => null);
+  if (!giveawayChannel) {
+    return interaction.reply({ content: 'Could not find the giveaway channel. Please check channel permissions/ID.', ephemeral: true });
+  }
+
   store.setBalance(userId, bal - amount);
-  
-  // Create the giveaway
+
   const durationMs = durationMinutes * 60 * 1000;
-  const giveaway = store.createGiveaway(userId, amount, durationMs, interaction.channelId);
-  
+  const giveaway = store.createGiveaway(userId, amount, durationMs, GIVEAWAY_CHANNEL_ID);
+
   const endTime = Math.floor((Date.now() + durationMs) / 1000);
   const rows = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`giveaway_join_${giveaway.id}`).setLabel('Join Giveaway').setStyle(ButtonStyle.Success),
   );
-  
-  return interaction.reply({
+
+  const giveawayMessage = await giveawayChannel.send({
     content: `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${userId}>\nPrize Pool: **${store.formatNumber(amount)}** coins\nParticipants: 0\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
     components: [rows],
   });
+
+  store.setGiveawayMessageRef(giveaway.id, giveawayMessage.id, GIVEAWAY_CHANNEL_ID);
+
+  return interaction.reply({ content: `Giveaway posted in <#${GIVEAWAY_CHANNEL_ID}>.`, ephemeral: true });
 }
 
 async function handleGiveawayJoin(interaction, giveawayId) {
@@ -635,7 +702,13 @@ async function handleGiveawayJoin(interaction, giveawayId) {
   }
   
   store.joinGiveaway(giveawayId, userId);
-  return interaction.reply({
+  await interaction.deferUpdate();
+  const endTime = Math.floor(giveaway.expiresAt / 1000);
+  await interaction.editReply({
+    content: `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\nParticipants: ${giveaway.participants.length}\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
+    components: interaction.message.components,
+  });
+  return interaction.followUp({
     content: `✅ You joined the giveaway! Participants: ${giveaway.participants.length}`,
     ephemeral: true,
   });
@@ -648,5 +721,5 @@ module.exports = {
   handleMysteryBox, handleInventory, handleCollection, handlePool,
   handleUpgradeButton, handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
-  handleGiveawayStart, handleGiveawayJoin,
+  handleGiveawayStart, handleGiveawayModal, handleGiveawayJoin,
 };

@@ -16,7 +16,7 @@ async function handleHelp(interaction) {
     for (const [rarity, pool] of poolEntries) {
       const pct = ((pool.weight / totalWeight) * 100).toFixed(1);
       const r = RARITIES[rarity];
-      text += `${r.emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}** — ${pct}% chance, ${pool.items.length} items\n`;
+      text += `${r.emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${pct}% chance, ${pool.items.length} items\n`;
     }
 
     text += `\n**Duplicate Compensation**\n`;

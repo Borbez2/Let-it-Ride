@@ -37,6 +37,7 @@ async function handleStats(interaction) {
 
   const wallet = store.getWallet(userId);
   const stats = wallet.stats;
+  const currentTotalBalance = (wallet.balance || 0) + (wallet.bank || 0);
 
   let text = `**📊 Stats for ${username}**\n\n`;
 
@@ -74,7 +75,7 @@ async function handleStats(interaction) {
 
   // Lifetime summary
   text += `\n**💰 Lifetime Summary**\n`;
-  text += `• Total Earnings: **${store.formatNumber(stats.lifetimeEarnings || 0)}** coins\n`;
+  text += `• Total Earnings: **${store.formatNumber(currentTotalBalance)}** coins\n`;
   text += `• Total Losses: **${store.formatNumber(stats.lifetimeLosses || 0)}** coins\n`;
 
   const netProfit = (stats.lifetimeEarnings || 0) - (stats.lifetimeLosses || 0);

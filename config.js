@@ -1,4 +1,4 @@
-// ─── Constants ───
+// Core economy constants.
 const STARTING_COINS = 1000;
 const DAILY_BASE = 500;
 const DAILY_STREAK_BONUS = 50;
@@ -16,12 +16,12 @@ const SPIN_MULT_COSTS = [
   5000000, 20000000, 100000000, 500000000, 2000000000
 ];
 
-// ─── Mines grid ───
+// Mines board dimensions.
 const MINES_ROWS = 4;
 const MINES_COLS = 5;
 const MINES_TOTAL = MINES_ROWS * MINES_COLS;
 
-// ─── Collectibles ───
+// Collectible definitions and rarity pools.
 const RARITIES = {
   common:    { emoji: '⬜', color: null },
   uncommon:  { emoji: '🟩', color: null },

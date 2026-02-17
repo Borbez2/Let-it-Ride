@@ -1,7 +1,6 @@
 const store = require('../data/store');
-const STATS_RESET_ADMIN_ID = '705758720847773803';
 
-async function handleAdmin(interaction, client, ADMIN_IDS, runDailySpin, distributeUniversalPool, getBotActive, setBotActive) {
+async function handleAdmin(interaction, client, ADMIN_IDS, STATS_RESET_ADMIN_IDS, runDailySpin, distributeUniversalPool, getBotActive, setBotActive) {
   const userId = interaction.user.id;
   if (!ADMIN_IDS.includes(userId)) return interaction.reply({ content: "Not authorized", ephemeral: true });
 
@@ -19,8 +18,16 @@ async function handleAdmin(interaction, client, ADMIN_IDS, runDailySpin, distrib
     return interaction.reply('[ADMIN] Bot stopped. Non-admin users are blocked until /admin start.');
   }
 
-  if (sub === 'forcespin') { await runDailySpin(); return interaction.reply("[ADMIN] Daily spin forced."); }
-  if (sub === 'forcepoolpayout') { await distributeUniversalPool(); return interaction.reply("[ADMIN] Pool distributed."); }
+  if (sub === 'forcespin') {
+    await interaction.deferReply({ ephemeral: true });
+    await runDailySpin();
+    return interaction.editReply("[ADMIN] Daily spin forced.");
+  }
+  if (sub === 'forcepoolpayout') {
+    await interaction.deferReply({ ephemeral: true });
+    await distributeUniversalPool();
+    return interaction.editReply("[ADMIN] Pool distributed.");
+  }
   
   const target = interaction.options.getUser('user');
   const amount = interaction.options.getInteger('amount');
@@ -44,8 +51,8 @@ async function handleAdmin(interaction, client, ADMIN_IDS, runDailySpin, distrib
     return interaction.reply(`[ADMIN] Upgrades reset for ${target.username}`);
   }
   if (sub === 'resetstats') {
-    if (userId !== STATS_RESET_ADMIN_ID) {
-      return interaction.reply({ content: 'Only the stats reset admin can use this subcommand.', ephemeral: true });
+    if (!STATS_RESET_ADMIN_IDS.includes(userId)) {
+      return interaction.reply({ content: 'Only configured stats-reset admins can use this subcommand.', ephemeral: true });
     }
     store.resetStats(target.id);
     const w = store.getWallet(target.id);

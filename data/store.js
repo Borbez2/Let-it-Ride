@@ -6,7 +6,7 @@ const {
   POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS,
 } = require('../config');
 
-// ─── Database Setup ───
+// Set up the SQLite database.
 const DB_PATH = path.join(__dirname, 'gambling.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
@@ -34,10 +34,15 @@ db.exec(`
     last_daily_spin INTEGER NOT NULL DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS runtime_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   INSERT OR IGNORE INTO pool (id, last_hourly_payout) VALUES (1, ${Date.now()});
 `);
 
-// ─── Default Stats Template ───
+// Default stats template for new wallets.
 const DEFAULT_STATS = () => ({
   flip: { wins: 0, losses: 0 },
   dice: { wins: 0, losses: 0 },
@@ -55,7 +60,7 @@ const DEFAULT_STATS = () => ({
   lifetimeLosses: 0,
 });
 
-// ─── Prepared Statements ───
+// Prepared SQL statements.
 const stmts = {
   getAllWallets: db.prepare('SELECT * FROM wallets'),
   upsertWallet: db.prepare(`
@@ -70,9 +75,12 @@ const stmts = {
     UPDATE pool SET universal_pool = ?, loss_pool = ?, last_hourly_payout = ?, last_daily_spin = ?
     WHERE id = 1
   `),
+  getRuntimeState: db.prepare('SELECT value FROM runtime_state WHERE key = ?'),
+  upsertRuntimeState: db.prepare('INSERT OR REPLACE INTO runtime_state (key, value) VALUES (?, ?)'),
+  deleteRuntimeState: db.prepare('DELETE FROM runtime_state WHERE key = ?'),
 };
 
-// ─── Row → wallet object (matches old JSON shape) ───
+// Convert a DB row into the wallet object shape.
 function rowToWallet(row) {
   let stats;
   try { stats = JSON.parse(row.stats); } catch { stats = DEFAULT_STATS(); }
@@ -92,7 +100,7 @@ function rowToWallet(row) {
   };
 }
 
-// ─── Migrate from JSON (one-time, on first run) ───
+// One-time migration from old JSON files.
 function migrateFromJson() {
   const OLD_WALLETS = path.resolve('./wallets.json');
   const OLD_POOL = path.resolve('./pool.json');
@@ -105,7 +113,7 @@ function migrateFromJson() {
       const migrate = db.transaction(() => {
         for (const [userId, w] of Object.entries(jsonWallets)) {
           const stats = w.stats || DEFAULT_STATS();
-          // Ensure all game types exist
+          // Ensure every game stat bucket exists.
           for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
             if (!stats[g]) stats[g] = { wins: 0, losses: 0 };
           }
@@ -146,7 +154,7 @@ function migrateFromJson() {
 }
 migrateFromJson();
 
-// ─── Load into memory ───
+// Load wallet and pool data into memory.
 function loadWalletsFromDb() {
   const rows = stmts.getAllWallets.all();
   const result = {};
@@ -167,7 +175,25 @@ function loadPoolFromDb() {
 let wallets = loadWalletsFromDb();
 let poolData = loadPoolFromDb();
 
-// Migrate any missing fields on existing wallets
+function setRuntimeState(key, value) {
+  stmts.upsertRuntimeState.run(key, JSON.stringify(value));
+}
+
+function getRuntimeState(key, fallback = null) {
+  const row = stmts.getRuntimeState.get(key);
+  if (!row) return fallback;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return fallback;
+  }
+}
+
+function removeRuntimeState(key) {
+  stmts.deleteRuntimeState.run(key);
+}
+
+// Backfill missing fields on existing wallets.
 for (const id in wallets) {
   const w = wallets[id];
   if (!w.inventory) w.inventory = [];
@@ -188,7 +214,7 @@ for (const id in wallets) {
 saveWallets();
 console.log('Wallets loaded from SQLite. Fields migrated.');
 
-// ─── Pool ───
+// Pool helpers.
 function savePool() {
   stmts.updatePool.run(
     poolData.universalPool, poolData.lossPool,
@@ -210,7 +236,7 @@ function addToLossPool(amount) {
   return tax;
 }
 
-// ─── Wallets ───
+// Wallet helpers.
 function saveWallets() {
   const upsertAll = db.transaction(() => {
     for (const [userId, w] of Object.entries(wallets)) {
@@ -293,7 +319,7 @@ function getSpinWeight(userId) {
   return 1 + (getWallet(userId).spinMultLevel || 0);
 }
 
-// ─── Bank interest (hourly proportional) ───
+// Process hourly-compounded bank interest.
 function processBank(userId) {
   const w = getWallet(userId);
   if (!w.bank || w.bank <= 0) return 0;
@@ -323,7 +349,7 @@ function processBank(userId) {
   return 0;
 }
 
-// ─── Daily ───
+// Daily reward helpers.
 function checkDaily(userId) {
   const w = getWallet(userId);
   const now = Date.now(), last = w.lastDaily || 0;
@@ -353,7 +379,7 @@ function claimDaily(userId) {
   return { newBalance: w.balance, streak: w.streak, reward };
 }
 
-// ─── Mystery box ───
+// Mystery box helpers.
 function rollMysteryBox() {
   const totalW = Object.values(MYSTERY_BOX_POOLS).reduce((s, p) => s + p.weight, 0);
   let roll = Math.random() * totalW;
@@ -370,7 +396,7 @@ function rollMysteryBox() {
   return { ...item, _rarity: 'common' };
 }
 
-// Calculate compensation for duplicate placeholders
+// Calculate duplicate compensation by rarity.
 function getDuplicateCompensation(itemId, rarity) {
   const COMP_BY_RARITY = {
     common: 2500,
@@ -396,7 +422,7 @@ function getDuplicateCompensationTable() {
   };
 }
 
-// ─── Formatting ───
+// Number formatting helpers.
 function formatNumber(num) {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
@@ -408,17 +434,17 @@ function formatNumberShort(num) {
   return formatNumber(num);
 }
 
-// ─── Parse abbreviated amounts ───
+// Parse abbreviated amounts like 1k/1m/1b.
 function parseAmount(str, maxValue = null) {
   if (!str) return null;
   const trimmed = str.toLowerCase().trim();
   
-  // Handle "all"
+  // Support the special "all" keyword.
   if (trimmed === 'all') {
     return maxValue !== null ? maxValue : null;
   }
   
-  // Parse number with abbreviations (1k, 1m, 1b)
+  // Parse numeric values with optional k/m/b suffixes.
   const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kmb]?)$/);
   if (!match) return null;
   
@@ -435,21 +461,48 @@ function parseAmount(str, maxValue = null) {
   return num > 0 ? num : null;
 }
 
-// ─── Giveaways ───
+// Giveaway state helpers.
 let activeGiveaways = {};
 let giveawayCounter = 0;
+
+function saveGiveawayState() {
+  setRuntimeState('giveaways', {
+    activeGiveaways,
+    giveawayCounter,
+  });
+}
+
+function loadGiveawayState() {
+  const state = getRuntimeState('giveaways', null);
+  if (!state || typeof state !== 'object') return;
+  activeGiveaways = state.activeGiveaways && typeof state.activeGiveaways === 'object' ? state.activeGiveaways : {};
+  giveawayCounter = Number.isInteger(state.giveawayCounter) ? state.giveawayCounter : 0;
+}
+
+loadGiveawayState();
 
 function createGiveaway(initiatorId, amount, durationMs, channelId = null) {
   const id = `giveaway_${++giveawayCounter}`;
   const giveaway = {
     id, initiatorId, amount,
     channelId,
+    messageId: null,
     participants: [],
     expiresAt: Date.now() + durationMs,
     createdAt: Date.now(),
   };
   activeGiveaways[id] = giveaway;
+  saveGiveawayState();
   return giveaway;
+}
+
+function setGiveawayMessageRef(giveawayId, messageId, channelId = null) {
+  const g = activeGiveaways[giveawayId];
+  if (!g) return false;
+  g.messageId = messageId;
+  if (channelId) g.channelId = channelId;
+  saveGiveawayState();
+  return true;
 }
 
 function getGiveaway(id) { return activeGiveaways[id] || null; }
@@ -460,12 +513,16 @@ function joinGiveaway(giveawayId, userId) {
   const g = activeGiveaways[giveawayId];
   if (!g || g.participants.includes(userId)) return false;
   g.participants.push(userId);
+  saveGiveawayState();
   return true;
 }
 
-function removeGiveaway(id) { delete activeGiveaways[id]; }
+function removeGiveaway(id) {
+  delete activeGiveaways[id];
+  saveGiveawayState();
+}
 
-// ─── Stats tracking ───
+// Basic stats tracking.
 function recordWin(userId, gameName, amount) {
   const w = getWallet(userId);
   if (w.stats[gameName]) {
@@ -484,7 +541,7 @@ function recordLoss(userId, gameName, amount) {
   saveWallets();
 }
 
-// ─── Extended Stats Tracking ───
+// Extended stats tracking helpers.
 function hasWallet(userId) {
   return !!wallets[userId];
 }
@@ -549,6 +606,8 @@ module.exports = {
   recordWin, recordLoss, resetStats,
   saveWallets,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
+  setGiveawayMessageRef,
   trackGiveawayWin, trackGiveawayCreated, trackDailySpinWin, trackUniversalIncome,
   trackMysteryBoxDuplicateComp,
+  setRuntimeState, getRuntimeState, removeRuntimeState,
 };

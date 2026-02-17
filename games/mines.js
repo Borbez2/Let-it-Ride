@@ -4,6 +4,24 @@ const store = require('../data/store');
 
 const activeMines = new Map();
 
+function persistMinesSessions() {
+  store.setRuntimeState('session:mines', {
+    activeMines: Object.fromEntries(activeMines),
+  });
+}
+
+function restoreMinesSessions() {
+  const state = store.getRuntimeState('session:mines', null);
+  if (!state || typeof state !== 'object') return;
+  if (state.activeMines && typeof state.activeMines === 'object') {
+    for (const [uid, game] of Object.entries(state.activeMines)) {
+      activeMines.set(uid, game);
+    }
+  }
+}
+
+restoreMinesSessions();
+
 function createMinesGrid(mc) {
   const g = Array(MINES_TOTAL).fill(false);
   let p = 0;
@@ -84,6 +102,7 @@ async function handleCommand(interaction) {
     multiplier: 1, oddsUserId: userId,
   };
   activeMines.set(userId, g);
+  persistMinesSessions();
   return interaction.reply({
     content: `**Mines** (${mc} mines, ${MINES_TOTAL - mc} safe)\nRevealed: 0 | 1.00x`,
     components: renderMinesGrid(g),
@@ -103,6 +122,7 @@ async function handleButton(interaction, parts) {
     store.setBalance(uid, store.getBalance(uid) + win);
     if (win > game.bet) store.addToUniversalPool(win - game.bet);
     activeMines.delete(uid);
+    persistMinesSessions();
     const gr = gridToString(game);
     return interaction.update({
       content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **${store.formatNumber(win)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
@@ -121,6 +141,7 @@ async function handleButton(interaction, parts) {
     const cb = store.applyCashback(uid, game.bet);
     store.addToLossPool(game.bet);
     activeMines.delete(uid);
+    persistMinesSessions();
     const gr = gridToString(game, ti);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
     let lossText = `Lost **${store.formatNumber(game.bet)}** (initial bet)`;
@@ -137,6 +158,7 @@ async function handleButton(interaction, parts) {
   game.revealed[ti] = true;
   game.revealedCount++;
   game.multiplier = getMinesMultiplier(game.revealedCount, game.mineCount);
+  persistMinesSessions();
 
   // Perfect clear
   if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
@@ -145,6 +167,7 @@ async function handleButton(interaction, parts) {
     store.setBalance(uid, store.getBalance(uid) + win);
     if (win > game.bet) store.addToUniversalPool(win - game.bet);
     activeMines.delete(uid);
+    persistMinesSessions();
     let gr = '';
     for (let r = 0; r < MINES_ROWS; r++) {
       for (let c = 0; c < MINES_COLS; c++) {
