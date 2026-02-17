@@ -2,10 +2,36 @@ const store = require('../data/store');
 
 async function handleStats(interaction) {
   const targetUser = interaction.options.getUser('user');
-  const userId = targetUser ? targetUser.id : interaction.user.id;
-  const username = targetUser ? targetUser.username : interaction.user.username;
+  const targetUsername = interaction.options.getString('username');
 
-  if (targetUser && !store.hasWallet(userId)) {
+  let userId = interaction.user.id;
+  let username = interaction.user.username;
+
+  if (targetUser) {
+    userId = targetUser.id;
+    username = targetUser.username;
+  } else if (targetUsername) {
+    const lookup = targetUsername.trim().toLowerCase();
+    const wallets = store.getAllWallets();
+    const ids = Object.keys(wallets);
+    let foundByUsername = false;
+
+    for (const id of ids) {
+      const u = await interaction.client.users.fetch(id).catch(() => null);
+      if (u && u.username.toLowerCase() === lookup) {
+        userId = u.id;
+        username = u.username;
+        foundByUsername = true;
+        break;
+      }
+    }
+
+    if (!foundByUsername) {
+      return interaction.reply(`No stats found for **${targetUsername}**.`);
+    }
+  }
+
+  if ((targetUser || targetUsername) && !store.hasWallet(userId)) {
     return interaction.reply(`No stats found for **${username}**.`);
   }
 
@@ -30,15 +56,12 @@ async function handleStats(interaction) {
 
   // Giveaways
   const gw = stats.giveaway || { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  const mb = stats.mysteryBox || { duplicateCompEarned: 0 };
   text += `\n**🎉 Giveaways**\n`;
   text += `• Created: ${gw.created} (${store.formatNumber(gw.amountGiven)} given away)\n`;
   text += `• Won: ${gw.won} (${store.formatNumber(gw.amountWon)} earned)\n`;
-
-  // Event Betting
-  const eb = stats.eventBetting || { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
-  text += `\n**📊 Event Betting**\n`;
-  text += `• Wins: ${eb.wins} (${store.formatNumber(eb.amountWon)} earned)\n`;
-  text += `• Losses: ${eb.losses} (${store.formatNumber(eb.amountLost)} lost)\n`;
+  text += `\n**📦 Mystery Boxes**\n`;
+  text += `• Duplicate Compensation Earned: ${store.formatNumber(mb.duplicateCompEarned)} coins\n`;
 
   // Passive Income
   const ds = stats.dailySpin || { won: 0, amountWon: 0 };

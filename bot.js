@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } = require('discord.js');
 require('dotenv').config();
 
 const store = require('./data/store');
@@ -16,7 +16,6 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim());
-const EVENT_RESOLVER_ID = process.env.EVENT_RESOLVER_ID || '705758720847773803';
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
   console.error("Missing env vars.");
@@ -24,6 +23,7 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+let isBotActive = true;
 
 // ─── Command definitions ───
 const commands = [
@@ -66,7 +66,8 @@ const commands = [
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
   new SlashCommandBuilder().setName('stats').setDescription('View your gaming stats and lifetime earnings/losses')
-    .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false)),
+    .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false))
+    .addStringOption(o => o.setName('username').setDescription('Username to check stats for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
@@ -88,22 +89,12 @@ const commands = [
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
     .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
     .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
+    .addSubcommand(s => s.setName('start').setDescription('[ADMIN] Start the bot for everyone'))
+    .addSubcommand(s => s.setName('stop').setDescription('[ADMIN] Stop the bot for non-admin users'))
     .addSubcommand(s => s.setName('resetstats').setDescription('[ADMIN] Reset a user\'s stats')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
-    .addSubcommand(s => s.setName('eventoutcome').setDescription('[ADMIN] Set event outcome')
-      .addStringOption(o => o.setName('eventid').setDescription('Event ID').setRequired(true))
-      .addStringOption(o => o.setName('outcome').setDescription('Winning prediction (e.g., "Yes", "Option A")').setRequired(true))),
+      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway')
     .addStringOption(o => o.setName('amount').setDescription('Prize pool amount (e.g. 1000, 1k, all)').setRequired(true))
-    .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
-  new SlashCommandBuilder().setName('eventbet').setDescription('Start event betting')
-    .addStringOption(o => o.setName('description').setDescription('Event description').setRequired(true).setMaxLength(100))
-    .addStringOption(o => o.setName('type').setDescription('Betting type: yes/no or over/under').setRequired(true)
-      .addChoices(
-        { name: 'Yes/No', value: 'yesno' },
-        { name: 'Over/Under', value: 'overunder' }
-      ))
-    .addStringOption(o => o.setName('parameter').setDescription('For over/under: the threshold number').setRequired(false))
     .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes (1-1440)').setRequired(true).setMinValue(1).setMaxValue(1440)),
 ].map(c => c.toJSON());
 
@@ -116,22 +107,58 @@ async function registerCommands() {
   } catch (err) { console.error("Failed:", err); }
 }
 
-// ─── Universal Pool Hourly Distribution ───
-function distributeUniversalPool() {
+// ─── Hourly interest + Universal Pool distribution ───
+async function distributeUniversalPool() {
   const wallets = store.getAllWallets();
   const poolData = store.getPoolData();
   const ids = Object.keys(wallets);
-  if (ids.length === 0 || poolData.universalPool <= 0) return;
-  const share = Math.floor(poolData.universalPool / ids.length);
-  if (share <= 0) return;
+
+  if (ids.length === 0) return;
+
+  const interestRows = [];
   for (const id of ids) {
-    store.getWallet(id).balance += share;
-    store.trackUniversalIncome(id, share);
+    const interest = store.processBank(id);
+    interestRows.push({ id, interest });
   }
-  poolData.universalPool -= share * ids.length;
+
+  let share = 0;
+  if (poolData.universalPool > 0) {
+    share = Math.floor(poolData.universalPool / ids.length);
+  }
+
+  if (share > 0) {
+    for (const id of ids) {
+      store.getWallet(id).balance += share;
+      store.trackUniversalIncome(id, share);
+    }
+    poolData.universalPool -= share * ids.length;
+  }
+
   poolData.lastHourlyPayout = Date.now();
-  store.savePool(); store.saveWallets();
-  console.log(`Pool: distributed ${share * ids.length} to ${ids.length} players (${share} each)`);
+  store.savePool();
+  store.saveWallets();
+
+  if (ANNOUNCE_CHANNEL_ID) {
+    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(() => null);
+    if (channel) {
+      const rows = [];
+      for (const row of interestRows) {
+        const u = await client.users.fetch(row.id).catch(() => null);
+        const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
+        rows.push(`${name} ${store.formatNumber(row.interest).padStart(11)}`);
+      }
+
+      let table = '**Hourly Bank Interest**\n```\nPlayer          Interest\n-------------- -----------\n';
+      table += rows.join('\n');
+      table += '\n```';
+
+      await channel.send(
+        `${table}\nUniversal payout: **${store.formatNumber(share)}** coins per player (${ids.length} players).`
+      ).catch(() => {});
+    }
+  }
+
+  console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}`);
 }
 
 // ─── Daily Spin ───
@@ -178,23 +205,24 @@ async function runDailySpin() {
     await new Promise(r => setTimeout(r, 1200));
     await msg.edit(
       `🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\n` +
-      `🎉🎉🎉\n**${winnerName}** WINS **${store.formatNumber(prize)}** COINS!\n🎉🎉🎉`
+      `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\n🎉🎉🎉`
     );
     console.log(`Daily spin: ${winnerName} won ${prize}`);
   } catch (err) { console.error("Daily spin error:", err); }
 }
 
-// ─── Giveaway & Event Expiration ───
-async function checkExpiredGiveawaysAndEvents() {
-  if (!ANNOUNCE_CHANNEL_ID) return;
+// ─── Giveaway Expiration ───
+async function checkExpiredGiveaways() {
   try {
-    const channel = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
-    if (!channel) return;
-    
     // Check expired giveaways
     const giveaways = store.getAllGiveaways();
     for (const giveaway of giveaways) {
       if (Date.now() > giveaway.expiresAt) {
+        const announceChannelId = giveaway.channelId || ANNOUNCE_CHANNEL_ID;
+        const channel = announceChannelId
+          ? await client.channels.fetch(announceChannelId).catch(() => null)
+          : null;
+
         if (giveaway.participants.length > 0) {
           // Select winner
           const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
@@ -205,75 +233,31 @@ async function checkExpiredGiveawaysAndEvents() {
           
           const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
           const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
-          
-          await channel.send(
-            `🎉 **GIVEAWAY ENDED!**\n\n` +
-            `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
-            `Participants: ${giveaway.participants.length}`
-          );
+
+          if (channel) {
+            await channel.send(
+              `🎉 **GIVEAWAY ENDED!**\n\n` +
+              `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
+              `Participants: ${giveaway.participants.length}`
+            ).catch(() => {});
+          }
         } else {
           // Refund if no participants
           store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
           store.saveWallets();
+
+          if (channel) {
+            await channel.send(
+              `🎉 **GIVEAWAY ENDED**\n\nNo participants joined, so <@${giveaway.initiatorId}> was refunded **${store.formatNumber(giveaway.amount)}** coins.`
+            ).catch(() => {});
+          }
         }
         
         store.removeGiveaway(giveaway.id);
       }
     }
     
-    // Check expired events
-    const events = store.getAllEvents();
-    for (const event of events) {
-      if (Date.now() > event.expiresAt && event.outcome === null) {
-        if (!event.notified) {
-          // Notify the resolver to make the final call
-          event.notified = true;
-          event.notifiedAt = Date.now();
-          
-          let buttons;
-          if (event.bettingType === 'yesno') {
-            buttons = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId(`eventresolve_Yes_${event.id}`).setLabel('Yes Won').setStyle(ButtonStyle.Success),
-              new ButtonBuilder().setCustomId(`eventresolve_No_${event.id}`).setLabel('No Won').setStyle(ButtonStyle.Danger),
-            );
-          } else {
-            buttons = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId(`eventresolve_Over_${event.id}`).setLabel('Over Won').setStyle(ButtonStyle.Success),
-              new ButtonBuilder().setCustomId(`eventresolve_Under_${event.id}`).setLabel('Under Won').setStyle(ButtonStyle.Danger),
-            );
-          }
-          
-          const totalBets = Object.values(event.participants).reduce((s, bets) => s + bets.reduce((ss, b) => ss + b.amount, 0), 0);
-          
-          await channel.send({
-            content: `📊 **EVENT BETTING CLOSED**\n\n` +
-              `Event: **${event.description}**\n` +
-              `Total bets: **${store.formatNumber(totalBets)}**\n\n` +
-              `<@${EVENT_RESOLVER_ID}> — Please resolve this event by selecting the winning outcome below.`,
-            components: [buttons],
-          });
-        } else if (event.notifiedAt && Date.now() > event.notifiedAt + 86400000) {
-          // 24h timeout - refund all participants
-          const participants = event.participants;
-          for (const [userId, bets] of Object.entries(participants)) {
-            let totalBet = 0;
-            for (const bet of bets) {
-              totalBet += bet.amount;
-            }
-            store.setBalance(userId, store.getBalance(userId) + totalBet);
-          }
-          store.saveWallets();
-          
-          await channel.send(
-            `📊 **EVENT EXPIRED** — **${event.description}**\n` +
-            `No outcome set after 24 hours. All participants have been refunded.`
-          );
-          
-          store.removeEvent(event.id);
-        }
-      }
-    }
-  } catch (err) { console.error("Giveaway/Event check error:", err); }
+  } catch (err) { console.error("Giveaway check error:", err); }
 }
 
 // ─── Daily Leaderboard ───
@@ -303,18 +287,28 @@ async function postDailyLeaderboard() {
 
 // ─── Scheduling ───
 function scheduleAll() {
-  setInterval(distributeUniversalPool, 3600000);
-  setInterval(checkExpiredGiveawaysAndEvents, 30000); // Check every 30 seconds for expired giveaways/events
+  setInterval(() => { distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err)); }, 3600000);
+  setInterval(checkExpiredGiveaways, 30000);
+
   const now = new Date();
+  const nextSpin = new Date();
+  nextSpin.setHours(23, 15, 0, 0);
+  if (now >= nextSpin) nextSpin.setDate(nextSpin.getDate() + 1);
+  const spinMs = nextSpin - now;
+  setTimeout(() => {
+    runDailySpin();
+    setInterval(runDailySpin, 86400000);
+  }, spinMs);
+
+  const leaderboardNow = new Date();
   const target = new Date(); target.setHours(12, 0, 0, 0);
-  if (now >= target) target.setDate(target.getDate() + 1);
-  const ms = target - now;
+  if (leaderboardNow >= target) target.setDate(target.getDate() + 1);
+  const ms = target - leaderboardNow;
   setTimeout(() => {
     postDailyLeaderboard();
-    runDailySpin();
-    setInterval(() => { postDailyLeaderboard(); runDailySpin(); }, 86400000);
+    setInterval(postDailyLeaderboard, 86400000);
   }, ms);
-  console.log(`Daily events in ${Math.round(ms / 60000)} min. Hourly pool active.`);
+  console.log(`Daily leaderboard in ${Math.round(ms / 60000)} min. Daily spin in ${Math.round(spinMs / 60000)} min. Hourly distribution active.`);
 }
 
 // ─── Bot Ready ───
@@ -327,16 +321,15 @@ client.once(Events.ClientReady, async () => {
 // ─── Interaction Handler ───
 client.on(Events.InteractionCreate, async (interaction) => {
 
+  const isAdminUser = ADMIN_IDS.includes(interaction.user.id);
+  if (!isBotActive && !isAdminUser) {
+    return interaction.reply({ content: 'Ask admin to start the bot.', ephemeral: true }).catch(() => {});
+  }
+
   // ══════ MODALS ══════
   if (interaction.isModalSubmit()) {
     try {
       if (interaction.customId.startsWith('trade_coinmodal_')) return await economy.handleTradeModal(interaction);
-      if (interaction.customId.startsWith('eventbet_modal_')) {
-        const parts = interaction.customId.split('_');
-        const eventId = parts[2];
-        const userId = parts[3];
-        return await economy.handleEventBetModal(interaction, eventId, userId);
-      }
     } catch (e) { console.error(e); }
     return;
   }
@@ -367,30 +360,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const giveawayId = interaction.customId.slice('giveaway_join_'.length);
         return await economy.handleGiveawayJoin(interaction, giveawayId);
       }
-      if (interaction.customId.startsWith('eventbet_predict_')) {
-        const eventId = interaction.customId.slice('eventbet_predict_'.length);
-        return await economy.handleEventBetPredict(interaction, eventId);
-      }
-      if (interaction.customId.startsWith('eventresolve_')) {
-        const resParts = interaction.customId.split('_');
-        const outcome = resParts[1];
-        const eventId = resParts.slice(2).join('_');
-        const resUserId = interaction.user.id;
-        
-        if (resUserId !== EVENT_RESOLVER_ID && !ADMIN_IDS.includes(resUserId)) {
-          return interaction.reply({ content: "You're not authorized to resolve events!", ephemeral: true });
-        }
-        
-        const result = store.resolveEventBetting(eventId, outcome);
-        if (!result) {
-          return interaction.reply({ content: '❌ Event not found or already resolved.', ephemeral: true });
-        }
-        
-        return interaction.update({
-          content: `📊 **EVENT RESOLVED**\n\nEvent: **${result.description}**\nOutcome: **${result.outcome}**\nWinners: ${result.winners} | Losers: ${result.losers}`,
-          components: [],
-        });
-      }
     } catch (e) { console.error(e); }
     return;
   }
@@ -399,6 +368,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   const cmd = interaction.commandName;
   const userId = interaction.user.id;
+  const isAdmin = ADMIN_IDS.includes(userId);
+
+  if (!isBotActive && !(cmd === 'admin' && isAdmin)) {
+    return interaction.reply({ content: 'Ask admin to start the bot.', ephemeral: true });
+  }
 
   try {
     // Process bank interest on every command
@@ -430,8 +404,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'stats':        return await statsCmd.handleStats(interaction);
       case 'help':         return await helpCmd.handleHelp(interaction);
       case 'giveaway':     return await economy.handleGiveawayStart(interaction);
-      case 'eventbet':     return await economy.handleEventBetStart(interaction);
-      case 'admin':        return await adminCmd.handleAdmin(interaction, client, ADMIN_IDS, runDailySpin, distributeUniversalPool);
+      case 'admin':        return await adminCmd.handleAdmin(
+        interaction,
+        client,
+        ADMIN_IDS,
+        runDailySpin,
+        distributeUniversalPool,
+        () => isBotActive,
+        (nextState) => { isBotActive = !!nextState; }
+      );
     }
   } catch (err) {
     console.error(err);

@@ -14,9 +14,18 @@ async function handleHelp(interaction) {
 
     text += `**Rarities and Drop Rates**\n\n`;
     for (const [rarity, pool] of poolEntries) {
-      const pct = ((pool.weight / totalWeight) * 100).toFixed(0);
+      const pct = ((pool.weight / totalWeight) * 100).toFixed(1);
       const r = RARITIES[rarity];
       text += `${r.emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}** — ${pct}% chance, ${pool.items.length} items\n`;
+    }
+
+    text += `\n**Duplicate Compensation**\n`;
+    text += `If you roll a duplicate, refund is based on item rarity:\n`;
+    const compTable = store.getDuplicateCompensationTable();
+    for (const [rarity] of poolEntries) {
+      const r = RARITIES[rarity];
+      const compensation = compTable[rarity] || 0;
+      text += `${r.emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${store.formatNumber(compensation)} coins\n`;
     }
 
     text += `\nWhen you open a mystery box, it first rolls which rarity tier you land on using the percentages above. `;
@@ -41,7 +50,7 @@ async function handleHelp(interaction) {
 
     text += `**Daily Spin Pool (Loss Tax)**\n`;
     text += `Every time someone loses a bet, ${lossPct}% of their loss goes into the Daily Spin Pool. `;
-    text += `Once per day at 12pm, the entire pool is given to one lucky winner chosen by a weighted random spin. `;
+    text += `Once per day at 11:15pm, the entire pool is given to one lucky winner chosen by a weighted random spin. `;
     text += `Your odds of winning the spin depend on your Spin Mult upgrade level. `;
     text += `At base you have 1x weight, and each upgrade level adds another 1x (so level 5 gives you 6x the base chance).\n\n`;
 

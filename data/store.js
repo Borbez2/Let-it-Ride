@@ -47,10 +47,10 @@ const DEFAULT_STATS = () => ({
   letitride: { wins: 0, losses: 0 },
   duel: { wins: 0, losses: 0 },
   giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
+  mysteryBox: { duplicateCompEarned: 0 },
   dailySpin: { won: 0, amountWon: 0 },
   interest: { totalEarned: 0 },
   universalIncome: { totalEarned: 0 },
-  eventBetting: { wins: 0, losses: 0, amountWon: 0, amountLost: 0 },
   lifetimeEarnings: 0,
   lifetimeLosses: 0,
 });
@@ -178,10 +178,10 @@ for (const id in wallets) {
     if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
   }
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
   if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
-  if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
 }
@@ -252,10 +252,10 @@ function getWallet(userId) {
     if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
   }
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
   if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
-  if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
   return w;
@@ -372,17 +372,28 @@ function rollMysteryBox() {
 
 // Calculate compensation for duplicate placeholders
 function getDuplicateCompensation(itemId, rarity) {
-  const { MYSTERY_BOX_COST, MYSTERY_BOX_POOLS } = require('../config');
-  const pool = MYSTERY_BOX_POOLS[rarity];
-  
-  if (!pool || !pool.weight) return 0;
-  
-  // Weight is proportional to drop chance
-  const totalWeight = Object.values(MYSTERY_BOX_POOLS).reduce((s, p) => s + p.weight, 0);
-  const dropChance = pool.weight / totalWeight;
-  
-  // Return 50% of mystery box cost, scaled by drop chance
-  return Math.floor((MYSTERY_BOX_COST * 0.5) * dropChance);
+  const COMP_BY_RARITY = {
+    common: 2500,
+    uncommon: 5000,
+    rare: 12500,
+    legendary: 35000,
+    epic: 75000,
+    mythic: 150000,
+    divine: 500000,
+  };
+  return COMP_BY_RARITY[rarity] || 0;
+}
+
+function getDuplicateCompensationTable() {
+  return {
+    common: 2500,
+    uncommon: 5000,
+    rare: 12500,
+    legendary: 35000,
+    epic: 75000,
+    mythic: 150000,
+    divine: 500000,
+  };
 }
 
 // ─── Formatting ───
@@ -428,10 +439,11 @@ function parseAmount(str, maxValue = null) {
 let activeGiveaways = {};
 let giveawayCounter = 0;
 
-function createGiveaway(initiatorId, amount, durationMs) {
+function createGiveaway(initiatorId, amount, durationMs, channelId = null) {
   const id = `giveaway_${++giveawayCounter}`;
   const giveaway = {
     id, initiatorId, amount,
+    channelId,
     participants: [],
     expiresAt: Date.now() + durationMs,
     createdAt: Date.now(),
@@ -452,49 +464,6 @@ function joinGiveaway(giveawayId, userId) {
 }
 
 function removeGiveaway(id) { delete activeGiveaways[id]; }
-
-// ─── Event Betting ───
-let activeEvents = {};
-let eventCounter = 0;
-
-function createEvent(creatorId, description, durationMs, bettingType = 'yesno', parameter = null) {
-  const id = `event_${++eventCounter}`;
-  const event = {
-    id, creatorId, description,
-    bettingType, parameter,
-    participants: {},
-    outcome: null,
-    expiresAt: Date.now() + durationMs,
-    createdAt: Date.now(),
-  };
-  activeEvents[id] = event;
-  return event;
-}
-
-function getEvent(id) { return activeEvents[id] || null; }
-
-function getAllEvents() { return Object.values(activeEvents); }
-
-function joinEvent(eventId, userId, prediction, amount) {
-  const e = activeEvents[eventId];
-  if (!e) return false;
-  if (!e.participants[userId]) {
-    e.participants[userId] = [];
-  }
-  e.participants[userId].push({ prediction, amount });
-  return true;
-}
-
-function setEventOutcome(eventId, outcome) {
-  const e = activeEvents[eventId];
-  if (e) {
-    e.outcome = outcome;
-    e.completedAt = Date.now();
-  }
-  return e;
-}
-
-function removeEvent(id) { delete activeEvents[id]; }
 
 // ─── Stats tracking ───
 function recordWin(userId, gameName, amount) {
@@ -560,64 +529,11 @@ function trackUniversalIncome(userId, amount) {
   w.stats.lifetimeEarnings += amount;
 }
 
-function resolveEventBetting(eventId, outcome) {
-  const event = activeEvents[eventId];
-  if (!event || event.outcome !== null) return null;
-
-  event.outcome = outcome;
-  event.completedAt = Date.now();
-
-  const participants = event.participants;
-  const winningBets = [];
-  const losingBets = [];
-  let losingPool = 0;
-
-  for (const [uid, bets] of Object.entries(participants)) {
-    for (const bet of bets) {
-      if (bet.prediction.toLowerCase() === outcome.toLowerCase()) {
-        winningBets.push({ userId: uid, amount: bet.amount });
-      } else {
-        losingBets.push({ userId: uid, amount: bet.amount });
-        losingPool += bet.amount;
-      }
-    }
-  }
-
-  const totalWinningBets = winningBets.reduce((s, b) => s + b.amount, 0);
-  const winnerIds = new Set();
-  const loserIds = new Set();
-
-  for (const wb of winningBets) {
-    const share = totalWinningBets > 0 ? Math.floor((wb.amount / totalWinningBets) * losingPool) : 0;
-    const payout = wb.amount + share;
-    const w = getWallet(wb.userId);
-    w.balance += payout;
-    if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
-    w.stats.eventBetting.wins += 1;
-    w.stats.eventBetting.amountWon += share;
-    w.stats.lifetimeEarnings += share;
-    winnerIds.add(wb.userId);
-  }
-
-  for (const lb of losingBets) {
-    const w = getWallet(lb.userId);
-    if (!w.stats.eventBetting) w.stats.eventBetting = { wins: 0, losses: 0, amountWon: 0, amountLost: 0 };
-    w.stats.eventBetting.losses += 1;
-    w.stats.eventBetting.amountLost += lb.amount;
-    w.stats.lifetimeLosses += lb.amount;
-    loserIds.add(lb.userId);
-  }
-
-  saveWallets();
-  delete activeEvents[eventId];
-
-  return {
-    winners: winnerIds.size,
-    losers: loserIds.size,
-    losingPool,
-    description: event.description,
-    outcome,
-  };
+function trackMysteryBoxDuplicateComp(userId, amount) {
+  const w = getWallet(userId);
+  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
+  w.stats.mysteryBox.duplicateCompEarned += amount;
+  w.stats.lifetimeEarnings += amount;
 }
 
 module.exports = {
@@ -628,12 +544,11 @@ module.exports = {
   getInterestRate, getCashbackRate, applyCashback,
   getSpinWeight, processBank,
   checkDaily, claimDaily,
-  rollMysteryBox, getDuplicateCompensation,
+  rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
   recordWin, recordLoss, resetStats,
   saveWallets,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
-  createEvent, getEvent, getAllEvents, joinEvent, setEventOutcome, removeEvent,
-  resolveEventBetting,
   trackGiveawayWin, trackGiveawayCreated, trackDailySpinWin, trackUniversalIncome,
+  trackMysteryBoxDuplicateComp,
 };

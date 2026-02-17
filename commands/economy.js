@@ -276,6 +276,7 @@ async function handleMysteryBox(interaction) {
         // Give compensation instead of duplicate
         const compensation = store.getDuplicateCompensation(item.id, item._rarity);
         w.balance += compensation;
+        store.trackMysteryBoxDuplicateComp(userId, compensation);
         totalCompensation += compensation;
         items.push({ ...item, isDuplicate: true, compensation });
         continue;
@@ -362,7 +363,7 @@ async function handlePool(interaction) {
   const players = Object.keys(wallets).length;
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
   let text = `**Universal Pool**\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
-  text += `**Daily Spin Pool**\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 12pm, weighted by Spin Mult upgrade`;
+  text += `**Daily Spin Pool**\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, weighted by Spin Mult upgrade`;
   return interaction.reply(text);
 }
 
@@ -600,7 +601,7 @@ async function handleGiveawayStart(interaction) {
   
   // Create the giveaway
   const durationMs = durationMinutes * 60 * 1000;
-  const giveaway = store.createGiveaway(userId, amount, durationMs);
+  const giveaway = store.createGiveaway(userId, amount, durationMs, interaction.channelId);
   
   const endTime = Math.floor((Date.now() + durationMs) / 1000);
   const rows = new ActionRowBuilder().addComponents(
@@ -640,142 +641,6 @@ async function handleGiveawayJoin(interaction, giveawayId) {
   });
 }
 
-// ═══════ EVENT BETTING HANDLERS ═══════
-
-async function handleEventBetStart(interaction) {
-  const userId = interaction.user.id;
-  const description = interaction.options.getString('description');
-  const bettingType = interaction.options.getString('type');
-  const parameter = interaction.options.getString('parameter');
-  const durationMinutes = interaction.options.getInteger('duration');
-  
-  if (durationMinutes < 1 || durationMinutes > 1440) {
-    return interaction.reply('Duration must be between 1 and 1440 minutes (1 day)');
-  }
-  
-  // Validate parameter for over/under
-  if (bettingType === 'overunder') {
-    if (!parameter) {
-      return interaction.reply('For over/under betting, you must provide a threshold number.');
-    }
-    const threshold = parseFloat(parameter);
-    if (isNaN(threshold)) {
-      return interaction.reply('Threshold must be a valid number.');
-    }
-  }
-  
-  // Create the event
-  const durationMs = durationMinutes * 60 * 1000;
-  const event = store.createEvent(userId, description, durationMs, bettingType, parameter);
-  
-  const endTime = Math.floor((Date.now() + durationMs) / 1000);
-  
-  let typeText = bettingType === 'yesno' 
-    ? 'Vote: Yes or No'
-    : `Vote: Over or Under ${parameter}`;
-  
-  const rows = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`eventbet_predict_${event.id}`).setLabel('Make Prediction').setStyle(ButtonStyle.Primary),
-  );
-  
-  return interaction.reply({
-    content: `📊 **EVENT BETTING OPENED**\n\n**${description}**\nType: ${typeText}\nCreator: <@${userId}>\nEnds: <t:${endTime}:R>\n\nClick to make your prediction!`,
-    components: [rows],
-  });
-}
-
-async function handleEventBetPredict(interaction, eventId) {
-  const userId = interaction.user.id;
-  const event = store.getEvent(eventId);
-  
-  if (!event) {
-    return interaction.reply({ content: '❌ Event not found or has ended.', ephemeral: true });
-  }
-  
-  if (Date.now() > event.expiresAt) {
-    return interaction.reply({ content: '❌ Event betting has ended.', ephemeral: true });
-  }
-  
-  // Create modal for prediction and amount
-  let predictionLabel = 'Your Prediction';
-  let predictionPlaceholder = 'Enter your prediction';
-  
-  if (event.bettingType === 'yesno') {
-    predictionLabel = 'Your Vote (Yes/No)';
-    predictionPlaceholder = 'Yes or No';
-  } else if (event.bettingType === 'overunder') {
-    predictionLabel = `Your Vote (Over ${event.parameter}/Under ${event.parameter})`;
-    predictionPlaceholder = 'Over or Under';
-  }
-  
-  const modal = new ModalBuilder()
-    .setCustomId(`eventbet_modal_${eventId}_${userId}`)
-    .setTitle('Make Prediction')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('prediction')
-          .setLabel(predictionLabel)
-          .setPlaceholder(predictionPlaceholder)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true),
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('amount')
-          .setLabel('Bet Amount (e.g., 1000, 1k, all)')
-          .setPlaceholder('5000')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true),
-      ),
-    );
-  
-  return interaction.showModal(modal);
-}
-
-async function handleEventBetModal(interaction, eventId, userId) {
-  const event = store.getEvent(eventId);
-  if (!event) {
-    return interaction.reply({ content: '❌ Event not found.', ephemeral: true });
-  }
-  
-  const prediction = interaction.fields.getTextInputValue('prediction').trim().toLowerCase();
-  const rawAmount = interaction.fields.getTextInputValue('amount').trim();
-  const bal = store.getBalance(userId);
-  
-  // Validate prediction based on betting type
-  if (event.bettingType === 'yesno') {
-    if (prediction !== 'yes' && prediction !== 'no') {
-      return interaction.reply({ content: 'Invalid prediction. Please enter "Yes" or "No".', ephemeral: true });
-    }
-  } else if (event.bettingType === 'overunder') {
-    if (prediction !== 'over' && prediction !== 'under') {
-      return interaction.reply({ content: 'Invalid prediction. Please enter "Over" or "Under".', ephemeral: true });
-    }
-  }
-  
-  const amount = store.parseAmount(rawAmount, bal);
-  if (!amount || amount <= 0) {
-    return interaction.reply({ content: 'Invalid amount.', ephemeral: true });
-  }
-  
-  if (amount > bal) {
-    return interaction.reply({ content: `You only have **${store.formatNumber(bal)}**`, ephemeral: true });
-  }
-  
-  // Capitalize prediction for storage
-  const normalizedPrediction = prediction.charAt(0).toUpperCase() + prediction.slice(1);
-  
-  // Deduct amount from user balance (they're betting)
-  store.setBalance(userId, bal - amount);
-  store.joinEvent(eventId, userId, normalizedPrediction, amount);
-  
-  return interaction.reply({
-    content: `✅ Placed **${store.formatNumber(amount)}** on: **${normalizedPrediction}**\n\nHope you're right about the outcome!`,
-    ephemeral: true,
-  });
-}
-
 module.exports = {
   activeTrades,
   handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
@@ -784,5 +649,4 @@ module.exports = {
   handleUpgradeButton, handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
   handleGiveawayStart, handleGiveawayJoin,
-  handleEventBetStart, handleEventBetPredict, handleEventBetModal,
 };
