@@ -138,6 +138,8 @@ In-progress interactions survive restarts via `runtime_state`, including:
 	- Cashback is currently `level * 0.1%` on losses
 - **Spin Mult Level** (0–10)
 	- Adds daily spin weight (`1 + level`)
+- **Hourly Universal Income Mult Level** (0–10)
+	- Gives `level%` chance to receive double hourly universal income payout
 
 ---
 

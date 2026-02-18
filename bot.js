@@ -79,8 +79,9 @@ const commands = [
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
     .addStringOption(o => o.setName('topic').setDescription('Help topic')
       .addChoices(
-        { name: 'Collectibles', value: 'collectibles' },
-        { name: 'Universal Income', value: 'universalincome' },
+        { name: 'General Economy', value: 'general' },
+        { name: 'Games and EV', value: 'games' },
+        { name: 'Command Reference', value: 'commands' },
       )),
   adminCmd.buildAdminCommand(),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
@@ -115,10 +116,17 @@ async function distributeUniversalPool() {
     share = Math.floor(poolData.universalPool / ids.length);
   }
 
+  const doubledPayouts = [];
   if (share > 0) {
     for (const id of ids) {
-      store.getWallet(id).bank += share;
-      store.trackUniversalIncome(id, share);
+      const doubleChance = store.getUniversalIncomeDoubleChance(id);
+      const gotDouble = Math.random() < doubleChance;
+      const payout = gotDouble ? share * 2 : share;
+      store.getWallet(id).bank += payout;
+      store.trackUniversalIncome(id, payout);
+      if (gotDouble) {
+        doubledPayouts.push({ id, payout });
+      }
     }
     poolData.universalPool -= share * ids.length;
   }
@@ -151,6 +159,12 @@ async function distributeUniversalPool() {
     ).catch((err) => {
       console.error(`Hourly universal message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
     });
+    if (doubledPayouts.length > 0) {
+      const lines = doubledPayouts.map(entry => `<@${entry.id}> earned **double universal income** from their perk (**${store.formatNumber(entry.payout)}** total).`);
+      await channel.send(`✨ **Hourly Universal Income Mult Procs**\n${lines.join('\n')}`).catch((err) => {
+        console.error(`Hourly perk message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
+      });
+    }
   } else {
     console.error(`Hourly payout skipped: channel ${HOURLY_PAYOUT_CHANNEL_ID} not accessible.`);
   }

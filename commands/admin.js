@@ -49,6 +49,7 @@ const ADMIN_ACTIONS = [
       wallet.interestLevel = 0;
       wallet.cashbackLevel = 0;
       wallet.spinMultLevel = 0;
+      wallet.universalIncomeMultLevel = 0;
       store.saveWallets();
       return interaction.reply(`[ADMIN] Upgrades reset for ${target.username}`);
     },

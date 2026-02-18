@@ -31,11 +31,12 @@ restoreTradeSessions();
 // Build the upgrades page text and buttons.
 function renderUpgradesPage(userId) {
   const w = store.getWallet(userId);
-  const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0;
-  const iRate = BASE_INVEST_RATE + (iLvl * 0.01), cRate = cLvl * 0.1, sW = 1 + sLvl;
+  const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
+  const iRate = BASE_INVEST_RATE + (iLvl * 0.01), cRate = cLvl * 0.1, sW = 1 + sLvl, uChance = uLvl;
   const iCost = iLvl < 10 ? UPGRADE_COSTS[iLvl] : null;
   const cCost = cLvl < 10 ? UPGRADE_COSTS[cLvl] : null;
   const sCost = sLvl < 10 ? SPIN_MULT_COSTS[sLvl] : null;
+  const uCost = uLvl < 10 ? UPGRADE_COSTS[uLvl] : null;
 
   let text = `**Upgrades**\n\nPurse: ${store.formatNumber(w.balance)} coins\n\n--------------------\n\n`;
   text += `**Bank Interest** Lv ${iLvl}/10 — ${(iRate * 100).toFixed(0)}% daily (hourly)\n`;
@@ -44,6 +45,8 @@ function renderUpgradesPage(userId) {
   text += cCost ? `Next: ${(cRate + 0.1).toFixed(1)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
   text += `**Daily Spin Mult** Lv ${sLvl}/10 — ${sW}x weight\n`;
   text += sCost ? `Next: ${sW + 1}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
+  text += `**Hourly Universal Income Mult** Lv ${uLvl}/10 — ${uChance}% chance to double income\n`;
+  text += uCost ? `Next: ${uChance + 1}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
   text += `Use **/mysterybox** to buy collectible boxes!\n`;
 
   const rows = [];
@@ -57,10 +60,11 @@ function renderUpgradesPage(userId) {
   ));
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
-      .setLabel(sCost ? `Spin Mult (${store.formatNumberShort(sCost)})` : 'Spin Mult MAXED')
+      .setLabel(sCost ? `Daily Spin Mult (${store.formatNumberShort(sCost)})` : 'Daily Spin Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
-    new ButtonBuilder().setCustomId(`upgrade_coming1_${userId}`)
-      .setLabel('Lucky Bonus - Soon').setStyle(ButtonStyle.Secondary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
+      .setLabel(uCost ? `Hourly Income Mult (${store.formatNumberShort(uCost)})` : 'Hourly Income Mult MAXED')
+      .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_refresh_${userId}`).setLabel('Refresh').setStyle(ButtonStyle.Primary),
@@ -464,7 +468,7 @@ async function handlePool(interaction) {
   const players = Object.keys(wallets).length;
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
   let text = `**Universal Pool**\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
-  text += `**Daily Spin Pool**\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, weighted by Spin Mult upgrade`;
+  text += `**Daily Spin Pool**\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, weighted by Daily Spin Mult upgrade`;
   return interaction.reply(text);
 }
 
@@ -505,7 +509,16 @@ async function handleUpgradeButton(interaction, parts) {
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Spin Mult → Lv ${w.spinMultLevel} (${1 + w.spinMultLevel}x)`, components: rows });
+    return interaction.update({ content: text + `\n✅ Daily Spin Mult → Lv ${w.spinMultLevel} (${1 + w.spinMultLevel}x)`, components: rows });
+  }
+  if (action === 'universalmult') {
+    const lvl = w.universalIncomeMultLevel || 0;
+    if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
+    const cost = UPGRADE_COSTS[lvl];
+    if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
+    w.balance -= cost; w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
+    const { text, rows } = renderUpgradesPage(uid);
+    return interaction.update({ content: text + `\n✅ Hourly Universal Income Mult → Lv ${w.universalIncomeMultLevel} (${w.universalIncomeMultLevel}% chance)`, components: rows });
   }
 }
 

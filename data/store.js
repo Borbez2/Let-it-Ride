@@ -22,6 +22,7 @@ db.exec(`
     interest_level INTEGER NOT NULL DEFAULT 0,
     cashback_level INTEGER NOT NULL DEFAULT 0,
     spin_mult_level INTEGER NOT NULL DEFAULT 0,
+    universal_income_mult_level INTEGER NOT NULL DEFAULT 0,
     inventory TEXT NOT NULL DEFAULT '[]',
     stats TEXT NOT NULL DEFAULT '{}'
   );
@@ -41,6 +42,11 @@ db.exec(`
 
   INSERT OR IGNORE INTO pool (id, last_hourly_payout) VALUES (1, ${Date.now()});
 `);
+
+const walletColumns = db.prepare('PRAGMA table_info(wallets)').all();
+if (!walletColumns.some(c => c.name === 'universal_income_mult_level')) {
+  db.exec('ALTER TABLE wallets ADD COLUMN universal_income_mult_level INTEGER NOT NULL DEFAULT 0');
+}
 
 // Default stats template for new wallets.
 const DEFAULT_STATS = () => ({
@@ -66,8 +72,8 @@ const stmts = {
   upsertWallet: db.prepare(`
     INSERT OR REPLACE INTO wallets
     (user_id, balance, last_daily, streak, bank, last_bank_payout,
-     interest_level, cashback_level, spin_mult_level, inventory, stats)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     interest_level, cashback_level, spin_mult_level, universal_income_mult_level, inventory, stats)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   deleteWallet: db.prepare('DELETE FROM wallets WHERE user_id = ?'),
   getPool: db.prepare('SELECT * FROM pool WHERE id = 1'),
@@ -95,6 +101,7 @@ function rowToWallet(row) {
     interestLevel: row.interest_level,
     cashbackLevel: row.cashback_level,
     spinMultLevel: row.spin_mult_level,
+    universalIncomeMultLevel: row.universal_income_mult_level || 0,
     inventory,
     stats,
   };
@@ -129,6 +136,7 @@ function migrateFromJson() {
             w.interestLevel || 0,
             w.cashbackLevel || 0,
             w.spinMultLevel || 0,
+            w.universalIncomeMultLevel || 0,
             JSON.stringify(w.inventory || []),
             JSON.stringify(stats)
           );
@@ -225,6 +233,7 @@ for (const id in wallets) {
   const w = wallets[id];
   if (!w.inventory) w.inventory = [];
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
+  if (w.universalIncomeMultLevel === undefined) w.universalIncomeMultLevel = 0;
   if (w.lastBankPayout === undefined) w.lastBankPayout = Date.now();
   if (!w.stats) w.stats = DEFAULT_STATS();
   for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
@@ -275,7 +284,7 @@ function saveWallets() {
         userId,
         w.balance, w.lastDaily || 0, w.streak || 0,
         w.bank || 0, w.lastBankPayout || 0,
-        w.interestLevel || 0, w.cashbackLevel || 0, w.spinMultLevel || 0,
+        w.interestLevel || 0, w.cashbackLevel || 0, w.spinMultLevel || 0, w.universalIncomeMultLevel || 0,
         JSON.stringify(w.inventory || []),
         JSON.stringify(w.stats || DEFAULT_STATS())
       );
@@ -291,7 +300,7 @@ function getWallet(userId) {
     wallets[userId] = {
       balance: STARTING_COINS, lastDaily: 0, streak: 0,
       bank: 0, lastBankPayout: Date.now(),
-      interestLevel: 0, cashbackLevel: 0, spinMultLevel: 0,
+      interestLevel: 0, cashbackLevel: 0, spinMultLevel: 0, universalIncomeMultLevel: 0,
       inventory: [],
       stats: DEFAULT_STATS(),
     };
@@ -306,6 +315,7 @@ function getWallet(userId) {
   if (w.interestLevel === undefined) w.interestLevel = 0;
   if (w.cashbackLevel === undefined) w.cashbackLevel = 0;
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
+  if (w.universalIncomeMultLevel === undefined) w.universalIncomeMultLevel = 0;
   if (!w.inventory) w.inventory = [];
   if (!w.stats) w.stats = DEFAULT_STATS();
   for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
@@ -355,6 +365,11 @@ function applyCashback(userId, lossAmount) {
 
 function getSpinWeight(userId) {
   return 1 + (getWallet(userId).spinMultLevel || 0);
+}
+
+function getUniversalIncomeDoubleChance(userId) {
+  const level = getWallet(userId).universalIncomeMultLevel || 0;
+  return Math.max(0, Math.min(10, level)) * 0.01;
 }
 
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
@@ -671,7 +686,7 @@ module.exports = {
   getAllWallets, getWallet, hasWallet, deleteWallet,
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback,
-  getSpinWeight, processBank,
+  getSpinWeight, getUniversalIncomeDoubleChance, processBank,
   checkDaily, claimDaily,
   rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
