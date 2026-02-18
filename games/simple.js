@@ -37,7 +37,7 @@ async function handleFlip(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const qty = interaction.options.getInteger('quantity') || 1;
@@ -83,7 +83,7 @@ async function handleDice(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const bal = store.getBalance(userId);
@@ -131,7 +131,7 @@ async function handleRoulette(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const bal = store.getBalance(userId);
@@ -205,7 +205,7 @@ async function handleLetItRide(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const bal = store.getBalance(userId);
@@ -273,7 +273,7 @@ async function handleDuel(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const bal = store.getBalance(userId);

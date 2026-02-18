@@ -16,7 +16,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
 const DAILY_EVENTS_CHANNEL_ID = '1467976012645269676';
-const HOURLY_PAYOUT_CHANNEL_ID = '1473346239146889391';
+const HOURLY_PAYOUT_CHANNEL_ID = '1473595731893027000';
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
 const STATS_RESET_ADMIN_IDS = (process.env.STATS_RESET_ADMIN_IDS || process.env.ADMIN_IDS || '')
   .split(',')
@@ -36,35 +36,35 @@ const commands = [
   new SlashCommandBuilder().setName('balance').setDescription('Check your coin balance'),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily coins'),
   new SlashCommandBuilder().setName('flip').setDescription('Flip coins, instant 50/50')
-    .addStringOption(o => o.setName('amount').setDescription('Bet per flip (e.g. 1000, 1k, all)').setRequired(true))
+    .addStringOption(o => o.setName('amount').setDescription('Bet per flip (e.g. 100, 4.7k, 1.2m, all)').setRequired(true))
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of flips (1-10)').setMinValue(1).setMaxValue(10)),
   new SlashCommandBuilder().setName('dice').setDescription('Roll dice, win on 4-6')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('blackjack').setDescription('Play blackjack')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('roulette').setDescription('Play roulette')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('allin17black').setDescription('Go ALL IN on 17 black in roulette'),
   new SlashCommandBuilder().setName('mines').setDescription('Navigate a minefield for multiplied rewards')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true))
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true))
     .addIntegerOption(o => o.setName('mines').setDescription('Number of mines (1-15)').setRequired(true).setMinValue(1).setMaxValue(15)),
   new SlashCommandBuilder().setName('leaderboard').setDescription('See the richest players'),
   new SlashCommandBuilder().setName('give').setDescription('Give coins to someone')
     .addUserOption(o => o.setName('user').setDescription('Who to give to').setRequired(true))
-    .addStringOption(o => o.setName('amount').setDescription('Amount (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('trade').setDescription('Start a trade with someone')
     .addUserOption(o => o.setName('user').setDescription('Who to trade with').setRequired(true)),
   new SlashCommandBuilder().setName('duel').setDescription('Challenge someone to a coin flip duel')
     .addUserOption(o => o.setName('opponent').setDescription('Who to challenge').setRequired(true))
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('letitride').setDescription('Win and keep doubling')
-    .addStringOption(o => o.setName('amount').setDescription('Starting bet (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Starting bet (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('deposit').setDescription('Deposit coins to your bank')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to deposit (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to deposit (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('invest').setDescription('Deposit coins to your bank (alias)')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to invest (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to invest (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to withdraw (e.g. 1000, 1k, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription('Amount to withdraw (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
   new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades'),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
@@ -95,11 +95,13 @@ const commands = [
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
     .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
     .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
+    .addSubcommand(s => s.setName('testannounce').setDescription('[ADMIN] Send a test announcement message'))
     .addSubcommand(s => s.setName('start').setDescription('[ADMIN] Start the bot for everyone'))
     .addSubcommand(s => s.setName('stop').setDescription('[ADMIN] Stop the bot'))
     .addSubcommand(s => s.setName('resetstats').setDescription('[ADMIN] Reset a user\'s stats')
       .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))),
-  new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form'),
+  new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
+    .addStringOption(o => o.setName('message').setDescription('Optional giveaway message').setRequired(false).setMaxLength(200)),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -142,7 +144,10 @@ async function distributeUniversalPool() {
   store.savePool();
   store.saveWallets();
 
-  const channel = await client.channels.fetch(HOURLY_PAYOUT_CHANNEL_ID).catch(() => null);
+  const channel = await client.channels.fetch(HOURLY_PAYOUT_CHANNEL_ID).catch((err) => {
+    console.error(`Hourly channel fetch failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
+    return null;
+  });
   if (channel) {
     const rows = [];
     for (const row of interestRows) {
@@ -155,13 +160,38 @@ async function distributeUniversalPool() {
     table += rows.join('\n');
     table += '\n```';
 
-    await channel.send(table).catch(() => {});
+    await channel.send(table).catch((err) => {
+      console.error(`Hourly interest message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
+    });
     await channel.send(
       `Universal income paid to bank: **${store.formatNumber(share)}** coins per player this hour (${ids.length} players).`
-    ).catch(() => {});
+    ).catch((err) => {
+      console.error(`Hourly universal message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
+    });
+  } else {
+    console.error(`Hourly payout skipped: channel ${HOURLY_PAYOUT_CHANNEL_ID} not accessible.`);
   }
 
   console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}`);
+}
+
+async function buildLeaderboardBoard(title = '**Leaderboard**') {
+  const wallets = store.getAllWallets();
+  const entries = Object.entries(wallets)
+    .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
+    .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
+  if (entries.length === 0) return null;
+
+  let board = `${title}\n\`\`\`\nRank Player          Purse       Bank        Total\n---- -------------- ----------- ----------- -----------\n`;
+  const medals = ['1st', '2nd', '3rd'];
+  for (let i = 0; i < entries.length; i++) {
+    const u = await client.users.fetch(entries[i].id).catch(() => null);
+    const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
+    const rank = (medals[i] || `${i + 1}th`).padEnd(4);
+    board += `${rank} ${name} ${store.formatNumber(entries[i].balance).padStart(11)} ${store.formatNumber(entries[i].bank).padStart(11)} ${store.formatNumber(entries[i].balance + entries[i].bank).padStart(11)}\n`;
+  }
+  board += '\`\`\`';
+  return board;
 }
 
 // Run the daily spin payout.
@@ -196,6 +226,7 @@ async function runDailySpin() {
     }
     const winnerUser = await client.users.fetch(winner.id).catch(() => null);
     const winnerName = winnerUser ? winnerUser.username : 'Unknown';
+    const winnerWeight = store.getSpinWeight(winner.id);
 
     const arrows = ['▶', '▷', '►', '▹'];
     let msg = await channel.send(`🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\nSpinning...`);
@@ -207,7 +238,7 @@ async function runDailySpin() {
     await new Promise(r => setTimeout(r, 1200));
     await msg.edit(
       `🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\n` +
-      `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\n🎉🎉🎉`
+      `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\nSpin Mult Applied: **x${winnerWeight}**\n🎉🎉🎉`
     );
     console.log(`Daily spin: ${winnerName} won ${prize}`);
   } catch (err) { console.error("Daily spin error:", err); }
@@ -243,13 +274,15 @@ async function checkExpiredGiveaways() {
           const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
           const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
 
+          const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
+
           if (channel && giveaway.messageId) {
             const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
             if (originalMessage) {
               await originalMessage.edit({
                 content:
                   `🎉 **GIVEAWAY ENDED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
-                  `Participants: ${giveaway.participants.length}\nEnds: **ENDED**\nWinner: <@${winner}>`,
+                  `Participants: ${giveaway.participants.length}${giveawayMessageLine}\nEnds: **ENDED**\nWinner: <@${winner}>`,
                 components: [disabledRow],
               }).catch(() => {});
             }
@@ -259,7 +292,7 @@ async function checkExpiredGiveaways() {
             await channel.send(
               `🎉 **GIVEAWAY ENDED!**\n\n` +
               `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
-              `Participants: ${giveaway.participants.length}`
+              `Participants: ${giveaway.participants.length}${giveawayMessageLine}`
             ).catch(() => {});
           }
         } else {
@@ -267,13 +300,15 @@ async function checkExpiredGiveaways() {
           store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
           store.saveWallets();
 
+          const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
+
           if (channel && giveaway.messageId) {
             const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
             if (originalMessage) {
               await originalMessage.edit({
                 content:
                   `🎉 **GIVEAWAY ENDED**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
-                  `Participants: 0\nEnds: **ENDED**\nNo participants joined. Host refunded.`,
+                  `Participants: 0${giveawayMessageLine}\nEnds: **ENDED**\nNo participants joined. Host refunded.`,
                 components: [disabledRow],
               }).catch(() => {});
             }
@@ -298,60 +333,71 @@ async function postDailyLeaderboard() {
   try {
     const channel = await client.channels.fetch(DAILY_EVENTS_CHANNEL_ID).catch(() => null);
     if (!channel) return;
-    const wallets = store.getAllWallets();
-    const entries = Object.entries(wallets)
-      .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
-      .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
-    if (entries.length === 0) return;
-
-    let board = "**Daily Leaderboard**\n```\nRank Player          Purse       Bank        Total\n---- -------------- ----------- ----------- -----------\n";
-    const medals = ['1st', '2nd', '3rd'];
-    for (let i = 0; i < entries.length; i++) {
-      const u = await client.users.fetch(entries[i].id).catch(() => null);
-      const name = (u ? u.username : "Unknown").substring(0, 14).padEnd(14);
-      const rank = (medals[i] || `${i + 1}th`).padEnd(4);
-      board += `${rank} ${name} ${store.formatNumber(entries[i].balance).padStart(11)} ${store.formatNumber(entries[i].bank).padStart(11)} ${store.formatNumber(entries[i].balance + entries[i].bank).padStart(11)}\n`;
-    }
-    board += "```";
+    const board = await buildLeaderboardBoard('**Daily Leaderboard**');
+    if (!board) return;
     await channel.send(board);
   } catch (err) { console.error("Leaderboard post error:", err); }
 }
 
 // Schedule recurring jobs and daily timers.
 function scheduleAll() {
-  const nowForHourly = new Date();
-  const nextUtcHour = new Date(nowForHourly);
-  nextUtcHour.setUTCMinutes(0, 0, 0);
-  nextUtcHour.setUTCHours(nextUtcHour.getUTCHours() + 1);
-  const hourlyMs = nextUtcHour - nowForHourly;
-  setTimeout(() => {
-    distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err));
-    setInterval(() => {
-      distributeUniversalPool().catch(err => console.error('Hourly distribution error:', err));
-    }, 3600000);
-  }, hourlyMs);
+  function msUntilNextUtcHour() {
+    const now = new Date();
+    const next = new Date(now);
+    next.setUTCMinutes(0, 0, 0);
+    next.setUTCHours(next.getUTCHours() + 1);
+    return next - now;
+  }
 
+  function msUntilNextDaily1115() {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(11, 15, 0, 0);
+    if (now >= next) next.setDate(next.getDate() + 1);
+    return next - now;
+  }
+
+  function scheduleNextHourly() {
+    const delay = msUntilNextUtcHour();
+    setTimeout(async () => {
+      try {
+        await distributeUniversalPool();
+      } catch (err) {
+        console.error('Hourly distribution error:', err);
+      } finally {
+        scheduleNextHourly();
+      }
+    }, delay);
+  }
+
+  function scheduleNextDaily1115() {
+    const delay = msUntilNextDaily1115();
+    setTimeout(async () => {
+      try {
+        await runDailySpin();
+      } catch (err) {
+        console.error('Daily 11:15 cycle error:', err);
+      } finally {
+        scheduleNextDaily1115();
+      }
+    }, delay);
+  }
+
+  const missedHourlyMs = Date.now() - (store.getPoolData().lastHourlyPayout || 0);
+  if (missedHourlyMs >= 3600000) {
+    distributeUniversalPool().catch((err) => console.error('Startup catch-up hourly error:', err));
+  }
+
+  scheduleNextHourly();
   setInterval(checkExpiredGiveaways, 30000);
+  scheduleNextDaily1115();
 
-  const now = new Date();
-  const nextSpin = new Date();
-  nextSpin.setHours(11, 15, 0, 0);
-  if (now >= nextSpin) nextSpin.setDate(nextSpin.getDate() + 1);
-  const spinMs = nextSpin - now;
-  setTimeout(() => {
-    runDailySpin();
-    setInterval(runDailySpin, 86400000);
-  }, spinMs);
-
-  const leaderboardNow = new Date();
-  const target = new Date(); target.setHours(11, 15, 0, 0);
-  if (leaderboardNow >= target) target.setDate(target.getDate() + 1);
-  const ms = target - leaderboardNow;
-  setTimeout(() => {
-    postDailyLeaderboard();
-    setInterval(postDailyLeaderboard, 86400000);
-  }, ms);
-  console.log(`Daily leaderboard in ${Math.round(ms / 60000)} min. Daily spin in ${Math.round(spinMs / 60000)} min. Hourly payout in ${Math.round(hourlyMs / 60000)} min (next UTC hour).`);
+  const hourlyMs = msUntilNextUtcHour();
+  const dailyMs = msUntilNextDaily1115();
+  console.log(
+    `Daily 11:15 cycle in ${Math.round(dailyMs / 60000)} min (spin only). ` +
+    `Hourly payout in ${Math.round(hourlyMs / 60000)} min (next UTC hour).`
+  );
 }
 
 // Run startup logic when the bot is ready.
@@ -455,6 +501,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         STATS_RESET_ADMIN_IDS,
         runDailySpin,
         distributeUniversalPool,
+        ANNOUNCE_CHANNEL_ID,
+        HOURLY_PAYOUT_CHANNEL_ID,
         () => isBotActive,
         (nextState) => { isBotActive = !!nextState; }
       );

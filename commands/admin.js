@@ -1,6 +1,6 @@
 const store = require('../data/store');
 
-async function handleAdmin(interaction, client, ADMIN_IDS, STATS_RESET_ADMIN_IDS, runDailySpin, distributeUniversalPool, getBotActive, setBotActive) {
+async function handleAdmin(interaction, client, ADMIN_IDS, STATS_RESET_ADMIN_IDS, runDailySpin, distributeUniversalPool, announceChannelId, hourlyChannelId, getBotActive, setBotActive) {
   const userId = interaction.user.id;
   if (!ADMIN_IDS.includes(userId)) return interaction.reply({ content: "Not authorized", ephemeral: true });
 
@@ -27,6 +27,34 @@ async function handleAdmin(interaction, client, ADMIN_IDS, STATS_RESET_ADMIN_IDS
     await interaction.deferReply({ ephemeral: true });
     await distributeUniversalPool();
     return interaction.editReply("[ADMIN] Pool distributed.");
+  }
+  if (sub === 'testannounce') {
+    const targets = [];
+    if (announceChannelId) targets.push(announceChannelId);
+    if (hourlyChannelId && hourlyChannelId !== announceChannelId) targets.push(hourlyChannelId);
+    if (!targets.length) {
+      return interaction.reply({ content: '[ADMIN] No test announce target channels configured.', ephemeral: true });
+    }
+
+    const now = new Date();
+    const sent = [];
+    const failed = [];
+    for (const channelId of targets) {
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel) {
+        failed.push(channelId);
+        continue;
+      }
+      const ok = await channel.send(
+        `📢 **Announcement Channel Test**\nTriggered by <@${interaction.user.id}> at **${now.toISOString()}**.`
+      ).then(() => true).catch(() => false);
+      if (ok) sent.push(channelId);
+      else failed.push(channelId);
+    }
+
+    const sentText = sent.length ? sent.map(id => `<#${id}>`).join(', ') : 'none';
+    const failedText = failed.length ? failed.map(id => `<#${id}>`).join(', ') : 'none';
+    return interaction.reply({ content: `[ADMIN] Test message sent: ${sentText}\nFailed: ${failedText}`, ephemeral: true });
   }
   
   const target = interaction.options.getUser('user');

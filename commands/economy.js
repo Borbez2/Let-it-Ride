@@ -7,6 +7,7 @@ const store = require('../data/store');
 const GIVEAWAY_CHANNEL_ID = '1467976012645269676';
 
 const activeTrades = new Map();
+const pendingGiveawayMessages = new Map();
 
 function persistTradeSessions() {
   store.setRuntimeState('session:trades', {
@@ -161,13 +162,13 @@ async function handleDeposit(interaction) {
   const rawAmount = interaction.options.getString('amount');
   const bal = store.getBalance(userId);
   
-  // Parse the amount (supports "all", "1k", "1m", etc.)
+  // Parse the amount (supports "all", "4.7k", "1.2m", etc.)
   const amount = rawAmount && typeof rawAmount === 'string' 
     ? store.parseAmount(rawAmount, bal)
     : interaction.options.getInteger('amount');
   
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
@@ -184,13 +185,13 @@ async function handleWithdraw(interaction) {
   const rawAmount = interaction.options.getString('amount');
   const w = store.getWallet(userId);
   
-  // Parse the amount (supports "all", "1k", "1m", etc.)
+  // Parse the amount (supports "all", "4.7k", "1.2m", etc.)
   const amount = rawAmount && typeof rawAmount === 'string'
     ? store.parseAmount(rawAmount, w.bank)
     : interaction.options.getInteger('amount');
   
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   if (amount > w.bank) return interaction.reply(`❌ Insufficient bank funds. You only have **${store.formatNumber(w.bank)}** in your bank (you tried to withdraw **${store.formatNumber(amount)}**).`);
@@ -220,7 +221,7 @@ async function handleGive(interaction) {
   
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   if (target.id === userId) return interaction.reply("Can't give to yourself");
@@ -608,52 +609,119 @@ async function handleTradeModal(interaction) {
 // Giveaway handlers.
 
 async function handleGiveawayStart(interaction) {
+  const rawMessage = interaction.options.getString('message');
+  const giveawayMessage = rawMessage && rawMessage.trim() ? rawMessage.trim().slice(0, 200) : null;
+  pendingGiveawayMessages.set(interaction.user.id, giveawayMessage);
+
   const modal = new ModalBuilder()
     .setCustomId('giveaway_create_modal')
     .setTitle('Start Giveaway');
 
   const amountInput = new TextInputBuilder()
     .setCustomId('giveaway_amount')
-    .setLabel('Prize amount (e.g. 1000, 1k, all)')
+    .setLabel('Prize amount (e.g. 100, 4.7k, 1.2m, all)')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
     .setMaxLength(20)
-    .setPlaceholder('e.g. 10000 or 10k or all');
+    .setPlaceholder('e.g. 100, 4.7k, 1.2m, all');
 
-  const durationInput = new TextInputBuilder()
-    .setCustomId('giveaway_duration')
-    .setLabel('Duration in minutes (1-1440)')
+  const secondsInput = new TextInputBuilder()
+    .setCustomId('giveaway_seconds')
+    .setLabel('Seconds (0-60, blank = 0)')
     .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setMaxLength(4)
-    .setPlaceholder('e.g. 60');
+    .setRequired(false)
+    .setMaxLength(2)
+    .setPlaceholder('e.g. 30');
+
+  const minutesInput = new TextInputBuilder()
+    .setCustomId('giveaway_minutes')
+    .setLabel('Minutes (0-60, blank = 0)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(2)
+    .setPlaceholder('e.g. 10');
+
+  const hoursInput = new TextInputBuilder()
+    .setCustomId('giveaway_hours')
+    .setLabel('Hours (0-24, blank = 0)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(2)
+    .setPlaceholder('e.g. 1');
+
+  const daysInput = new TextInputBuilder()
+    .setCustomId('giveaway_days')
+    .setLabel('Days (0-365, blank = 0)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(3)
+    .setPlaceholder('e.g. 2');
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(amountInput),
-    new ActionRowBuilder().addComponents(durationInput),
+    new ActionRowBuilder().addComponents(secondsInput),
+    new ActionRowBuilder().addComponents(minutesInput),
+    new ActionRowBuilder().addComponents(hoursInput),
+    new ActionRowBuilder().addComponents(daysInput),
   );
 
   return interaction.showModal(modal);
 }
 
+function parseDurationPart(rawValue, label, min, max) {
+  const raw = (rawValue || '').trim();
+  if (!raw) return { ok: true, value: 0 };
+  if (!/^\d+$/.test(raw)) {
+    return { ok: false, error: `${label} must be a whole number between ${min} and ${max}.` };
+  }
+  const value = parseInt(raw, 10);
+  if (value < min || value > max) {
+    return { ok: false, error: `${label} must be between ${min} and ${max}.` };
+  }
+  return { ok: true, value };
+}
+
 async function handleGiveawayModal(interaction) {
   const userId = interaction.user.id;
+  const giveawayNote = pendingGiveawayMessages.get(userId) || null;
+  pendingGiveawayMessages.delete(userId);
+
   const rawAmount = interaction.fields.getTextInputValue('giveaway_amount');
-  const rawDuration = interaction.fields.getTextInputValue('giveaway_duration');
+  const rawSeconds = interaction.fields.getTextInputValue('giveaway_seconds');
+  const rawMinutes = interaction.fields.getTextInputValue('giveaway_minutes');
+  const rawHours = interaction.fields.getTextInputValue('giveaway_hours');
+  const rawDays = interaction.fields.getTextInputValue('giveaway_days');
   const bal = store.getBalance(userId);
 
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
-    return interaction.reply({ content: 'Invalid amount. Use a number, "1k", "1m", or "all".', ephemeral: true });
+    return interaction.reply({ content: 'Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all".', ephemeral: true });
   }
 
   if (amount > bal) {
     return interaction.reply({ content: `You only have **${store.formatNumber(bal)}**`, ephemeral: true });
   }
 
-  const durationMinutes = parseInt((rawDuration || '').trim(), 10);
-  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
-    return interaction.reply({ content: 'Duration must be between 1 and 1440 minutes (1 day).', ephemeral: true });
+  const seconds = parseDurationPart(rawSeconds, 'Seconds', 0, 60);
+  if (!seconds.ok) return interaction.reply({ content: seconds.error, ephemeral: true });
+
+  const minutes = parseDurationPart(rawMinutes, 'Minutes', 0, 60);
+  if (!minutes.ok) return interaction.reply({ content: minutes.error, ephemeral: true });
+
+  const hours = parseDurationPart(rawHours, 'Hours', 0, 24);
+  if (!hours.ok) return interaction.reply({ content: hours.error, ephemeral: true });
+
+  const days = parseDurationPart(rawDays, 'Days', 0, 365);
+  if (!days.ok) return interaction.reply({ content: days.error, ephemeral: true });
+
+  const durationSeconds =
+    seconds.value +
+    (minutes.value * 60) +
+    (hours.value * 3600) +
+    (days.value * 86400);
+
+  if (durationSeconds <= 0) {
+    return interaction.reply({ content: 'Duration must be greater than 0 seconds.', ephemeral: true });
   }
 
   const giveawayChannel = await interaction.client.channels.fetch(GIVEAWAY_CHANNEL_ID).catch(() => null);
@@ -663,20 +731,23 @@ async function handleGiveawayModal(interaction) {
 
   store.setBalance(userId, bal - amount);
 
-  const durationMs = durationMinutes * 60 * 1000;
-  const giveaway = store.createGiveaway(userId, amount, durationMs, GIVEAWAY_CHANNEL_ID);
+  const durationMs = durationSeconds * 1000;
+  const giveaway = store.createGiveaway(userId, amount, durationMs, GIVEAWAY_CHANNEL_ID, giveawayNote);
 
   const endTime = Math.floor((Date.now() + durationMs) / 1000);
   const rows = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`giveaway_join_${giveaway.id}`).setLabel('Join Giveaway').setStyle(ButtonStyle.Success),
   );
 
-  const giveawayMessage = await giveawayChannel.send({
-    content: `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${userId}>\nPrize Pool: **${store.formatNumber(amount)}** coins\nParticipants: 0\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
+  const giveawayPostMessage = await giveawayChannel.send({
+    content:
+      `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${userId}>\nPrize Pool: **${store.formatNumber(amount)}** coins\n` +
+      `${giveaway.message ? `Message: ${giveaway.message}\n` : ''}` +
+      `Participants: 0\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
     components: [rows],
   });
 
-  store.setGiveawayMessageRef(giveaway.id, giveawayMessage.id, GIVEAWAY_CHANNEL_ID);
+  store.setGiveawayMessageRef(giveaway.id, giveawayPostMessage.id, GIVEAWAY_CHANNEL_ID);
 
   return interaction.reply({ content: `Giveaway posted in <#${GIVEAWAY_CHANNEL_ID}>.`, ephemeral: true });
 }
@@ -705,7 +776,10 @@ async function handleGiveawayJoin(interaction, giveawayId) {
   await interaction.deferUpdate();
   const endTime = Math.floor(giveaway.expiresAt / 1000);
   await interaction.editReply({
-    content: `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\nParticipants: ${giveaway.participants.length}\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
+    content:
+      `🎉 **GIVEAWAY STARTED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
+      `${giveaway.message ? `Message: ${giveaway.message}\n` : ''}` +
+      `Participants: ${giveaway.participants.length}\nEnds: <t:${endTime}:R>\n\nUse the button below to join!`,
     components: interaction.message.components,
   });
   return interaction.followUp({

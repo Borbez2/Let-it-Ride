@@ -87,7 +87,7 @@ async function handleCommand(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use a number, "1k", "1m", or "all"');
+    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
   const mc = interaction.options.getInteger('mines');

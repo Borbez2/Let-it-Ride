@@ -54,7 +54,7 @@ const DEFAULT_STATS = () => ({
   giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
   mysteryBox: { duplicateCompEarned: 0 },
   dailySpin: { won: 0, amountWon: 0 },
-  interest: { totalEarned: 0 },
+  interest: { totalEarned: 0, pendingFraction: 0 },
   universalIncome: { totalEarned: 0 },
   lifetimeEarnings: 0,
   lifetimeLosses: 0,
@@ -206,7 +206,8 @@ for (const id in wallets) {
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
   if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
+  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
@@ -280,7 +281,8 @@ function getWallet(userId) {
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
   if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
+  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
@@ -331,15 +333,21 @@ function processBank(userId) {
 
   if (hoursPassed >= 1) {
     const hourlyRate = getInterestRate(userId) / 24;
+    if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
+    if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
+    let pendingFraction = w.stats.interest.pendingFraction;
     let current = w.bank;
     for (let i = 0; i < hoursPassed; i++) {
-      current += Math.floor(current * hourlyRate);
+      const rawInterest = (current * hourlyRate) + pendingFraction;
+      const hourlyPayout = Math.floor(rawInterest);
+      pendingFraction = rawInterest - hourlyPayout;
+      current += hourlyPayout;
     }
     const totalPayout = current - w.bank;
     w.bank = current;
     w.lastBankPayout = last + (hoursPassed * hourMs);
+    w.stats.interest.pendingFraction = pendingFraction;
     if (totalPayout > 0) {
-      if (!w.stats.interest) w.stats.interest = { totalEarned: 0 };
       w.stats.interest.totalEarned += totalPayout;
       w.stats.lifetimeEarnings += totalPayout;
     }
@@ -481,11 +489,12 @@ function loadGiveawayState() {
 
 loadGiveawayState();
 
-function createGiveaway(initiatorId, amount, durationMs, channelId = null) {
+function createGiveaway(initiatorId, amount, durationMs, channelId = null, message = null) {
   const id = `giveaway_${++giveawayCounter}`;
   const giveaway = {
     id, initiatorId, amount,
     channelId,
+    message,
     messageId: null,
     participants: [],
     expiresAt: Date.now() + durationMs,

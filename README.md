@@ -144,8 +144,8 @@ In-progress interactions survive restarts via `runtime_state`, including:
 ## Games
 
 All bet amount inputs support abbreviated formats like:
-- `1000`
-- `1k`, `1m`, `1b`
+- `100`
+- `4.7k`, `1.2m`, `1b`
 - `all`
 
 ### `/flip`
