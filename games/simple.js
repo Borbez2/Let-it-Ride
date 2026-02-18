@@ -455,7 +455,7 @@ async function handleDuelButton(interaction, parts) {
     persistSimpleSessions();
     
     const emoji = w === cid ? '✅' : '❌';
-    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** wins **${store.formatNumber(duel.bet + boostedProfit)}** from **${ln}**!`, components: [] });
+    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** beats **${ln}** and wins **${store.formatNumber(boostedProfit)}**!`, components: [] });
   }
 }
 
