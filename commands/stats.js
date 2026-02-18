@@ -1,4 +1,5 @@
 const store = require('../data/store');
+const binomial = require('../utils/binomial');
 
 async function handleStats(interaction) {
   const targetUser = interaction.options.getUser('user');
@@ -90,6 +91,19 @@ async function handleStats(interaction) {
     const totalWins = games.reduce((sum, g) => sum + ((stats[g] || {}).wins || 0), 0);
     const overallWinRate = (totalWins / totalGames) * 100;
     text += `• Overall Win Rate: **${overallWinRate.toFixed(1)}%** (${totalWins} total wins)\n`;
+
+    const luck = binomial.getLuckAssessment(totalWins, totalGames, 0.5);
+    if (luck) {
+      text += `\n**🎯 Binomial Luck (50/50 baseline)**\n`;
+      text += `• Expected Wins: ${luck.expectedWins.toFixed(1)} / ${totalGames}\n`;
+      text += `• Win Rate Delta: ${luck.winRateDelta >= 0 ? '+' : ''}${luck.winRateDelta.toFixed(1)}%\n`;
+
+      if (luck.direction === 'neutral') {
+        text += `• Luck: **Neutral**\n`;
+      } else {
+        text += `• Luck: **${capitalize(luck.direction)} ${luck.confidence.toFixed(1)}%**\n`;
+      }
+    }
   }
 
   return interaction.reply(text);
