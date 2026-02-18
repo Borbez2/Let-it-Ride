@@ -82,24 +82,7 @@ const commands = [
         { name: 'Collectibles', value: 'collectibles' },
         { name: 'Universal Income', value: 'universalincome' },
       )),
-  new SlashCommandBuilder().setName('admin').setDescription('[ADMIN] Admin commands')
-    .addSubcommand(s => s.setName('give').setDescription('[ADMIN] Give coins')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true)))
-    .addSubcommand(s => s.setName('set').setDescription('[ADMIN] Set balance')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true)))
-    .addSubcommand(s => s.setName('reset').setDescription('[ADMIN] Reset a user')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
-    .addSubcommand(s => s.setName('resetupgrades').setDescription('[ADMIN] Reset upgrades')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)))
-    .addSubcommand(s => s.setName('forcespin').setDescription('[ADMIN] Force the daily spin now'))
-    .addSubcommand(s => s.setName('forcepoolpayout').setDescription('[ADMIN] Force hourly pool payout'))
-    .addSubcommand(s => s.setName('testannounce').setDescription('[ADMIN] Send a test announcement message'))
-    .addSubcommand(s => s.setName('start').setDescription('[ADMIN] Start the bot for everyone'))
-    .addSubcommand(s => s.setName('stop').setDescription('[ADMIN] Stop the bot'))
-    .addSubcommand(s => s.setName('resetstats').setDescription('[ADMIN] Reset a user\'s stats')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))),
+  adminCmd.buildAdminCommand(),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
     .addStringOption(o => o.setName('message').setDescription('Optional giveaway message').setRequired(false).setMaxLength(200)),
 ].map(c => c.toJSON());

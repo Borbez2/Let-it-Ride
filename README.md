@@ -263,12 +263,14 @@ Rarities used:
 - `/giveaway`
 
 ### Admin
+- Single entrypoint: `/admin <subcommand>`
 - `/admin give user amount`
 - `/admin set user amount`
 - `/admin reset user`
 - `/admin resetupgrades user`
 - `/admin forcespin`
 - `/admin forcepoolpayout`
+- `/admin testannounce`
 - `/admin start`
 - `/admin stop`
 - `/admin resetstats user` (restricted to `STATS_RESET_ADMIN_IDS`)
