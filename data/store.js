@@ -54,7 +54,7 @@ const DEFAULT_STATS = () => ({
   giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
   mysteryBox: { duplicateCompEarned: 0 },
   dailySpin: { won: 0, amountWon: 0 },
-  interest: { totalEarned: 0, pendingFraction: 0 },
+  interest: { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 },
   universalIncome: { totalEarned: 0 },
   lifetimeEarnings: 0,
   lifetimeLosses: 0,
@@ -175,6 +175,33 @@ function loadPoolFromDb() {
 let wallets = loadWalletsFromDb();
 let poolData = loadPoolFromDb();
 
+function normalizeNumeric(value, fallback = 0) {
+  if (typeof value === 'bigint') {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) return Number.MAX_SAFE_INTEGER;
+    if (value < BigInt(Number.MIN_SAFE_INTEGER)) return Number.MIN_SAFE_INTEGER;
+    return Number(value);
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function normalizeCoins(value, fallback = 0) {
+  return Math.trunc(normalizeNumeric(value, fallback));
+}
+
+for (const wallet of Object.values(wallets)) {
+  wallet.balance = normalizeCoins(wallet.balance, STARTING_COINS);
+  wallet.bank = normalizeCoins(wallet.bank, 0);
+}
+poolData.universalPool = normalizeCoins(poolData.universalPool, 0);
+poolData.lossPool = normalizeCoins(poolData.lossPool, 0);
+
 function setRuntimeState(key, value) {
   stmts.upsertRuntimeState.run(key, JSON.stringify(value));
 }
@@ -206,8 +233,11 @@ for (const id in wallets) {
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
   if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
   if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
+  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
+  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
+  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
@@ -268,7 +298,10 @@ function getWallet(userId) {
     saveWallets();
   }
   const w = wallets[userId];
+  if (w.balance === undefined) w.balance = STARTING_COINS;
+  w.balance = normalizeCoins(w.balance, STARTING_COINS);
   if (w.bank === undefined) w.bank = 0;
+  w.bank = normalizeCoins(w.bank, 0);
   if (w.lastBankPayout === undefined) w.lastBankPayout = Date.now();
   if (w.interestLevel === undefined) w.interestLevel = 0;
   if (w.cashbackLevel === undefined) w.cashbackLevel = 0;
@@ -281,8 +314,11 @@ function getWallet(userId) {
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
   if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
   if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
+  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
+  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
+  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
@@ -294,10 +330,10 @@ function deleteWallet(userId) {
   stmts.deleteWallet.run(userId);
 }
 
-function getBalance(userId) { return getWallet(userId).balance; }
+function getBalance(userId) { return normalizeCoins(getWallet(userId).balance, 0); }
 
 function setBalance(userId, amount) {
-  getWallet(userId).balance = Math.floor(amount);
+  getWallet(userId).balance = normalizeCoins(amount, 0);
   saveWallets();
 }
 
@@ -321,40 +357,63 @@ function getSpinWeight(userId) {
   return 1 + (getWallet(userId).spinMultLevel || 0);
 }
 
-// Process hourly-compounded bank interest.
+// Process minute-accrued bank interest, paid to bank on hourly boundaries.
 function processBank(userId) {
   const w = getWallet(userId);
-  if (!w.bank || w.bank <= 0) return 0;
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
+  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
+  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
+  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
+  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
+
+  const hasPrincipal = !!w.bank && w.bank > 0;
+  const hasPending = (w.stats.interest.pendingCoins || 0) > 0 || (w.stats.interest.pendingMinutes || 0) > 0 || (w.stats.interest.pendingFraction || 0) > 0;
+  if (!hasPrincipal && !hasPending) return 0;
 
   const now = Date.now();
-  const last = w.lastBankPayout || now;
-  const hourMs = 60 * 60 * 1000;
-  const hoursPassed = Math.floor((now - last) / hourMs);
+  const minuteMs = 60 * 1000;
+  const baseLast = w.stats.interest.lastAccrualAt || w.lastBankPayout || now;
+  const elapsedMinutes = Math.floor((now - baseLast) / minuteMs);
+  if (elapsedMinutes < 1) return 0;
 
-  if (hoursPassed >= 1) {
-    const hourlyRate = getInterestRate(userId) / 24;
-    if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0 };
-    if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
-    let pendingFraction = w.stats.interest.pendingFraction;
-    let current = w.bank;
-    for (let i = 0; i < hoursPassed; i++) {
-      const rawInterest = (current * hourlyRate) + pendingFraction;
-      const hourlyPayout = Math.floor(rawInterest);
-      pendingFraction = rawInterest - hourlyPayout;
-      current += hourlyPayout;
+  const perMinuteRate = getInterestRate(userId) / 24 / 60;
+  let pendingFraction = w.stats.interest.pendingFraction || 0;
+  let pendingCoins = w.stats.interest.pendingCoins || 0;
+  let pendingMinutes = w.stats.interest.pendingMinutes || 0;
+  let processedAt = baseLast;
+  let totalPayout = 0;
+
+  for (let i = 0; i < elapsedMinutes; i++) {
+    const rawInterest = ((w.bank || 0) * perMinuteRate) + pendingFraction;
+    const minuteInterest = Math.floor(rawInterest);
+    pendingFraction = rawInterest - minuteInterest;
+    pendingCoins += minuteInterest;
+    pendingMinutes += 1;
+    processedAt += minuteMs;
+
+    if (pendingMinutes >= 60) {
+      if (pendingCoins > 0) {
+        w.bank += pendingCoins;
+        totalPayout += pendingCoins;
+      }
+      pendingCoins = 0;
+      pendingMinutes = 0;
+      w.lastBankPayout = processedAt;
     }
-    const totalPayout = current - w.bank;
-    w.bank = current;
-    w.lastBankPayout = last + (hoursPassed * hourMs);
-    w.stats.interest.pendingFraction = pendingFraction;
-    if (totalPayout > 0) {
-      w.stats.interest.totalEarned += totalPayout;
-      w.stats.lifetimeEarnings += totalPayout;
-    }
-    saveWallets();
-    return totalPayout;
   }
-  return 0;
+
+  w.stats.interest.pendingFraction = pendingFraction;
+  w.stats.interest.pendingCoins = pendingCoins;
+  w.stats.interest.pendingMinutes = pendingMinutes;
+  w.stats.interest.lastAccrualAt = processedAt;
+
+  if (totalPayout > 0) {
+    w.stats.interest.totalEarned += totalPayout;
+    w.stats.lifetimeEarnings += totalPayout;
+  }
+
+  saveWallets();
+  return totalPayout;
 }
 
 // Daily reward helpers.
@@ -432,10 +491,11 @@ function getDuplicateCompensationTable() {
 
 // Number formatting helpers.
 function formatNumber(num) {
-  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return normalizeCoins(num, 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 function formatNumberShort(num) {
+  num = normalizeCoins(num, 0);
   if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B';
   if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
   if (num >= 1e4) return (num / 1e3).toFixed(1) + 'K';
@@ -446,10 +506,13 @@ function formatNumberShort(num) {
 function parseAmount(str, maxValue = null) {
   if (!str) return null;
   const trimmed = str.toLowerCase().trim();
+  const cap = (maxValue !== null && maxValue !== undefined)
+    ? normalizeCoins(maxValue, 0)
+    : null;
   
   // Support the special "all" keyword.
   if (trimmed === 'all') {
-    return maxValue !== null ? maxValue : null;
+    return cap !== null ? cap : null;
   }
   
   // Parse numeric values with optional k/m/b suffixes.
@@ -464,7 +527,7 @@ function parseAmount(str, maxValue = null) {
   else if (suffix === 'b') num *= 1000000000;
   
   num = Math.floor(num);
-  if (maxValue !== null && num > maxValue) num = maxValue;
+  if (cap !== null && num > cap) num = cap;
   
   return num > 0 ? num : null;
 }

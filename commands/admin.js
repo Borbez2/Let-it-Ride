@@ -73,6 +73,7 @@ async function handleAdmin(interaction, client, ADMIN_IDS, STATS_RESET_ADMIN_IDS
     return interaction.reply(`[ADMIN] Reset ${target.username}`);
   }
   if (sub === 'resetupgrades') {
+    store.processBank(target.id);
     const w = store.getWallet(target.id);
     w.interestLevel = 0; w.cashbackLevel = 0; w.spinMultLevel = 0;
     store.saveWallets();

@@ -172,6 +172,7 @@ async function handleDeposit(interaction) {
   }
   
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
+  store.processBank(userId);
   const w = store.getWallet(userId);
   w.balance -= amount; w.bank += amount;
   if (!w.lastBankPayout) w.lastBankPayout = Date.now();
@@ -183,7 +184,7 @@ async function handleDeposit(interaction) {
 async function handleWithdraw(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
-  const w = store.getWallet(userId);
+  let w = store.getWallet(userId);
   
   // Parse the amount (supports "all", "4.7k", "1.2m", etc.)
   const amount = rawAmount && typeof rawAmount === 'string'
@@ -194,6 +195,9 @@ async function handleWithdraw(interaction) {
     return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
   }
   
+  if (amount > w.bank) return interaction.reply(`❌ Insufficient bank funds. You only have **${store.formatNumber(w.bank)}** in your bank (you tried to withdraw **${store.formatNumber(amount)}**).`);
+  store.processBank(userId);
+  w = store.getWallet(userId);
   if (amount > w.bank) return interaction.reply(`❌ Insufficient bank funds. You only have **${store.formatNumber(w.bank)}** in your bank (you tried to withdraw **${store.formatNumber(amount)}**).`);
   w.bank -= amount; w.balance += amount; store.saveWallets();
   return interaction.reply(`Withdrew **${store.formatNumber(amount)}**\nBank: **${store.formatNumber(w.bank)}** | Purse: **${store.formatNumber(w.balance)}**`);
@@ -402,6 +406,7 @@ async function handleUpgradeButton(interaction, parts) {
     return interaction.update({ content: text, components: rows });
   }
   if (action === 'interest') {
+    store.processBank(uid);
     const lvl = w.interestLevel || 0;
     if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = UPGRADE_COSTS[lvl];
