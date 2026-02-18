@@ -466,26 +466,26 @@ function rollMysteryBox() {
 // Calculate duplicate compensation by rarity.
 function getDuplicateCompensation(itemId, rarity) {
   const COMP_BY_RARITY = {
-    common: 2500,
-    uncommon: 5000,
-    rare: 12500,
-    legendary: 35000,
-    epic: 75000,
-    mythic: 150000,
-    divine: 500000,
+    common: 2000,
+    uncommon: 3500,
+    rare: 6000,
+    epic: 12000,
+    legendary: 20000,
+    mythic: 60000,
+    divine: 150000,
   };
   return COMP_BY_RARITY[rarity] || 0;
 }
 
 function getDuplicateCompensationTable() {
   return {
-    common: 2500,
-    uncommon: 5000,
-    rare: 12500,
-    legendary: 35000,
-    epic: 75000,
-    mythic: 150000,
-    divine: 500000,
+    common: 2000,
+    uncommon: 3500,
+    rare: 6000,
+    epic: 12000,
+    legendary: 20000,
+    mythic: 60000,
+    divine: 150000,
   };
 }
 

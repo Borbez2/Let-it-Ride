@@ -439,6 +439,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.customId.startsWith('upgrade_'))  return await economy.handleUpgradeButton(interaction, parts);
       if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);
+      if (interaction.customId.startsWith('invpage_'))  return await economy.handleInventoryButton(interaction, parts);
       if (interaction.customId.startsWith('mines_'))    return await mines.handleButton(interaction, parts);
       if (interaction.customId.startsWith('duel_'))     return await simple.handleDuelButton(interaction, parts);
       if (interaction.customId.startsWith('ride_'))     return await simple.handleRideButton(interaction, parts);

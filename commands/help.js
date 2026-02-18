@@ -5,7 +5,7 @@ async function handleHelp(interaction) {
   const topic = interaction.options.getString('topic');
 
   if (topic === 'collectibles') {
-    const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine'];
+    const rarityOrder = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
     const poolEntries = rarityOrder
       .map((rarity) => [rarity, MYSTERY_BOX_POOLS[rarity]])
       .filter(([, pool]) => !!pool);
@@ -13,7 +13,8 @@ async function handleHelp(interaction) {
 
     let text = `**Collectibles Guide**\n\n`;
     text += `There are **120 collectibles** to collect, split across 7 rarities. `;
-    text += `You get them from mystery boxes which cost **${store.formatNumber(MYSTERY_BOX_COST)}** coins each.\n\n`;
+    text += `You get them from mystery boxes.\n`;
+    text += `Box price: **${store.formatNumber(MYSTERY_BOX_COST)}** coins\n\n`;
 
     text += `**Rarities and Drop Rates**\n\n`;
     for (const [rarity, pool] of poolEntries) {
@@ -24,11 +25,13 @@ async function handleHelp(interaction) {
 
     text += `\n**Duplicate Compensation**\n`;
     text += `If you roll a duplicate, refund is based on item rarity:\n`;
-    const compTable = store.getDuplicateCompensationTable();
-    for (const [rarity] of poolEntries) {
-      const r = RARITIES[rarity];
-      const compensation = compTable[rarity] || 0;
-      text += `${r.emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${store.formatNumber(compensation)} coins\n`;
+    const compensationTable = store.getDuplicateCompensationTable();
+    for (const rarity of rarityOrder) {
+      const amount = compensationTable[rarity];
+      if (!amount) continue;
+      const icon = RARITIES[rarity]?.emoji || '•';
+      const label = rarity.charAt(0).toUpperCase() + rarity.slice(1);
+      text += `${icon} **${label}**: ${store.formatNumber(amount)} coins\n`;
     }
 
     text += `\nWhen you open a mystery box, it first rolls which rarity tier you land on using the percentages above. `;

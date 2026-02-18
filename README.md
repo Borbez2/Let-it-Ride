@@ -190,12 +190,21 @@ All bet amount inputs support abbreviated formats like:
 
 ## Collectibles & Mystery Boxes
 
-- `/mysterybox [quantity]` buys boxes (cost: `5000` each)
+- `/mysterybox [quantity]` buys boxes (cost: `5,000` each)
 - 120 placeholder collectibles across 7 rarities
 - Duplicate placeholder drops pay rarity-based compensation instead
 - `/inventory` shows owned collectibles
 - `/collection` shows top collectors by unique count
 - `/trade` allows user-to-user coin + item trades
+
+Duplicate compensation values:
+- ⬜ Common: `2,000`
+- 🟩 Uncommon: `3,500`
+- 🟦 Rare: `6,000`
+- 🟪 Epic: `12,000`
+- 🟨 Legendary: `20,000`
+- 🩷 Mythic: `60,000`
+- 🩵 Divine: `150,000`
 
 Rarities used:
 - common

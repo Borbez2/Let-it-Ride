@@ -8,6 +8,7 @@ const GIVEAWAY_CHANNEL_ID = '1467976012645269676';
 
 const activeTrades = new Map();
 const pendingGiveawayMessages = new Map();
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
 
 function persistTradeSessions() {
   store.setRuntimeState('session:trades', {
@@ -91,15 +92,69 @@ function renderTradeView(trade) {
   return t;
 }
 
+async function updateTradeMessage(interaction, trade) {
+  const channelId = trade.channelId || interaction.channelId;
+  if (!channelId || !trade.messageId) return false;
+  const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
+  if (!channel) return false;
+  const message = await channel.messages.fetch(trade.messageId).catch(() => null);
+  if (!message) return false;
+  await message.edit({ content: renderTradeView(trade), components: renderTradeButtons(trade) }).catch(() => null);
+  return true;
+}
+
+function buildInventoryText(username, inventory, safePage, total, perPage) {
+  const items = inventory.slice(safePage * perPage, (safePage + 1) * perPage);
+  const counts = Object.fromEntries(RARITY_ORDER.map(r => [r, 0]));
+  inventory.forEach(i => { if (counts[i.rarity] !== undefined) counts[i.rarity]++; });
+
+  let text = `**${username}'s Inventory** (${inventory.length} items) - Page ${safePage + 1}/${total}\n\n`;
+  text += `${RARITIES.common.emoji} ${counts.common} common | ${RARITIES.uncommon.emoji} ${counts.uncommon} uncommon | ${RARITIES.rare.emoji} ${counts.rare} rare | ${RARITIES.legendary.emoji} ${counts.legendary} legendary | ${RARITIES.epic.emoji} ${counts.epic} epic | ${RARITIES.mythic.emoji} ${counts.mythic} mythic | ${RARITIES.divine.emoji} ${counts.divine} divine\n\n`;
+  items.forEach(it => { text += `${it.emoji} ${it.name}\n`; });
+  return text;
+}
+
+function buildInventoryButtons(userId, safePage, total) {
+  if (total <= 1) return [];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`invpage_${userId}_${safePage - 1}`)
+        .setLabel('Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage <= 0),
+      new ButtonBuilder()
+        .setCustomId(`invpage_${userId}_${safePage + 1}`)
+        .setLabel('Next')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(safePage >= total - 1),
+    ),
+  ];
+}
+
 // Build a select menu from a player's inventory for adding items
 function buildItemSelectMenu(userId, trade, isInit) {
   const inv = store.getWallet(userId).inventory;
   const offer = isInit ? trade.initiatorOffer : trade.targetOffer;
   const usedIndices = new Set(offer.items.map(i => i._idx));
 
+  const getItemNumber = (entry) => {
+    const idMatch = typeof entry.item.id === 'string' ? entry.item.id.match(/_(\d+)$/) : null;
+    if (idMatch) return parseInt(idMatch[1], 10);
+    const nameMatch = typeof entry.item.name === 'string' ? entry.item.name.match(/(\d+)/) : null;
+    if (nameMatch) return parseInt(nameMatch[1], 10);
+    return Number.MAX_SAFE_INTEGER;
+  };
+
   const available = inv
     .map((item, idx) => ({ item, idx }))
     .filter(e => !usedIndices.has(e.idx))
+    .sort((a, b) => {
+      const an = getItemNumber(a);
+      const bn = getItemNumber(b);
+      if (an !== bn) return an - bn;
+      return (a.item.name || '').localeCompare(b.item.name || '');
+    })
     .slice(0, 25); // Discord max 25 options
 
   if (available.length === 0) return null;
@@ -247,11 +302,15 @@ async function handleTrade(interaction) {
     initiatorConfirmed: false, targetConfirmed: false,
   };
   activeTrades.set(userId, trade);
-  persistTradeSessions();
-  return interaction.reply({
+  const msg = await interaction.reply({
     content: renderTradeView(trade) + `\n\nBoth players can set coins, add/remove items, then both confirm.`,
     components: renderTradeButtons(trade),
+    fetchReply: true,
   });
+  trade.channelId = interaction.channelId;
+  trade.messageId = msg.id;
+  persistTradeSessions();
+  return;
 }
 
 async function handleLeaderboard(interaction, client) {
@@ -336,7 +395,9 @@ async function handleMysteryBox(interaction) {
   }
   
   let summary = `**Mystery Boxes x${quantity}**\n\n`;
-  for (const [rarity, rarityItems] of Object.entries(byRarity)) {
+  for (const rarity of RARITY_ORDER) {
+    const rarityItems = byRarity[rarity];
+    if (!rarityItems || rarityItems.length === 0) continue;
     summary += `${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}\n`;
   }
   if (duplicateCount > 0) {
@@ -354,13 +415,26 @@ async function handleInventory(interaction) {
   if (!w.inventory.length) return interaction.reply("Your inventory is empty. Buy a /mysterybox!");
   const total = Math.ceil(w.inventory.length / perPage);
   const safePage = Math.max(0, Math.min(page, total - 1));
-  const items = w.inventory.slice(safePage * perPage, (safePage + 1) * perPage);
-  let text = `**${username}'s Inventory** (${w.inventory.length} items) - Page ${safePage + 1}/${total}\n\n`;
-  const counts = { common: 0, uncommon: 0, rare: 0, legendary: 0, epic: 0, mythic: 0, divine: 0 };
-  w.inventory.forEach(i => { if (counts[i.rarity] !== undefined) counts[i.rarity]++; });
-  text += `⬜ ${counts.common} common | 🟩 ${counts.uncommon} uncommon | 🟦 ${counts.rare} rare | 🟨 ${counts.legendary} legendary | 🟪 ${counts.epic} epic | 🩷 ${counts.mythic} mythic | 🩵 ${counts.divine} divine\n\n`;
-  items.forEach(it => { text += `${it.emoji} ${it.name}\n`; });
-  return interaction.reply(text);
+  const text = buildInventoryText(username, w.inventory, safePage, total, perPage);
+  const components = buildInventoryButtons(userId, safePage, total);
+  return interaction.reply({ content: text, components });
+}
+
+async function handleInventoryButton(interaction, parts) {
+  const userId = parts[1];
+  if (interaction.user.id !== userId) return interaction.reply({ content: "Not your inventory!", ephemeral: true });
+
+  const requestedPage = parseInt(parts[2], 10);
+  const w = store.getWallet(userId);
+  if (!w.inventory.length) return interaction.update({ content: "Your inventory is empty. Buy a /mysterybox!", components: [] });
+
+  const perPage = 15;
+  const total = Math.ceil(w.inventory.length / perPage);
+  const safePage = Math.max(0, Math.min(Number.isNaN(requestedPage) ? 0 : requestedPage, total - 1));
+  const username = interaction.user.username;
+  const text = buildInventoryText(username, w.inventory, safePage, total, perPage);
+  const components = buildInventoryButtons(userId, safePage, total);
+  return interaction.update({ content: text, components });
 }
 
 async function handleCollection(interaction, client) {
@@ -555,17 +629,9 @@ async function handleTradeSelectMenu(interaction) {
     offer.items.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, _idx: idx });
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
     persistTradeSessions();
-    
-    // Find the original trade message in the channel and update it
-    try {
-      await interaction.deferReply({ ephemeral: true });
-      // Send confirmation to user
-      await interaction.followUp({ content: `Added **${item.name}** to your offer!`, ephemeral: true });
-    } catch (e) {
-      // Fallback if message can't be found
-      await interaction.reply({ content: `Added **${item.name}** to your offer!`, ephemeral: true });
-    }
-    return;
+
+    await updateTradeMessage(interaction, trade);
+    return interaction.update({ content: `Added **${item.name}** to your offer!`, components: [] });
   }
 
   if (action === 'unselectitem') {
@@ -574,13 +640,8 @@ async function handleTradeSelectMenu(interaction) {
     const removed = offer.items.splice(offerIdx, 1)[0];
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
     persistTradeSessions();
-    try {
-      await interaction.deferReply({ ephemeral: true });
-      await interaction.followUp({ content: `Removed **${removed.name}** from your offer!`, ephemeral: true });
-    } catch (e) {
-      await interaction.reply({ content: `Removed **${removed.name}** from your offer!`, ephemeral: true });
-    }
-    return;
+    await updateTradeMessage(interaction, trade);
+    return interaction.update({ content: `Removed **${removed.name}** from your offer!`, components: [] });
   }
 }
 
@@ -698,6 +759,10 @@ async function handleGiveawayModal(interaction) {
   const rawDays = interaction.fields.getTextInputValue('giveaway_days');
   const bal = store.getBalance(userId);
 
+  if (bal <= 0) {
+    return interaction.reply({ content: `Not enough coins. You only have **${store.formatNumber(bal)}**`, ephemeral: true });
+  }
+
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
     return interaction.reply({ content: 'Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all".', ephemeral: true });
@@ -797,7 +862,7 @@ module.exports = {
   activeTrades,
   handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
   handleGive, handleTrade, handleLeaderboard, handleUpgrades,
-  handleMysteryBox, handleInventory, handleCollection, handlePool,
+  handleMysteryBox, handleInventory, handleInventoryButton, handleCollection, handlePool,
   handleUpgradeButton, handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
   handleGiveawayStart, handleGiveawayModal, handleGiveawayJoin,

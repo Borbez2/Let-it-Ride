@@ -84,6 +84,7 @@ async function handleCommand(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
   const balance = store.getBalance(userId);
+  if (balance <= 0) return interaction.reply(`Not enough coins. You only have **${store.formatNumber(balance)}**`);
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
