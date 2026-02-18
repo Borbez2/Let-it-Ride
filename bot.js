@@ -9,6 +9,7 @@ const economy = require('./commands/economy');
 const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
+const pityCmd = require('./commands/pity');
 
 // Load required environment values from .env.
 const TOKEN = process.env.TOKEN;
@@ -17,6 +18,7 @@ const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
 const DAILY_EVENTS_CHANNEL_ID = '1467976012645269676';
 const HOURLY_PAYOUT_CHANNEL_ID = '1473595731893027000';
+const LIFE_STATS_CHANNEL_ID = '1473753550332104746';
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
 const STATS_RESET_ADMIN_IDS = (process.env.STATS_RESET_ADMIN_IDS || process.env.ADMIN_IDS || '')
   .split(',')
@@ -30,6 +32,283 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let isBotActive = true;
+const LIVE_GRAPH_SLOT_SECONDS = 10;
+const LIVE_GRAPH_MAX_USERS = 20;
+const LIVE_GRAPH_SESSION_TTL_MS = 30 * 60 * 1000;
+const LIVE_GRAPH_TIMEFRAMES = [
+  { key: '10m', seconds: 600 },
+  { key: '30m', seconds: 1800 },
+  { key: '1h', seconds: 3600 },
+  { key: '6h', seconds: 21600 },
+  { key: '1d', seconds: 86400 },
+  { key: '1m', seconds: 2592000 },
+  { key: '1y', seconds: 31536000 },
+  { key: 'all', seconds: null },
+];
+const liveGraphSessions = new Map();
+const PUBLIC_GRAPH_REFRESH_MS = 60000;
+const publicGraphState = {
+  chartUrl: null,
+  datasetsCount: 0,
+  generatedAt: 0,
+};
+const lifeStatsLoopState = {
+  timer: null,
+  running: false,
+  stopped: false,
+};
+
+function withTimeout(promise, timeoutMs = 2000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout:${timeoutMs}ms`)), timeoutMs)),
+  ]);
+}
+
+function getGraphPalette() {
+  return [
+    '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#8dd17e', '#ff7aa2', '#00bcd4', '#cddc39',
+    '#f06292', '#64b5f6', '#ffd54f', '#4db6ac', '#9575cd', '#ffb74d', '#81c784', '#ba68c8', '#90a4ae', '#ef5350',
+  ];
+}
+
+function formatTimeframe(seconds) {
+  if (seconds === null) return 'All';
+  if (seconds % 3600 === 0) return `${Math.floor(seconds / 3600)}h`;
+  if (seconds % 60 === 0) return `${Math.floor(seconds / 60)}m`;
+  return `${seconds}s`;
+}
+
+function roundUpToStep(value, step) {
+  return Math.ceil(value / step) * step;
+}
+
+function pickSlotSeconds(durationMs, maxPoints = 180) {
+  if (durationMs <= 0) return LIVE_GRAPH_SLOT_SECONDS;
+  const raw = Math.ceil((durationMs / 1000) / Math.max(1, maxPoints - 1));
+  return Math.max(LIVE_GRAPH_SLOT_SECONDS, roundUpToStep(raw, LIVE_GRAPH_SLOT_SECONDS));
+}
+
+function buildAdaptiveLabels(slotCount, startTs, slotSeconds, mode = 'relative') {
+  const tickEvery = Math.max(1, Math.floor(slotCount / 8));
+  return Array.from({ length: slotCount }, (_, i) => {
+    if (i !== slotCount - 1 && (i % tickEvery !== 0)) return '';
+    const ts = startTs + (i * slotSeconds * 1000);
+    if (mode === 'clock') {
+      const d = new Date(ts);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+    const age = (slotCount - i - 1) * slotSeconds;
+    if (age === 0) return 'Now';
+    if (age >= 86400) return `-${Math.floor(age / 86400)}d`;
+    if (age >= 3600) return `-${Math.floor(age / 3600)}h`;
+    if (age >= 60) return `-${Math.floor(age / 60)}m`;
+    return `-${age}s`;
+  });
+}
+
+function getGraphCandidateIds(wallets) {
+  return Object.entries(wallets)
+    .map(([id, wallet]) => {
+      const history = Array.isArray(wallet?.stats?.netWorthHistory) ? wallet.stats.netWorthHistory : [];
+      const last = history.length ? history[history.length - 1] : null;
+      return { id, points: history.length, lastValue: last?.v || 0 };
+    })
+    .filter((row) => row.points >= 2)
+    .sort((a, b) => b.lastValue - a.lastValue)
+    .slice(0, LIVE_GRAPH_MAX_USERS)
+    .map((row) => row.id);
+}
+
+async function resolveUsersByIds(ids) {
+  const usersById = new Map();
+  await Promise.all(ids.map(async (id) => {
+    const cached = client.users.cache.get(id);
+    if (cached) {
+      usersById.set(id, cached);
+      return;
+    }
+    const fetched = await withTimeout(client.users.fetch(id), 1500).catch(() => null);
+    if (fetched) usersById.set(id, fetched);
+  }));
+  return usersById;
+}
+
+function buildSeriesByRange(history, startTs, slotCount, slotSeconds = LIVE_GRAPH_SLOT_SECONDS) {
+  const values = Array(slotCount).fill(null);
+  for (let i = history.length - 1; i >= 0; i--) {
+    const point = history[i];
+    const ts = point?.t || 0;
+    if (ts < startTs) break;
+    const slotIndex = Math.floor((ts - startTs) / (slotSeconds * 1000));
+    if (slotIndex < 0 || slotIndex >= slotCount) continue;
+    values[slotIndex] = point?.v || 0;
+  }
+  return values;
+}
+
+async function createQuickChartUrl(chartConfig, width, height) {
+  const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+  if (directChartUrl.length <= 2000) return directChartUrl;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    const resp = await fetch('https://quickchart.io/chart/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        width,
+        height,
+        devicePixelRatio: 1.5,
+        backgroundColor: '#1f1f1f',
+        chart: chartConfig,
+        format: 'png',
+      }),
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    const body = await resp.json().catch(() => null);
+    if (!body || typeof body.url !== 'string') return null;
+    return body.url;
+  } catch (err) {
+    console.error('QuickChart short URL generation failed:', err?.message || err);
+    return null;
+  }
+}
+
+function resolveGraphWindow({ wallets, selectedIds, timeframeSec = 1800, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
+  const safeEnd = Math.max(0, endTs || Date.now());
+  if (Number.isFinite(startTs) && startTs !== null) {
+    const durationMs = Math.max(0, safeEnd - startTs);
+    const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
+    const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
+    return { startTs, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'clock' };
+  }
+
+  if (timeframeSec === null) {
+    let earliest = safeEnd;
+    for (const id of selectedIds || []) {
+      const history = Array.isArray(wallets[id]?.stats?.netWorthHistory) ? wallets[id].stats.netWorthHistory : [];
+      if (history.length > 0) earliest = Math.min(earliest, history[0].t || safeEnd);
+    }
+    const durationMs = Math.max(1000, safeEnd - earliest);
+    const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
+    const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
+    return { startTs: earliest, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'relative' };
+  }
+
+  const durationMs = Math.max(1000, timeframeSec * 1000);
+  const rangeStart = safeEnd - durationMs;
+  const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
+  const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
+  return { startTs: rangeStart, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'relative' };
+}
+
+async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, includeAvatars, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
+  const window = resolveGraphWindow({ wallets, selectedIds, timeframeSec, startTs, endTs, maxPoints });
+  const labels = buildAdaptiveLabels(window.slotCount, window.startTs, window.slotSeconds, window.labelMode);
+  const ids = (selectedIds || []).slice(0, LIVE_GRAPH_MAX_USERS);
+  const usersById = await resolveUsersByIds(ids);
+  const palette = getGraphPalette();
+
+  const datasets = [];
+  for (let index = 0; index < ids.length; index++) {
+    const id = ids[index];
+    const history = Array.isArray(wallets[id]?.stats?.netWorthHistory) ? wallets[id].stats.netWorthHistory : [];
+    const series = buildSeriesByRange(history, window.startTs, window.slotCount, window.slotSeconds);
+    const points = series.filter((v) => v !== null).length;
+    if (points < 2) continue;
+
+    const user = usersById.get(id) || client.users.cache.get(id);
+    const color = palette[index % palette.length];
+    const name = (user?.username || `User ${id.slice(-4)}`).slice(0, 16);
+    const avatarUrl = includeAvatars && user ? user.displayAvatarURL({ extension: 'png', size: 64, forceStatic: true }) : null;
+    const lastNonNull = series.reduce((acc, val, idx) => (val !== null ? idx : acc), -1);
+    const pointRadius = series.map((value, pointIndex) => {
+      if (value === null) return 0;
+      return pointIndex === lastNonNull ? 7 : 0;
+    });
+
+    datasets.push({
+      label: name,
+      data: series,
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: 2,
+      pointRadius,
+      pointHoverRadius: pointRadius,
+      pointStyle: avatarUrl || 'circle',
+      tension: 0.25,
+      spanGaps: true,
+      fill: false,
+    });
+  }
+
+  return { labels, datasets, usersById, slotSeconds: window.slotSeconds, startTs: window.startTs, endTs: window.endTs };
+}
+
+function getOrCreateLiveGraphSession(viewerId, candidateIds) {
+  const now = Date.now();
+  const existing = liveGraphSessions.get(viewerId);
+  if (existing && existing.expiresAt > now) {
+    existing.candidateIds = candidateIds;
+    existing.selectedIds = existing.selectedIds.filter((id) => candidateIds.includes(id));
+    if (existing.selectedIds.length === 0) existing.selectedIds = candidateIds.slice(0, LIVE_GRAPH_MAX_USERS);
+    existing.expiresAt = now + LIVE_GRAPH_SESSION_TTL_MS;
+    return existing;
+  }
+
+  const next = {
+    viewerId,
+    timeframeSec: 3600,
+    candidateIds,
+    selectedIds: candidateIds.slice(0, LIVE_GRAPH_MAX_USERS),
+    lastChartUrl: null,
+    expiresAt: now + LIVE_GRAPH_SESSION_TTL_MS,
+  };
+  liveGraphSessions.set(viewerId, next);
+  return next;
+}
+
+function buildLiveGraphControlRows(session, usersById) {
+  const rows = [];
+  const tfValues = LIVE_GRAPH_TIMEFRAMES;
+  for (let i = 0; i < tfValues.length; i += 5) {
+    const timeframeRow = new ActionRowBuilder();
+    for (const tf of tfValues.slice(i, i + 5)) {
+      timeframeRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`livestats_tf_${session.viewerId}_${tf.key}`)
+          .setLabel(tf.key.toUpperCase())
+          .setStyle(session.timeframeSec === tf.seconds ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      );
+    }
+    rows.push(timeframeRow);
+  }
+
+  const candidates = session.candidateIds.slice(0, LIVE_GRAPH_MAX_USERS);
+  for (let i = 0; i < candidates.length; i += 5) {
+    const row = new ActionRowBuilder();
+    const slice = candidates.slice(i, i + 5);
+    for (const id of slice) {
+      const user = usersById.get(id) || client.users.cache.get(id);
+      const labelBase = (user?.username || id.slice(-4)).slice(0, 12);
+      const selected = session.selectedIds.includes(id);
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`livestats_tg_${session.viewerId}_${id}`)
+          .setLabel(`${selected ? '✓' : '✕'} ${labelBase}`)
+          .setStyle(selected ? ButtonStyle.Success : ButtonStyle.Secondary)
+      );
+    }
+    rows.push(row);
+    if (rows.length >= 5) break;
+  }
+
+  return rows;
+}
 
 // Register all slash command definitions.
 const commands = [
@@ -71,16 +350,21 @@ const commands = [
     .addIntegerOption(o => o.setName('page').setDescription('Page number').setMinValue(1)),
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
-  new SlashCommandBuilder().setName('stats').setDescription('View your gaming stats and lifetime earnings/losses')
+  new SlashCommandBuilder().setName('stats').setDescription('Open the multi-page stats dashboard with graphs and bonus details')
     .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false))
     .addStringOption(o => o.setName('username').setDescription('Username to check stats for (optional)').setRequired(false)),
+  new SlashCommandBuilder().setName('pity').setDescription('View your active pity stacks and per-stack timers'),
   new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
     .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
     .addStringOption(o => o.setName('topic').setDescription('Help topic')
       .addChoices(
         { name: 'General Economy', value: 'general' },
+        { name: 'Universal Income', value: 'universalincome' },
+        { name: 'Collectibles', value: 'collectibles' },
         { name: 'Games and EV', value: 'games' },
+        { name: 'Luck, Pity, and Modifiers', value: 'modifiers' },
+        { name: 'Mystery Boxes', value: 'mysteryboxes' },
         { name: 'Command Reference', value: 'commands' },
       )),
   adminCmd.buildAdminCommand(),
@@ -170,6 +454,277 @@ async function distributeUniversalPool() {
   }
 
   console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}`);
+  await postLifeStatistics().catch((err) => {
+    console.error('Life stats update failed after hourly distribution:', err);
+  });
+}
+
+async function postLifeStatistics() {
+  const channel = await client.channels.fetch(LIFE_STATS_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const now = Date.now();
+  store.trackLifeStatsHeartbeat(now);
+
+  const wallets = store.getAllWallets();
+  const ids = Object.keys(wallets);
+  const poolData = store.getPoolData();
+  const share = ids.length > 0 ? Math.floor((poolData.universalPool || 0) / ids.length) : 0;
+
+  const candidateIds = getGraphCandidateIds(wallets);
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  let datasets = [];
+  let labels = [];
+  let chartUrl = publicGraphState.chartUrl;
+  const shouldRefreshGraph = !publicGraphState.generatedAt || (now - publicGraphState.generatedAt >= PUBLIC_GRAPH_REFRESH_MS) || !publicGraphState.chartUrl;
+
+  if (shouldRefreshGraph) {
+    const graph = await buildPlayerNetworthGraph({
+      wallets,
+      selectedIds: candidateIds,
+      timeframeSec: null,
+      includeAvatars: false,
+      startTs: startOfToday.getTime(),
+      endTs: now,
+      maxPoints: 220,
+    });
+    labels = graph.labels;
+    datasets = graph.datasets;
+
+    const chartConfig = {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { color: '#ffffff', boxWidth: 10, usePointStyle: true, pointStyleWidth: 14 },
+          },
+          title: { display: true, text: 'Player Networth', color: '#ffffff' },
+        },
+        scales: {
+          x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        },
+        layout: { padding: 8 },
+      },
+    };
+
+    const freshUrl = datasets.length > 0 ? await createQuickChartUrl(chartConfig, 980, 420) : null;
+    if (freshUrl) {
+      chartUrl = freshUrl;
+      publicGraphState.chartUrl = freshUrl;
+      publicGraphState.datasetsCount = datasets.length;
+      publicGraphState.generatedAt = now;
+      store.setRuntimeState('lifeStatsLastChartUrl', freshUrl);
+    } else {
+      chartUrl = publicGraphState.chartUrl || store.getRuntimeState('lifeStatsLastChartUrl', null);
+    }
+  } else {
+    datasets = Array.from({ length: publicGraphState.datasetsCount });
+  }
+
+  const text =
+    `**Live Economy Snapshot**\n` +
+    `• Universal Pool: **${store.formatNumber(poolData.universalPool || 0)}**\n` +
+    `• Daily Spin Pool: **${store.formatNumber(poolData.lossPool || 0)}**\n` +
+    `• Current Hourly Payout Per Player: **${store.formatNumber(share)}**\n` +
+    `• Players in Graph: ${shouldRefreshGraph ? datasets.length : publicGraphState.datasetsCount}\n` +
+    `• Last Updated: <t:${Math.floor(Date.now() / 1000)}:R>`;
+
+  const controls = [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('livestats_open')
+        .setLabel('Open Big Graph')
+        .setStyle(ButtonStyle.Primary)
+    ),
+  ];
+
+  const payload = chartUrl
+    ? {
+        content: text,
+        embeds: [{ title: 'Player Networth', image: { url: chartUrl } }],
+        components: controls,
+      }
+    : { content: text, embeds: [], components: controls };
+
+  const state = store.getRuntimeState('lifeStatsMessageRef', null);
+  if (state && state.messageId) {
+    const msg = await channel.messages.fetch(state.messageId).catch(() => null);
+    if (msg) {
+      const edited = await msg.edit(payload).then(() => true).catch((err) => {
+        console.error('Live stats message edit failed:', err);
+        return false;
+      });
+      if (edited) return;
+    }
+  }
+
+  const sent = await channel.send(payload).catch((err) => {
+    console.error(`Live stats message send failed for ${LIFE_STATS_CHANNEL_ID}:`, err);
+    return null;
+  });
+  if (sent) {
+    store.setRuntimeState('lifeStatsMessageRef', {
+      channelId: channel.id,
+      messageId: sent.id,
+    });
+  }
+}
+
+async function buildLiveBigGraphPayload(viewerId) {
+  const wallets = store.getAllWallets();
+  const candidateIds = getGraphCandidateIds(wallets);
+  const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+  const selectedIds = session.selectedIds.filter((id) => session.candidateIds.includes(id));
+
+  const { labels, datasets, usersById } = await buildPlayerNetworthGraph({
+    wallets,
+    selectedIds,
+    timeframeSec: session.timeframeSec,
+    includeAvatars: true,
+    maxPoints: 260,
+  });
+
+  const chartConfig = {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      plugins: {
+        legend: {
+          display: true,
+          position: 'bottom',
+          labels: { color: '#ffffff', boxWidth: 10, usePointStyle: true, pointStyleWidth: 14 },
+        },
+        title: { display: true, text: 'Player Networth', color: '#ffffff' },
+      },
+      scales: {
+        x: { ticks: { color: '#d9d9d9', maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+      },
+      layout: { padding: 8 },
+    },
+  };
+
+  let chartUrl = datasets.length > 0 ? await createQuickChartUrl(chartConfig, 1600, 900) : null;
+  if (!chartUrl && session.lastChartUrl) chartUrl = session.lastChartUrl;
+  if (chartUrl) session.lastChartUrl = chartUrl;
+
+  const content =
+    `**Player Networth (Big Picture)**\n` +
+    `• Timeframe: ${formatTimeframe(session.timeframeSec)}\n` +
+    `• Players in Graph: ${datasets.length}\n` +
+    `• Last Updated: <t:${Math.floor(Date.now() / 1000)}:R>`;
+
+  const components = buildLiveGraphControlRows(session, usersById);
+  return {
+    content,
+    embeds: chartUrl ? [{ title: 'Player Networth', image: { url: chartUrl } }] : [],
+    components,
+    ephemeral: true,
+  };
+}
+
+async function handleLiveStatsButton(interaction) {
+  if (interaction.customId === 'livestats_open') {
+    const payload = await buildLiveBigGraphPayload(interaction.user.id);
+    return interaction.reply(payload);
+  }
+
+  if (interaction.customId.startsWith('livestats_tf_')) {
+    const parts = interaction.customId.split('_');
+    const viewerId = parts[2];
+    const timeframeKey = parts[3];
+    const timeframe = LIVE_GRAPH_TIMEFRAMES.find((entry) => entry.key === timeframeKey);
+    if (interaction.user.id !== viewerId) {
+      return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
+    }
+    if (!timeframe) {
+      return interaction.reply({ content: 'Invalid timeframe selection.', ephemeral: true });
+    }
+
+    const candidateIds = getGraphCandidateIds(store.getAllWallets());
+    const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+    session.timeframeSec = timeframe.seconds;
+    session.expiresAt = Date.now() + LIVE_GRAPH_SESSION_TTL_MS;
+    liveGraphSessions.set(viewerId, session);
+    const payload = await buildLiveBigGraphPayload(viewerId);
+    return interaction.update(payload);
+  }
+
+  if (interaction.customId.startsWith('livestats_tg_')) {
+    const parts = interaction.customId.split('_');
+    const viewerId = parts[2];
+    const targetId = parts[3];
+    if (interaction.user.id !== viewerId) {
+      return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
+    }
+
+    const candidateIds = getGraphCandidateIds(store.getAllWallets());
+    const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+    if (!session.candidateIds.includes(targetId)) {
+      return interaction.reply({ content: 'Player is not available in current graph candidates.', ephemeral: true });
+    }
+
+    const selected = new Set(session.selectedIds);
+    if (selected.has(targetId)) selected.delete(targetId);
+    else selected.add(targetId);
+    session.selectedIds = Array.from(selected);
+    session.expiresAt = Date.now() + LIVE_GRAPH_SESSION_TTL_MS;
+    liveGraphSessions.set(viewerId, session);
+
+    const payload = await buildLiveBigGraphPayload(viewerId);
+    return interaction.update(payload);
+  }
+}
+
+function restartLifeStatsInterval() {
+  lifeStatsLoopState.stopped = true;
+  if (lifeStatsLoopState.timer) {
+    clearTimeout(lifeStatsLoopState.timer);
+    lifeStatsLoopState.timer = null;
+  }
+  lifeStatsLoopState.running = false;
+
+  const tuning = store.getRuntimeTuning();
+
+  const scheduleNext = () => {
+    if (lifeStatsLoopState.stopped) return;
+    lifeStatsLoopState.timer = setTimeout(runCycle, tuning.lifeStatsIntervalMs);
+  };
+
+  const runCycle = async () => {
+    if (lifeStatsLoopState.stopped) return;
+    if (lifeStatsLoopState.running) {
+      scheduleNext();
+      return;
+    }
+
+    lifeStatsLoopState.running = true;
+    try {
+      await withTimeout(postLifeStatistics(), Math.max(10000, tuning.lifeStatsIntervalMs * 2));
+    } catch (err) {
+      console.error('Periodic life stats update failed:', err);
+    } finally {
+      lifeStatsLoopState.running = false;
+      scheduleNext();
+    }
+  };
+
+  lifeStatsLoopState.stopped = false;
+  runCycle().catch((err) => {
+    console.error('Life stats loop bootstrap failed:', err);
+  });
+  console.log(`Life stats interval set to ${tuning.lifeStatsIntervalMs}ms.`);
+}
+
+async function onRuntimeConfigUpdated() {
+  restartLifeStatsInterval();
+  await postLifeStatistics().catch(() => null);
 }
 
 async function buildLeaderboardBoard(title = '**Leaderboard**') {
@@ -237,6 +792,7 @@ async function runDailySpin() {
       `🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\n` +
       `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\nSpin Mult Applied: **x${winnerWeight}**\n🎉🎉🎉`
     );
+    await postLifeStatistics().catch(() => null);
     console.log(`Daily spin: ${winnerName} won ${prize}`);
   } catch (err) { console.error("Daily spin error:", err); }
 }
@@ -387,6 +943,7 @@ function scheduleAll() {
 
   scheduleNextHourly();
   setInterval(checkExpiredGiveaways, 30000);
+  restartLifeStatsInterval();
   scheduleNextDaily1115();
 
   const hourlyMs = msUntilNextUtcHour();
@@ -401,6 +958,9 @@ function scheduleAll() {
 client.once(Events.ClientReady, async () => {
   console.log(`Bot online: ${client.user.tag}`);
   await registerCommands();
+  await postLifeStatistics().catch((err) => {
+    console.error('Initial life stats update failed:', err);
+  });
   scheduleAll();
 });
 
@@ -434,6 +994,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     try {
+      if (interaction.customId.startsWith('livestats_')) return await handleLiveStatsButton(interaction);
+      if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('upgrade_'))  return await economy.handleUpgradeButton(interaction, parts);
       if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);
       if (interaction.customId.startsWith('invpage_'))  return await economy.handleInventoryButton(interaction, parts);
@@ -442,6 +1004,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('ride_'))     return await simple.handleRideButton(interaction, parts);
       if (interaction.customId.startsWith('bjsplit_'))  return await blackjack.handleButton(interaction, parts);
       if (interaction.customId.startsWith('bj_'))       return await blackjack.handleButton(interaction, parts);
+      if (interaction.customId.startsWith('allin17_'))  return await simple.handleAllIn17Button(interaction, parts);
       if (interaction.customId.startsWith('roulette_')) return await simple.handleRouletteButton(interaction, parts);
       if (interaction.customId.startsWith('dice_'))     return await simple.handleDiceButton(interaction, parts);
       if (interaction.customId.startsWith('giveaway_join_')) {
@@ -490,6 +1053,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'collection':   return await economy.handleCollection(interaction, client);
       case 'pool':         return await economy.handlePool(interaction);
       case 'stats':        return await statsCmd.handleStats(interaction);
+      case 'pity':         return await pityCmd.handlePity(interaction);
       case 'help':         return await helpCmd.handleHelp(interaction);
       case 'giveaway':     return await economy.handleGiveawayStart(interaction);
       case 'admin':        return await adminCmd.handleAdmin(
@@ -502,7 +1066,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ANNOUNCE_CHANNEL_ID,
         HOURLY_PAYOUT_CHANNEL_ID,
         () => isBotActive,
-        (nextState) => { isBotActive = !!nextState; }
+        (nextState) => { isBotActive = !!nextState; },
+        onRuntimeConfigUpdated,
       );
     }
   } catch (err) {

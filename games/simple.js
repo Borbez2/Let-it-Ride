@@ -5,6 +5,23 @@ const activeGames = new Map();   // shared for dice + roulette
 const activeRides = new Map();
 const activeDuels = new Map();
 
+async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
+  if (!pityResult || !pityResult.triggered) return;
+  const channel = interaction.channel;
+  if (!channel || typeof channel.send !== 'function') return;
+
+  const addedPct = (pityResult.addedBoostRate * 100).toFixed(2);
+  const totalPct = (pityResult.totalBoostRate * 100).toFixed(2);
+  const thresholds = Array.isArray(pityResult.crossedThresholds) && pityResult.crossedThresholds.length
+    ? pityResult.crossedThresholds.map(v => `${v}%`).join(', ')
+    : 'none';
+
+  await channel.send(
+    `⚡ <@${userId}> pity triggered: +${addedPct}% EV (${pityResult.addedStacks} stack${pityResult.addedStacks === 1 ? '' : 's'}) | ` +
+    `active total +${totalPct}% | probability of being this lucky/unlucky ${Number(pityResult.confidence || 0).toFixed(2)}% | crossed: ${thresholds}`
+  ).catch(() => null);
+}
+
 function persistSimpleSessions() {
   store.setRuntimeState('session:simple', {
     activeGames: Object.fromEntries(activeGames),
@@ -51,29 +68,47 @@ async function handleFlip(interaction) {
     results.push(r ? 'W' : 'L');
     if (r) wins++;
   }
+
+  if (qty === 1) {
+    if (wins) {
+      const profit = store.applyProfitBoost(userId, 'flip', bet);
+      const pityResult = store.recordWin(userId, 'flip', profit);
+      await maybeAnnouncePityTrigger(interaction, userId, pityResult);
+      store.setBalance(userId, bal + profit);
+      store.addToUniversalPool(profit);
+      return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+    }
+    store.setBalance(userId, bal - bet);
+    const pityResult = store.recordLoss(userId, 'flip', bet);
+    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
+    const cb = store.applyCashback(userId, bet);
+    store.addToLossPool(bet);
+    const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
+    return interaction.reply(`❌ **Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+  }
+
   const net = (wins - (qty - wins)) * bet;
-  store.setBalance(userId, bal + net);
+  const boostedNet = net > 0 ? store.applyProfitBoost(userId, 'flip', net) : net;
+  store.setBalance(userId, bal + boostedNet);
 
   let cbm = '';
   if (net < 0) {
     const cb = store.applyCashback(userId, Math.abs(net));
     store.addToLossPool(Math.abs(net));
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
-  } else if (net > 0) {
-    store.addToUniversalPool(net);
+  } else if (boostedNet > 0) {
+    store.addToUniversalPool(boostedNet);
   }
 
-  if (qty === 1) {
-    if (wins) {
-      store.recordWin(userId, 'flip', bet);
-      return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(bet)}**\nBalance: **${store.formatNumber(bal + net)}**`);
-    }
-    store.recordLoss(userId, 'flip', bet);
-    return interaction.reply(`❌ **Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+  if (wins > 0) {
+    const pityResult = store.recordWin(userId, 'flip', boostedNet > 0 ? boostedNet : wins * bet);
+    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
   }
-  if (wins > 0) store.recordWin(userId, 'flip', wins * bet);
-  if (qty - wins > 0) store.recordLoss(userId, 'flip', (qty - wins) * bet);
-  return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${net >= 0 ? '+' : ''}${store.formatNumber(net)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+  if (qty - wins > 0) {
+    const pityResult = store.recordLoss(userId, 'flip', (qty - wins) * bet);
+    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
+  }
+  return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${boostedNet >= 0 ? '+' : ''}${store.formatNumber(boostedNet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
 // Dice command.
@@ -109,11 +144,14 @@ async function handleDiceButton(interaction, parts) {
   const bal = store.getBalance(uid), won = (choice === 'high' && hi) || (choice === 'low' && !hi);
 
   if (won) {
-    store.recordWin(uid, 'dice', game.bet);
-    store.setBalance(uid, bal + game.bet); store.addToUniversalPool(game.bet);
-    await interaction.update({ content: `✅ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet)}**`, components: [] });
+    const profit = store.applyProfitBoost(uid, 'dice', game.bet);
+    const pityResult = store.recordWin(uid, 'dice', profit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    store.setBalance(uid, bal + profit); store.addToUniversalPool(profit);
+    await interaction.update({ content: `✅ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   } else {
-    store.recordLoss(uid, 'dice', game.bet);
+    const pityResult = store.recordLoss(uid, 'dice', game.bet);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
@@ -166,11 +204,14 @@ async function handleRouletteButton(interaction, parts) {
 
   const bal = store.getBalance(uid);
   if (profit > 0) {
-    store.recordWin(uid, 'roulette', profit);
-    store.setBalance(uid, bal + profit); store.addToUniversalPool(profit);
-    await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(bal + profit)}**`, components: [] });
+    const boostedProfit = store.applyProfitBoost(uid, 'roulette', profit);
+    const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    store.setBalance(uid, bal + boostedProfit); store.addToUniversalPool(boostedProfit);
+    await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   } else {
-    store.recordLoss(uid, 'roulette', game.bet);
+    const pityResult = store.recordLoss(uid, 'roulette', game.bet);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
@@ -183,21 +224,80 @@ async function handleRouletteButton(interaction, parts) {
 // All-in roulette shortcut on 17 black.
 async function handleAllIn17(interaction) {
   const userId = interaction.user.id;
-  const bal = store.getBalance(userId);
-  if (bal <= 0) return interaction.reply("You're broke!");
+  const purse = store.getBalance(userId);
+  if (purse <= 0) return interaction.reply("Your purse is empty. This command uses purse coins only.");
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`allin17_yes_${userId}`)
+      .setLabel('Yes, send it')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`allin17_no_${userId}`)
+      .setLabel("No i'm scared")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.reply({
+    content: `🪟 **ALL IN 17 BLACK CONFIRMATION**\n\nAre you sure you want to lose all your money?\nThis bet uses **purse only** (bank is not used).\n\nCurrent purse: **${store.formatNumber(purse)}**`,
+    components: [row],
+  });
+}
+
+async function handleAllIn17Button(interaction, parts) {
+  const action = parts[1];
+  const uid = parts[2];
+
+  if (interaction.user.id !== uid) {
+    return interaction.reply({ content: 'This confirmation is not yours.', ephemeral: true });
+  }
+
+  if (action === 'no') {
+    return interaction.update({
+      content: '✅ Cancelled. Your purse and bank are unchanged.',
+      components: [],
+    });
+  }
+
+  if (action !== 'yes') {
+    return interaction.reply({ content: 'Invalid choice.', ephemeral: true });
+  }
+
+  const purse = store.getBalance(uid);
+  if (purse <= 0) {
+    return interaction.update({
+      content: 'Your purse is empty now. This command uses purse coins only.',
+      components: [],
+    });
+  }
 
   const num = Math.floor(Math.random() * 37);
   const col = num === 0 ? 'green' : (REDS.includes(num) ? 'red' : 'black');
 
   if (num === 17) {
-    const win = bal * 36;
-    store.recordWin(userId, 'roulette', win - bal);
-    store.setBalance(userId, win); store.addToUniversalPool(win - bal);
-    return interaction.reply(`🎰 **ALL IN 17 BLACK** 🎰\nBall: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\n${store.formatNumber(bal)} → **${store.formatNumber(win)}**`);
+    const baseProfit = purse * 35;
+    const boostedProfit = store.applyProfitBoost(uid, 'roulette', baseProfit);
+    const payout = purse + boostedProfit;
+    const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    store.setBalance(uid, payout);
+    store.addToUniversalPool(boostedProfit);
+    return interaction.update({
+      content: `🎰 **ALL IN 17 BLACK** 🎰\nBall: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\nPurse only bet: ${store.formatNumber(purse)} → **${store.formatNumber(payout)}**\nBank was not used.`,
+      components: [],
+    });
   }
-  store.recordLoss(userId, 'roulette', bal);
-  store.setBalance(userId, 0); store.applyCashback(userId, bal); store.addToLossPool(bal);
-  return interaction.reply(`🎰 **ALL IN 17 BLACK** 🎰\nBall: **${num} (${col.toUpperCase()})**\n\n💀 Lost **${store.formatNumber(bal)}**. Balance: **0**`);
+
+  const pityResult = store.recordLoss(uid, 'roulette', purse);
+  await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+  store.setBalance(uid, 0);
+  const cb = store.applyCashback(uid, purse);
+  store.addToLossPool(purse);
+  const cbm = cb > 0 ? `\nCashback: +${store.formatNumber(cb)} to purse` : '';
+  return interaction.update({
+    content: `🎰 **ALL IN 17 BLACK** 🎰\nBall: **${num} (${col.toUpperCase()})**\n\n💀 Lost **${store.formatNumber(purse)}** from purse.${cbm}\nBank was not used.`,
+    components: [],
+  });
 }
 
 // Let It Ride command.
@@ -217,7 +317,8 @@ async function handleLetItRide(interaction) {
 
   store.setBalance(userId, bal - bet);
   if (Math.random() >= 0.5) {
-    store.recordLoss(userId, 'letitride', bet);
+    const pityResult = store.recordLoss(userId, 'letitride', bet);
+    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet); store.addToLossPool(bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
     return interaction.reply(`**Let It Ride**\nBust on first flip! -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
@@ -240,12 +341,19 @@ async function handleRideButton(interaction, parts) {
   const action = parts[1];
 
   if (action === 'cashout') {
-    if (ride.current > ride.original) store.recordWin(uid, 'letitride', ride.current - ride.original);
-    store.setBalance(uid, store.getBalance(uid) + ride.current);
-    if (ride.current > ride.original) store.addToUniversalPool(ride.current - ride.original);
+    let payout = ride.current;
+    if (ride.current > ride.original) {
+      const baseProfit = ride.current - ride.original;
+      const boostedProfit = store.applyProfitBoost(uid, 'letitride', baseProfit);
+      payout = ride.original + boostedProfit;
+      const pityResult = store.recordWin(uid, 'letitride', boostedProfit);
+      await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+      store.addToUniversalPool(boostedProfit);
+    }
+    store.setBalance(uid, store.getBalance(uid) + payout);
     activeRides.delete(uid);
     persistSimpleSessions();
-    return interaction.update({ content: `**Let It Ride - Cashed Out**\n${store.formatNumber(ride.current)} coins after ${ride.wins} wins!`, components: [] });
+    return interaction.update({ content: `**Let It Ride - Cashed Out**\n${store.formatNumber(payout)} coins after ${ride.wins} wins!`, components: [] });
   }
 
   if (action === 'ride') {
@@ -258,7 +366,8 @@ async function handleRideButton(interaction, parts) {
       );
       return interaction.update({ content: `**Let It Ride**\nWIN! Pot: **${store.formatNumber(ride.current)}**\n🔥 ${ride.wins}`, components: [row] });
     } else {
-      store.recordLoss(uid, 'letitride', ride.original);
+      const pityResult = store.recordLoss(uid, 'letitride', ride.original);
+      await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, ride.original); store.addToLossPool(ride.original);
       activeRides.delete(uid);
       persistSimpleSessions();
@@ -333,9 +442,12 @@ async function handleDuelButton(interaction, parts) {
     const li = w === cid ? oid : cid;
     
     // Winner gets both bets
-    store.recordWin(w, 'duel', duel.bet);
-    store.recordLoss(li, 'duel', duel.bet);
-    store.setBalance(w, store.getBalance(w) + (duel.bet * 2));
+    const boostedProfit = store.applyProfitBoost(w, 'duel', duel.bet);
+    const pityWinResult = store.recordWin(w, 'duel', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, w, pityWinResult);
+    const pityLossResult = store.recordLoss(li, 'duel', duel.bet);
+    await maybeAnnouncePityTrigger(interaction, li, pityLossResult);
+    store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit);
     
     store.addToUniversalPool(duel.bet);
     store.addToLossPool(duel.bet);
@@ -343,7 +455,7 @@ async function handleDuelButton(interaction, parts) {
     persistSimpleSessions();
     
     const emoji = w === cid ? '✅' : '❌';
-    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** wins **${store.formatNumber(duel.bet * 2)}** from **${ln}**!`, components: [] });
+    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** wins **${store.formatNumber(duel.bet + boostedProfit)}** from **${ln}**!`, components: [] });
   }
 }
 
@@ -351,6 +463,6 @@ module.exports = {
   activeGames, activeRides, activeDuels,
   handleFlip, handleDice, handleDiceButton,
   handleRoulette, handleRouletteButton,
-  handleAllIn17, handleLetItRide, handleRideButton,
+  handleAllIn17, handleAllIn17Button, handleLetItRide, handleRideButton,
   handleDuel, handleDuelButton,
 };

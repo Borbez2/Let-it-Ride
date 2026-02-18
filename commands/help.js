@@ -1,12 +1,145 @@
 const { MYSTERY_BOX_COST, MYSTERY_BOX_POOLS, POOL_TAX_RATE, LOSS_POOL_RATE, RARITIES } = require('../config');
 const store = require('../data/store');
 
+async function replyHelp(interaction, text) {
+  const maxLen = 1900;
+  if (text.length <= 2000) return interaction.reply(text);
+
+  const lines = text.split('\n');
+  const chunks = [];
+  let current = '';
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+    if (candidate.length > maxLen) {
+      if (current) chunks.push(current);
+      if (line.length > maxLen) {
+        let remaining = line;
+        while (remaining.length > maxLen) {
+          chunks.push(remaining.slice(0, maxLen));
+          remaining = remaining.slice(maxLen);
+        }
+        current = remaining;
+      } else {
+        current = line;
+      }
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) chunks.push(current);
+  if (!chunks.length) return interaction.reply('No help content available.');
+
+  await interaction.reply(chunks[0]);
+  for (let i = 1; i < chunks.length; i++) {
+    await interaction.followUp(chunks[i]);
+  }
+}
+
 async function handleHelp(interaction) {
   const topic = interaction.options.getString('topic') || 'general';
 
-  if (topic === 'general' || topic === 'universalincome' || topic === 'collectibles') {
+  if (topic === 'general') {
     const taxPct = (POOL_TAX_RATE * 100).toFixed(0);
     const lossPct = (LOSS_POOL_RATE * 100).toFixed(0);
+
+    let text = `**General Economy**\n\n`;
+    text += `**Money**\n`;
+    text += `• Purse: spendable coins for bets, trades, and boxes\n`;
+    text += `• Bank: protected coins with hourly-paid interest\n\n`;
+
+    text += `**Income + Pools**\n`;
+    text += `• **/daily** gives daily coins + streak bonus\n`;
+    text += `• Win tax: ${taxPct}% of profit -> Universal Pool\n`;
+    text += `• Loss tax: ${lossPct}% of losses -> Daily Spin Pool\n`;
+    text += `• Universal Pool pays all players hourly to bank\n`;
+    text += `• Daily Spin Pool pays one weighted winner daily\n\n`;
+
+    text += `**Upgrades**\n`;
+    text += `• Interest: +1% daily per level (Lv0 1% -> Lv10 11%)\n`;
+    text += `• Cashback: +0.1% loss refund per level (Lv10 = 1.0%)\n`;
+    text += `• Spin Mult: weight = 1 + level\n`;
+    text += `• Universal Mult: level% chance to double hourly universal payout\n`;
+    text += `• Manage in **/upgrades**\n\n`;
+
+    text += `**Collectibles + Boxes**\n`;
+    text += `• Boxes use purse coins only\n`;
+    text += `• Collectibles can add passive bonuses\n`;
+    text += `• For rarity/drop/duplicate tables: **/help mysteryboxes**\n`;
+    text += `• Manage items with **/inventory**, **/collection**, **/trade**\n`;
+    return replyHelp(interaction, text);
+  }
+
+  if (topic === 'universalincome') {
+    const taxPct = (POOL_TAX_RATE * 100).toFixed(0);
+    let text = `**Universal Income**\n\n`;
+    text += `• Source: ${taxPct}% of win profit goes to Universal Pool\n`;
+    text += `• Payout: every hour, shared across all registered players\n`;
+    text += `• Destination: paid to **bank** (not purse)\n`;
+    text += `• Upgrade: Universal Mult gives level% chance to double your hourly payout\n`;
+    text += `• Check pool and estimate via **/pool**\n`;
+    return replyHelp(interaction, text);
+  }
+
+  if (topic === 'collectibles') {
+    let text = `**Collectibles**\n\n`;
+    text += `• Earned mainly from **/mysterybox**\n`;
+    text += `• Stored in your inventory and can provide passive bonuses\n`;
+    text += `• Typical effect types: interest, cashback, luck, mines-save, EV boosts\n`;
+    text += `• View active bonuses in **/stats** -> **Bonuses**\n`;
+    text += `• Manage with **/inventory**, **/collection**, **/trade**\n`;
+    text += `• Box rarity/drop/duplicate details: **/help mysteryboxes**\n`;
+    return replyHelp(interaction, text);
+  }
+
+  if (topic === 'games') {
+    let text = `**Games + EV (Quick)**\n\n`;
+    text += `EV = expected value per round.\n\n`;
+    text += `• **Flip**: 50/50, EV ~0 before cashback\n`;
+    text += `• **Dice (high/low)**: 50/50, EV ~0 before cashback\n`;
+    text += `• **Roulette red/black**: EV = -1/37 = **-2.70%**\n`;
+    text += `• **Roulette green 0**: EV = -23/37 = **-62.16%**\n`;
+    text += `• **/allin17black**: same straight-up EV style (~-2.70%)\n`;
+    text += `• **Blackjack**: strategy dependent, no single fixed EV\n`;
+    text += `• **Mines**: multiplier = product((20-i)/(safeTiles-i)); cashout = floor(bet × mult)\n`;
+    text += `• **LetItRide**: repeated 50/50 double-or-bust steps\n`;
+    text += `• **Duel**: equal stakes, random winner, EV ~0/player\n\n`;
+    text += `Cashback and item EV boosts can improve net outcomes.`;
+    return replyHelp(interaction, text);
+  }
+
+  if (topic === 'modifiers' || topic === 'luck' || topic === 'pity') {
+    const cfg = store.getRuntimeTuning ? store.getRuntimeTuning() : null;
+    const pityBoostPct = cfg ? (cfg.binomialPityBoostRate * 100).toFixed(2) : '1.00';
+    const pityDuration = cfg ? cfg.binomialPityDurationMinutes : 30;
+    const pityCooldown = cfg ? cfg.binomialPityCooldownMinutes : 15;
+
+    let text = `**Modifiers + Luck + Pity**\n\n`;
+    text += `Base game math runs first, then modifiers are applied.\n\n`;
+    text += `**Sources**\n`;
+    text += `• Upgrades: interest, cashback, spin weight, universal double chance\n`;
+    text += `• Items: passive boosts (interest/cashback/luck/mines-save/EV by game)\n`;
+    text += `• Pity systems: mystery-box pity + game-results pity\n`;
+    text += `• Mystery-box pity full details: **/help mysteryboxes**\n\n`;
+    text += `**Quick Summary**\n`;
+    text += `• Modifiers affect payout math, not win chance\n`;
+    text += `• Pity tiers: 60/70/80/90%, then every +1% from 91% to 99%\n`;
+    text += `• Each pity trigger adds +${pityBoostPct}% EV for ${pityDuration}m and stacks\n`;
+    text += `• Track live status with **/pity** and **/stats**\n\n`;
+    text += `**Pity (Game Results)**\n`;
+    text += `• No minimum game requirement\n`;
+    text += `• Unlucky threshold stacks: **60% / 70% / 80% / 90%** probability of being this unlucky, each adds **+${pityBoostPct}%** EV boost\n`;
+    text += `• After 90, every **+1%** probability step (**91%..99%**) also adds **+${pityBoostPct}%**\n`;
+    text += `• Max pity boost cap: **+10.00%** total\n`;
+    text += `• Runtime pity cooldown setting is currently not used by threshold-cross stacks\n`;
+    text += `• Every trigger lasts **${pityDuration}m** and stacks with other active triggers\n`;
+    text += `• Boost affects win profit only (does not force wins)\n\n`;
+    text += `Check live values in **/stats** -> **Bonuses** and **/pity**.`;
+    return replyHelp(interaction, text);
+  }
+
+  if (topic === 'mysterybox' || topic === 'mysteryboxes' || topic === 'boxes') {
     const rarityOrder = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
     const poolEntries = rarityOrder
       .map((rarity) => [rarity, MYSTERY_BOX_POOLS[rarity]])
@@ -14,38 +147,21 @@ async function handleHelp(interaction) {
     const totalWeight = poolEntries.reduce((s, [, p]) => s + p.weight, 0);
     const compensationTable = store.getDuplicateCompensationTable();
 
-    let text = `**General Economy Guide**\n\n`;
-    text += `Every player starts with coins in their purse. You can move coins between purse and bank, gamble, trade, and collect items.\n\n`;
+    let text = `**Mystery Boxes**\n\n`;
+    text += `• **/mysterybox quantity:<1-50 optional>** uses **purse only**\n`;
+    text += `• Cost: **${store.formatNumber(MYSTERY_BOX_COST)}** per box\n`;
+    text += `• 120 collectibles across 7 rarities\n`;
+    text += `• Luck = item luck + pity luck\n\n`;
 
-    text += `**Money Flow**\n`;
-    text += `• Purse = spendable coins for bets, trades, and box purchases\n`;
-    text += `• Bank = protected coins that earn interest over time\n`;
-    text += `• Interest accrues by minute and is paid to your bank each hour\n\n`;
-
-    text += `**Daily and Passive Income**\n`;
-    text += `• **/daily** gives a daily claim with a streak bonus\n`;
-    text += `• Wins add ${taxPct}% of win profit to the Universal Pool\n`;
-    text += `• Losses add ${lossPct}% of losses to the Daily Spin Pool\n`;
-    text += `• Universal Pool pays all registered players hourly (to bank)\n`;
-    text += `• Daily Spin Pool is paid to one weighted winner once per day\n\n`;
-
-    text += `**Upgrades**\n`;
-    text += `• **Bank Interest**: +1% daily rate per level (Lv0 1% daily up to Lv10 11% daily)\n`;
-    text += `• **Loss Cashback**: +0.1% of losses refunded per level (Lv10 = 1.0%)\n`;
-    text += `• **Daily Spin Mult**: spin weight = 1 + level (Lv0=1x, Lv10=11x)\n`;
-    text += `• **Hourly Universal Income Mult**: level% chance to double hourly universal payout\n`;
-    text += `Use **/upgrades** to buy levels.\n\n`;
-
-    text += `**Collectibles and Mystery Boxes**\n`;
-    text += `• **/mysterybox** costs **${store.formatNumber(MYSTERY_BOX_COST)}** per box\n`;
-    text += `• There are 120 collectibles across 7 rarities\n`;
+    text += `**Base Drop Weights**\n`;
     for (const [rarity, pool] of poolEntries) {
       const pct = ((pool.weight / totalWeight) * 100).toFixed(1);
       const icon = RARITIES[rarity]?.emoji || '•';
       const label = rarity.charAt(0).toUpperCase() + rarity.slice(1);
       text += `  ${icon} ${label}: ${pct}% (${pool.items.length} items)\n`;
     }
-    text += `• Duplicate compensation by rarity:\n`;
+
+    text += `\n**Duplicate Compensation**\n`;
     for (const rarity of rarityOrder) {
       const amount = compensationTable[rarity];
       if (!amount) continue;
@@ -53,103 +169,35 @@ async function handleHelp(interaction) {
       const label = rarity.charAt(0).toUpperCase() + rarity.slice(1);
       text += `  ${icon} ${label}: ${store.formatNumber(amount)}\n`;
     }
-    text += `Use **/inventory**, **/collection**, and **/trade** to manage items.`;
-    return interaction.reply(text);
-  }
 
-  if (topic === 'games') {
-    let text = `**Games, Payouts, and EV Guide**\n\n`;
-    text += `EV means expected value per round: EV = sum of (outcome probability × net profit).\n\n`;
+    text += `\n**Future Item Modifier Placeholder**\n`;
+    text += `• Format: Item — interest +X%/day | cashback +Y% | luck +Z% | mines-save +A% | EV(game)+B%\n`;
+    text += `• Many placeholders are currently 0 until assigned\n\n`;
 
-    text += `**Flip**\n`;
-    text += `• Win chance: 50%\n`;
-    text += `• Net result: +bet or -bet\n`;
-    text += `• EV: 0 per flip before cashback\n\n`;
-
-    text += `**Dice (High/Low)**\n`;
-    text += `• Roll 1-6, high is 4-6, low is 1-3\n`;
-    text += `• Win chance: 50%\n`;
-    text += `• Net result: +bet or -bet\n`;
-    text += `• EV: 0 before cashback\n\n`;
-
-    text += `**Roulette**\n`;
-    text += `• Red/Black: win chance 18/37, net +bet on win, -bet on loss\n`;
-    text += `• EV(red/black): (18/37)*(+1) + (19/37)*(-1) = -1/37 = -2.70% of bet\n`;
-    text += `• Green 0: win chance 1/37, net +13x bet on win, -1x bet on loss\n`;
-    text += `• EV(green): (1/37)*(+13) + (36/37)*(-1) = -23/37 = -62.16% of bet\n`;
-    text += `• **/allin17black** has the same EV as a straight-up roulette number: about -2.70%\n\n`;
-
-    text += `**Blackjack**\n`;
-    text += `• Natural blackjack pays +1.5x profit\n`;
-    text += `• Standard win pays +1x, push pays 0, loss pays -1x\n`;
-    text += `• Double and split multiply both risk and payout\n`;
-    text += `• EV is decision-based, so there is no single fixed value without a strategy model\n\n`;
-
-    text += `**Mines**\n`;
-    text += `• You choose tiles on a 20-tile board with chosen mine count\n`;
-    text += `• Multiplier after r safe reveals uses:\n`;
-    text += `  multiplier = product from i=0 to r-1 of (20 - i) / (safeTiles - i)\n`;
-    text += `• Cashout payout = floor(bet × multiplier)\n`;
-    text += `• Without floor rounding, EV is near break-even at any fixed cashout depth\n\n`;
-
-    text += `**Let It Ride**\n`;
-    text += `• Each ride step is a 50/50 double-or-bust decision\n`;
-    text += `• Cashing after any fixed number of successful doubles has EV near 0 before cashback\n\n`;
-
-    text += `**Duel**\n`;
-    text += `• Two players stake equal amounts, random winner takes both\n`;
-    text += `• EV per player is 0 (ignoring external effects like pools and future income)\n\n`;
-
-    text += `**Important notes**\n`;
-    text += `• Cashback applies on many losses and improves your long-run EV slightly\n`;
-    text += `• Win/loss pool taxes are tracked separately for system redistribution`;
-    return interaction.reply(text);
+    text += `Use **/inventory**, **/collection**, and **/trade** to manage collectibles.`;
+    return replyHelp(interaction, text);
   }
 
   if (topic === 'commands') {
-    let text = `**Command Reference (New Player Friendly)**\n\n`;
-    text += `Amount input supports values like **100**, **4.7k**, **1.2m**, **2b**, and **all**.\n\n`;
-
-    text += `**Core Money Commands**\n`;
-    text += `• **/balance**: show purse, bank, and total\n`;
-    text += `• **/daily**: claim daily reward\n`;
-    text += `• **/deposit amount:<amount>**: move purse to bank\n`;
-    text += `• **/invest amount:<amount>**: alias of /deposit\n`;
-    text += `• **/withdraw amount:<amount>**: move bank to purse\n`;
-    text += `• **/bank**: show bank amount, rate, and next payout\n`;
-    text += `• **/upgrades**: buy and view upgrades\n`;
-    text += `• **/pool**: view universal and daily spin pools\n\n`;
-
-    text += `**Game Commands**\n`;
-    text += `• **/flip amount:<amount> quantity:<1-10 optional>**\n`;
-    text += `• **/dice amount:<amount>** (then pick high or low)\n`;
-    text += `• **/roulette amount:<amount>** (then pick red, black, or green)\n`;
-    text += `• **/allin17black** (all purse coins on 17 black)\n`;
-    text += `• **/blackjack amount:<amount>** (buttons for hit, stand, double, split)\n`;
-    text += `• **/mines amount:<amount> mines:<1-15>**\n`;
-    text += `• **/letitride amount:<amount>**\n`;
-    text += `• **/duel opponent:<user> amount:<amount>**\n\n`;
-
-    text += `**Player Economy and Social**\n`;
-    text += `• **/give user:<user> amount:<amount>**: send coins to another player\n`;
-    text += `• **/trade user:<user>**: start item/coin trade flow\n`;
-    text += `• **/leaderboard**: richest players\n`;
-    text += `• **/stats user:<user optional> username:<text optional>**\n`;
-    text += `• **/giveaway message:<text optional>**: start giveaway modal\n\n`;
-
+    let text = `**Command Reference**\n\n`;
+    text += `Amount format: **100**, **4.7k**, **1.2m**, **2b**, **all**\n\n`;
+    text += `**Money**\n`;
+    text += `• /balance /daily /bank /pool\n`;
+    text += `• /deposit /invest /withdraw\n`;
+    text += `• /upgrades\n\n`;
+    text += `**Games**\n`;
+    text += `• /flip /dice /roulette /allin17black\n`;
+    text += `• /blackjack /mines /letitride /duel\n\n`;
+    text += `**Economy + Social**\n`;
+    text += `• /give /trade /leaderboard /stats /pity /giveaway\n\n`;
     text += `**Collectibles**\n`;
-    text += `• **/mysterybox quantity:<1-50 optional>**\n`;
-    text += `• **/inventory page:<1+ optional>**\n`;
-    text += `• **/collection**\n\n`;
-
-    text += `**Help**\n`;
-    text += `• **/help general** economy, pools, upgrades, collectibles\n`;
-    text += `• **/help games** payouts, EV, and formulas\n`;
-    text += `• **/help commands** full command list and inputs`;
-    return interaction.reply(text);
+    text += `• /mysterybox /inventory /collection\n\n`;
+    text += `**Help Topics**\n`;
+    text += `• /help general | universalincome | collectibles | games | modifiers | mysteryboxes | commands`;
+    return replyHelp(interaction, text);
   }
 
-  return interaction.reply(`Unknown help topic. Try **/help general**, **/help games**, or **/help commands**.`);
+  return interaction.reply(`Unknown help topic. Try **/help general**, **/help universalincome**, **/help collectibles**, **/help games**, **/help modifiers**, **/help mysteryboxes**, or **/help commands**.`);
 }
 
 module.exports = { handleHelp };

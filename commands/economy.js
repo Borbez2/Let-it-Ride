@@ -10,6 +10,151 @@ const activeTrades = new Map();
 const pendingGiveawayMessages = new Map();
 const RARITY_ORDER = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
 
+async function createQuickChartUrl(chartConfig, width = 980, height = 420) {
+  const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+  if (directChartUrl.length <= 2000) return directChartUrl;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    const resp = await fetch('https://quickchart.io/chart/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        width,
+        height,
+        devicePixelRatio: 1.5,
+        backgroundColor: '#1f1f1f',
+        chart: chartConfig,
+        format: 'png',
+      }),
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    const body = await resp.json().catch(() => null);
+    if (!body || typeof body.url !== 'string') return null;
+    return body.url;
+  } catch {
+    return null;
+  }
+}
+
+function buildMonospaceTable(columns, rows) {
+  const widths = columns.map((column) => {
+    const rowMax = rows.reduce((max, row) => Math.max(max, String(row[column.key] ?? '').length), 0);
+    return Math.max(column.header.length, rowMax);
+  });
+
+  const formatRow = (rowObj) => columns
+    .map((column, index) => String(rowObj[column.key] ?? '').padEnd(widths[index]))
+    .join('  ');
+
+  const headerRow = formatRow(Object.fromEntries(columns.map((col) => [col.key, col.header])));
+  const dividerRow = widths.map((w) => '-'.repeat(w)).join('  ');
+  const bodyRows = rows.map((row) => formatRow(row));
+  return ['```', headerRow, dividerRow, ...bodyRows, '```'].join('\n');
+}
+
+function pickSlotSeconds(durationMs, maxPoints = 200) {
+  if (durationMs <= 0) return 10;
+  const raw = Math.ceil((durationMs / 1000) / Math.max(1, maxPoints - 1));
+  return Math.max(10, Math.ceil(raw / 10) * 10);
+}
+
+function buildRelativeLabels(slotCount, slotSeconds) {
+  const tickEvery = Math.max(1, Math.floor(slotCount / 8));
+  return Array.from({ length: slotCount }, (_, i) => {
+    if (i !== slotCount - 1 && (i % tickEvery !== 0)) return '';
+    const age = (slotCount - i - 1) * slotSeconds;
+    if (age === 0) return 'Now';
+    if (age >= 86400) return `-${Math.floor(age / 86400)}d`;
+    if (age >= 3600) return `-${Math.floor(age / 3600)}h`;
+    if (age >= 60) return `-${Math.floor(age / 60)}m`;
+    return `-${age}s`;
+  });
+}
+
+function seriesForRange(history, startTs, slotCount, slotSeconds) {
+  const data = Array(slotCount).fill(null);
+  for (let i = history.length - 1; i >= 0; i--) {
+    const point = history[i];
+    const ts = point?.t || 0;
+    if (ts < startTs) break;
+    const idx = Math.floor((ts - startTs) / (slotSeconds * 1000));
+    if (idx < 0 || idx >= slotCount) continue;
+    data[idx] = point?.v || 0;
+  }
+  return data;
+}
+
+async function buildAllPlayersGraphUrl(client, wallets) {
+  const palette = [
+    '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#8dd17e', '#ff7aa2', '#00bcd4', '#cddc39',
+    '#f06292', '#64b5f6', '#ffd54f', '#4db6ac', '#9575cd', '#ffb74d', '#81c784', '#ba68c8', '#90a4ae', '#ef5350',
+  ];
+
+  const candidates = Object.entries(wallets)
+    .map(([id, w]) => {
+      const history = Array.isArray(w?.stats?.netWorthHistory) ? w.stats.netWorthHistory : [];
+      const last = history.length ? history[history.length - 1].v || 0 : 0;
+      return { id, history, last };
+    })
+    .filter((row) => row.history.length >= 2)
+    .sort((a, b) => b.last - a.last)
+    .slice(0, 20);
+
+  if (!candidates.length) return null;
+
+  const now = Date.now();
+  const earliest = candidates.reduce((min, c) => Math.min(min, c.history[0]?.t || now), now);
+  const durationMs = Math.max(1000, now - earliest);
+  const slotSeconds = pickSlotSeconds(durationMs, 220);
+  const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
+  const labels = buildRelativeLabels(slotCount, slotSeconds);
+
+  const datasets = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const entry = candidates[i];
+    const user = await client.users.fetch(entry.id).catch(() => null);
+    const label = (user?.username || `User ${entry.id.slice(-4)}`).slice(0, 16);
+    const data = seriesForRange(entry.history, earliest, slotCount, slotSeconds);
+    const points = data.filter((v) => v !== null).length;
+    if (points < 2) continue;
+    datasets.push({
+      label,
+      data,
+      borderColor: palette[i % palette.length],
+      backgroundColor: palette[i % palette.length],
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.25,
+      spanGaps: true,
+      fill: false,
+    });
+  }
+
+  if (!datasets.length) return null;
+
+  const chartConfig = {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: '#ffffff', boxWidth: 10 } },
+        title: { display: true, text: 'Player Networth', color: '#ffffff' },
+      },
+      scales: {
+        x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+      },
+      layout: { padding: 8 },
+    },
+  };
+
+  return createQuickChartUrl(chartConfig, 980, 420);
+}
+
 function persistTradeSessions() {
   store.setRuntimeState('session:trades', {
     activeTrades: Object.fromEntries(activeTrades),
@@ -32,21 +177,33 @@ restoreTradeSessions();
 function renderUpgradesPage(userId) {
   const w = store.getWallet(userId);
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
-  const iRate = BASE_INVEST_RATE + (iLvl * 0.01), cRate = cLvl * 0.1, sW = 1 + sLvl, uChance = uLvl;
+  const bonuses = store.getUserBonuses(userId);
+  const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sW = 1 + sLvl, uChance = bonuses.universalIncomeDoubleChance * 100;
+  const iBaseRate = BASE_INVEST_RATE + (iLvl * 0.01);
+  const cBaseRatePct = cLvl * 0.1;
   const iCost = iLvl < 10 ? UPGRADE_COSTS[iLvl] : null;
   const cCost = cLvl < 10 ? UPGRADE_COSTS[cLvl] : null;
   const sCost = sLvl < 10 ? SPIN_MULT_COSTS[sLvl] : null;
   const uCost = uLvl < 10 ? UPGRADE_COSTS[uLvl] : null;
 
   let text = `**Upgrades**\n\nPurse: ${store.formatNumber(w.balance)} coins\n\n--------------------\n\n`;
-  text += `**Bank Interest** Lv ${iLvl}/10 — ${(iRate * 100).toFixed(0)}% daily (hourly)\n`;
-  text += iCost ? `Next: ${((iRate + 0.01) * 100).toFixed(0)}% for ${store.formatNumber(iCost)}\n\n` : `MAXED\n\n`;
-  text += `**Loss Cashback** Lv ${cLvl}/10 — ${cRate.toFixed(1)}% back\n`;
-  text += cCost ? `Next: ${(cRate + 0.1).toFixed(1)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
+  text += `**Bank Interest** Lv ${iLvl}/10 — ${(iRate * 100).toFixed(2)}% daily (hourly)\n`;
+  text += iCost ? `Next upgrade base: ${((iBaseRate + 0.01) * 100).toFixed(2)}% for ${store.formatNumber(iCost)}\n\n` : `MAXED\n\n`;
+  text += `**Loss Cashback** Lv ${cLvl}/10 — ${cRatePct.toFixed(2)}% back\n`;
+  text += cCost ? `Next upgrade base: ${(cBaseRatePct + 0.1).toFixed(2)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
   text += `**Daily Spin Mult** Lv ${sLvl}/10 — ${sW}x weight\n`;
   text += sCost ? `Next: ${sW + 1}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
-  text += `**Hourly Universal Income Mult** Lv ${uLvl}/10 — ${uChance}% chance to double income\n`;
-  text += uCost ? `Next: ${uChance + 1}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
+  text += `**Hourly Universal Income Mult** Lv ${uLvl}/10 — ${uChance.toFixed(2)}% chance to double income\n`;
+  text += uCost ? `Next base: ${(uLvl + 1).toFixed(0)}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
+  text += `**Item and Collection Effects**\n`;
+  if (bonuses.inventoryEffects.length === 0) {
+    text += `No active item boosts yet.\n\n`;
+  } else {
+    for (const line of bonuses.inventoryEffects.slice(0, 5)) {
+      text += `• ${line}\n`;
+    }
+    text += '\n';
+  }
   text += `Use **/mysterybox** to buy collectible boxes!\n`;
 
   const rows = [];
@@ -324,16 +481,29 @@ async function handleLeaderboard(interaction, client) {
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
   if (!entries.length) return interaction.reply("No players yet!");
 
-  let board = "**Leaderboard**\n```\nRank Player          Purse       Bank        Total\n---- -------------- ----------- ----------- -----------\n";
   const medals = ['🥇', '🥈', '🥉'];
+  const lines = [];
   for (let i = 0; i < entries.length; i++) {
     const u = await client.users.fetch(entries[i].id).catch(() => null);
-    const nm = (u ? u.username : "Unknown").substring(0, 14).padEnd(14);
-    const rk = (i < 3 ? medals[i] : `${i + 1}.`).padEnd(4);
-    board += `${rk} ${nm} ${store.formatNumber(entries[i].balance).padStart(11)} ${store.formatNumber(entries[i].bank).padStart(11)} ${store.formatNumber(entries[i].balance + entries[i].bank).padStart(11)}\n`;
+    const username = u ? u.username : 'Unknown';
+    const rank = i < 3 ? medals[i] : `${i + 1}.`;
+    const wallet = store.formatNumber(entries[i].balance);
+    const bank = store.formatNumber(entries[i].bank);
+    const total = store.formatNumber(entries[i].balance + entries[i].bank);
+    lines.push(`${rank} **${username}**`);
+    lines.push(`Wallet: ${wallet} | Bank: ${bank} | Total: ${total}`);
   }
-  board += "```";
-  return interaction.reply(board);
+
+  const tableEmbed = {
+    title: 'Leaderboard',
+    color: 0x2b2d31,
+    description: lines.join('\n'),
+  };
+
+  const graphUrl = await buildAllPlayersGraphUrl(client, wallets);
+  if (graphUrl) tableEmbed.image = { url: graphUrl };
+
+  return interaction.reply({ embeds: [tableEmbed] });
 }
 
 async function handleUpgrades(interaction) {
@@ -356,7 +526,7 @@ async function handleMysteryBox(interaction) {
   let totalCompensation = 0;
   
   for (let i = 0; i < quantity; i++) {
-    const item = store.rollMysteryBox();
+    const item = store.rollMysteryBox(userId);
     
     // Check if this is a duplicate placeholder
     if (item.id && item.id.startsWith('placeholder_')) {
@@ -448,16 +618,33 @@ async function handleCollection(interaction, client) {
     .filter(e => e.count > 0)
     .sort((a, b) => b.unique - a.unique || b.count - a.count).slice(0, 10);
   if (!entries.length) return interaction.reply("Nobody has collectibles yet!");
-  let board = "**Collectible Leaderboard**\n```\nRank Player         Unique Total\n---- -------------- ------ -----\n";
+
   const medals = ['🥇', '🥈', '🥉'];
+  const rows = [];
   for (let i = 0; i < entries.length; i++) {
     const u = await client.users.fetch(entries[i].id).catch(() => null);
-    const nm = (u ? u.username : "Unknown").substring(0, 14).padEnd(14);
-    const rk = (i < 3 ? medals[i] : `${i + 1}.`).padEnd(4);
-    board += `${rk} ${nm} ${String(entries[i].unique).padStart(6)} ${String(entries[i].count).padStart(5)}\n`;
+    rows.push({
+      rank: i < 3 ? medals[i] : `${i + 1}`,
+      player: (u ? u.username : 'Unknown').slice(0, 24),
+      unique: String(entries[i].unique),
+      total: String(entries[i].count),
+    });
   }
-  board += "```";
-  return interaction.reply(board);
+
+  const columns = [
+    { key: 'rank', header: 'Rank' },
+    { key: 'player', header: 'Player' },
+    { key: 'unique', header: 'Unique' },
+    { key: 'total', header: 'Total' },
+  ];
+  const tableText = buildMonospaceTable(columns, rows);
+  const tableEmbed = {
+    title: 'Collectible Leaderboard',
+    color: 0x2b2d31,
+    description: tableText,
+  };
+
+  return interaction.reply({ embeds: [tableEmbed] });
 }
 
 async function handlePool(interaction) {

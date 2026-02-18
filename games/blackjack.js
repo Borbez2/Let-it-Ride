@@ -5,6 +5,23 @@ const store = require('../data/store');
 const activeGames = new Map();
 const activeSplitGames = new Map();
 
+async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
+  if (!pityResult || !pityResult.triggered) return;
+  const channel = interaction.channel;
+  if (!channel || typeof channel.send !== 'function') return;
+
+  const addedPct = (pityResult.addedBoostRate * 100).toFixed(2);
+  const totalPct = (pityResult.totalBoostRate * 100).toFixed(2);
+  const thresholds = Array.isArray(pityResult.crossedThresholds) && pityResult.crossedThresholds.length
+    ? pityResult.crossedThresholds.map(v => `${v}%`).join(', ')
+    : 'none';
+
+  await channel.send(
+    `⚡ <@${userId}> pity triggered: +${addedPct}% EV (${pityResult.addedStacks} stack${pityResult.addedStacks === 1 ? '' : 's'}) | ` +
+    `active total +${totalPct}% | probability of being this lucky/unlucky ${Number(pityResult.confidence || 0).toFixed(2)}% | crossed: ${thresholds}`
+  ).catch(() => null);
+}
+
 function persistBlackjackSessions() {
   store.setRuntimeState('session:blackjack', {
     activeGames: Object.fromEntries(activeGames),
@@ -52,7 +69,7 @@ function renderSplitStatus(game) {
 }
 
 // Resolve the dealer hand and all split hands.
-function resolveSplitGame(interaction, uid, game) {
+async function resolveSplitGame(interaction, uid, game) {
   let dv = getHandValue(game.dealerHand);
   while (dv < 17) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
 
@@ -62,8 +79,16 @@ function resolveSplitGame(interaction, uid, game) {
     const hh = game.hands[h], v = getHandValue(hh.cards);
     let o = '';
     if (hh.busted) { o = `BUST -${store.formatNumber(hh.bet)}`; }
-    else if (dv > 21) { payout += hh.bet * 2; o = `Dealer busts +${store.formatNumber(hh.bet)}`; }
-    else if (v > dv) { payout += hh.bet * 2; o = `Win +${store.formatNumber(hh.bet)}`; }
+    else if (dv > 21) {
+      const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      payout += hh.bet + boostedProfit;
+      o = `Dealer busts +${store.formatNumber(boostedProfit)}`;
+    }
+    else if (v > dv) {
+      const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      payout += hh.bet + boostedProfit;
+      o = `Win +${store.formatNumber(boostedProfit)}`;
+    }
     else if (v < dv) { o = `Lose -${store.formatNumber(hh.bet)}`; }
     else { payout += hh.bet; o = `Push`; }
     rt += `Hand ${h + 1}: ${formatHand(hh.cards)} (${v}) ${o}\n`;
@@ -73,11 +98,13 @@ function resolveSplitGame(interaction, uid, game) {
 
   store.setBalance(uid, store.getBalance(uid) + payout);
   if (profit > 0) {
-    store.recordWin(uid, 'blackjack', profit);
+    const pityResult = store.recordWin(uid, 'blackjack', profit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     store.addToUniversalPool(profit);
   }
   if (profit < 0) {
-    store.recordLoss(uid, 'blackjack', Math.abs(profit));
+    const pityResult = store.recordLoss(uid, 'blackjack', Math.abs(profit));
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     store.applyCashback(uid, Math.abs(profit));
     store.addToLossPool(Math.abs(profit));
   }
@@ -95,7 +122,7 @@ function resolveSplitGame(interaction, uid, game) {
 //   win  => return bet + winnings
 //   lose => no further deduction needed
 //   push => return bet
-function resolveStandard(interaction, uid, game, doubled) {
+async function resolveStandard(interaction, uid, game, doubled) {
   const pv = getHandValue(game.playerHand);
   const bal = store.getBalance(uid);
   let dv = getHandValue(game.dealerHand);
@@ -103,15 +130,20 @@ function resolveStandard(interaction, uid, game, doubled) {
 
   let res;
   if (dv > 21) {
-    store.recordWin(uid, 'blackjack', game.bet);
-    store.setBalance(uid, bal + game.bet * 2); store.addToUniversalPool(game.bet);
-    res = `Dealer busts! +**${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet * 2)}**`;
+    const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
+    const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    store.setBalance(uid, bal + game.bet + boostedProfit); store.addToUniversalPool(boostedProfit);
+    res = `Dealer busts! +**${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
   } else if (pv > dv) {
-    store.recordWin(uid, 'blackjack', game.bet);
-    store.setBalance(uid, bal + game.bet * 2); store.addToUniversalPool(game.bet);
-    res = `Win! ${pv}>${dv} +**${store.formatNumber(game.bet)}**\nBalance: **${store.formatNumber(bal + game.bet * 2)}**`;
+    const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
+    const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    store.setBalance(uid, bal + game.bet + boostedProfit); store.addToUniversalPool(boostedProfit);
+    res = `Win! ${pv}>${dv} +**${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
   } else if (dv > pv) {
-    store.recordLoss(uid, 'blackjack', game.bet);
+    const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     // bet already deducted, no further deduction needed
     const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
@@ -167,8 +199,13 @@ async function handleCommand(interaction) {
       return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit).
-    const profit = Math.floor(bet * 1.5);    store.recordWin(userId, 'blackjack', profit);    store.setBalance(userId, bal + profit); store.addToUniversalPool(profit);
-    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(profit)}**! Balance: **${store.formatNumber(bal + profit)}**`);
+    const baseProfit = Math.floor(bet * 1.5);
+    const boostedProfit = store.applyProfitBoost(userId, 'blackjack', baseProfit);
+    const pityResult = store.recordWin(userId, 'blackjack', boostedProfit);
+    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
+    store.setBalance(userId, bal + boostedProfit);
+    store.addToUniversalPool(boostedProfit);
+    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(boostedProfit)}**! Balance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
 
   // Check if the player can afford a double/split using remaining balance.
@@ -256,7 +293,8 @@ async function handleButton(interaction, parts) {
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
       // Bust after doubling; the full bet is already deducted.
-      store.recordLoss(uid, 'blackjack', game.bet);
+      const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
+      await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
       store.addToLossPool(game.bet);
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
@@ -276,7 +314,8 @@ async function handleButton(interaction, parts) {
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
       // Bust on hit; the bet was already deducted at game start.
-      store.recordLoss(uid, 'blackjack', game.bet);
+      const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
+      await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
       store.addToLossPool(game.bet);
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';

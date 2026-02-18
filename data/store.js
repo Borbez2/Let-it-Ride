@@ -1,10 +1,55 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const binomial = require('../utils/binomial');
 const {
   STARTING_COINS, BASE_INVEST_RATE,
   POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS,
 } = require('../config');
+
+const GAME_KEYS = ['flip', 'dice', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'];
+const RARITY_TIER = {
+  common: 1,
+  uncommon: 2,
+  rare: 3,
+  legendary: 4,
+  epic: 5,
+  mythic: 6,
+  divine: 7,
+};
+const DEFAULT_RUNTIME_TUNING = {
+  lifeStatsIntervalMs: 10000,
+  globalEvScalar: 1,
+  binomialPityThreshold: 97,
+  binomialPityBoostRate: 0.01,
+  binomialPityDurationMinutes: 30,
+  binomialPityCooldownMinutes: 15,
+};
+const PITY_MAX_BOOST_RATE = 0.10;
+
+const COLLECTIBLE_EFFECTS = (() => {
+  const map = {};
+  for (let i = 1; i <= 120; i++) {
+    map[`placeholder_${i}`] = {
+      interestRateBonus: 0,
+      cashbackRateBonus: 0,
+      mysteryBoxLuckBonus: 0,
+      minesRevealChance: 0,
+      universalDoubleChanceBonus: 0,
+      evBoostByGame: {
+        flip: 0,
+        dice: 0,
+        roulette: 0,
+        blackjack: 0,
+        mines: 0,
+        letitride: 0,
+        duel: 0,
+      },
+      label: null,
+    };
+  }
+  return map;
+})();
 
 // Set up the SQLite database.
 const DB_PATH = path.join(__dirname, 'gambling.db');
@@ -58,13 +103,285 @@ const DEFAULT_STATS = () => ({
   letitride: { wins: 0, losses: 0 },
   duel: { wins: 0, losses: 0 },
   giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
-  mysteryBox: { duplicateCompEarned: 0 },
+  mysteryBox: { duplicateCompEarned: 0, opened: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 },
   dailySpin: { won: 0, amountWon: 0 },
   interest: { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 },
   universalIncome: { totalEarned: 0 },
+  bonuses: {
+    minesSaves: 0,
+    evBoostProfit: 0,
+    binomialPity: {
+      activeUntil: 0,
+      boostRate: 0,
+      stacks: [],
+      triggers: 0,
+      lastTriggeredAt: 0,
+      lastDirection: 'neutral',
+      lastConfidence: 0,
+      lastTotalGames: 0,
+    },
+  },
+  netWorthHistory: [],
   lifetimeEarnings: 0,
   lifetimeLosses: 0,
 });
+
+function getInventoryBonuses(inventory) {
+  const bonuses = {
+    interestRateBonus: 0,
+    cashbackRateBonus: 0,
+    mysteryBoxLuckBonus: 0,
+    minesRevealChance: 0,
+    universalDoubleChanceBonus: 0,
+    evBoostByGame: {
+      flip: 0,
+      dice: 0,
+      roulette: 0,
+      blackjack: 0,
+      mines: 0,
+      letitride: 0,
+      duel: 0,
+    },
+    effectLines: [],
+  };
+
+  if (!Array.isArray(inventory) || inventory.length === 0) return bonuses;
+
+  for (const item of inventory) {
+    const effect = COLLECTIBLE_EFFECTS[item.id];
+    if (!effect) continue;
+
+    bonuses.interestRateBonus += effect.interestRateBonus || 0;
+    bonuses.cashbackRateBonus += effect.cashbackRateBonus || 0;
+    bonuses.mysteryBoxLuckBonus += effect.mysteryBoxLuckBonus || 0;
+    bonuses.minesRevealChance += effect.minesRevealChance || 0;
+    bonuses.universalDoubleChanceBonus += effect.universalDoubleChanceBonus || 0;
+
+    for (const game of GAME_KEYS) {
+      bonuses.evBoostByGame[game] += (effect.evBoostByGame && effect.evBoostByGame[game]) || 0;
+    }
+
+    if (effect.label) {
+      bonuses.effectLines.push(effect.label);
+    }
+  }
+
+  if (!bonuses.effectLines.length) {
+    if (bonuses.interestRateBonus > 0) bonuses.effectLines.push(`Bank interest +${(bonuses.interestRateBonus * 100).toFixed(2)}%/day`);
+    if (bonuses.cashbackRateBonus > 0) bonuses.effectLines.push(`Cashback +${(bonuses.cashbackRateBonus * 100).toFixed(2)}%`);
+    if (bonuses.mysteryBoxLuckBonus > 0) bonuses.effectLines.push(`Mystery box luck +${(bonuses.mysteryBoxLuckBonus * 100).toFixed(2)}%`);
+    if (bonuses.minesRevealChance > 0) bonuses.effectLines.push(`Mines auto-reveal save ${(bonuses.minesRevealChance * 100).toFixed(2)}%`);
+  }
+
+  return bonuses;
+}
+
+function ensureWalletStatsShape(w) {
+  if (!w.stats) w.stats = DEFAULT_STATS();
+  for (const g of GAME_KEYS) {
+    if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
+  }
+  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0, opened: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 };
+  if (w.stats.mysteryBox.duplicateCompEarned === undefined) w.stats.mysteryBox.duplicateCompEarned = 0;
+  if (w.stats.mysteryBox.opened === undefined) w.stats.mysteryBox.opened = 0;
+  if (w.stats.mysteryBox.luckyHighRarity === undefined) w.stats.mysteryBox.luckyHighRarity = 0;
+  if (w.stats.mysteryBox.pityStreak === undefined) w.stats.mysteryBox.pityStreak = 0;
+  if (w.stats.mysteryBox.bestPityStreak === undefined) w.stats.mysteryBox.bestPityStreak = 0;
+  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
+  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
+  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
+  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
+  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
+  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
+  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
+  if (!w.stats.bonuses) {
+    w.stats.bonuses = {
+      minesSaves: 0,
+      evBoostProfit: 0,
+      binomialPity: {
+        activeUntil: 0,
+        boostRate: 0,
+        stacks: [],
+        triggers: 0,
+        lastTriggeredAt: 0,
+        lastDirection: 'neutral',
+        lastConfidence: 0,
+        lastTotalGames: 0,
+      },
+    };
+  }
+  if (w.stats.bonuses.minesSaves === undefined) w.stats.bonuses.minesSaves = 0;
+  if (w.stats.bonuses.evBoostProfit === undefined) w.stats.bonuses.evBoostProfit = 0;
+  if (!w.stats.bonuses.binomialPity) {
+    w.stats.bonuses.binomialPity = {
+      activeUntil: 0,
+      boostRate: 0,
+      stacks: [],
+      triggers: 0,
+      lastTriggeredAt: 0,
+      lastDirection: 'neutral',
+      lastConfidence: 0,
+      lastTotalGames: 0,
+    };
+  }
+  if (w.stats.bonuses.binomialPity.activeUntil === undefined) w.stats.bonuses.binomialPity.activeUntil = 0;
+  if (w.stats.bonuses.binomialPity.boostRate === undefined) w.stats.bonuses.binomialPity.boostRate = 0;
+  if (!Array.isArray(w.stats.bonuses.binomialPity.stacks)) w.stats.bonuses.binomialPity.stacks = [];
+  if (w.stats.bonuses.binomialPity.triggers === undefined) w.stats.bonuses.binomialPity.triggers = 0;
+  if (w.stats.bonuses.binomialPity.lastTriggeredAt === undefined) w.stats.bonuses.binomialPity.lastTriggeredAt = 0;
+  if (w.stats.bonuses.binomialPity.lastDirection === undefined) w.stats.bonuses.binomialPity.lastDirection = 'neutral';
+  if (w.stats.bonuses.binomialPity.lastConfidence === undefined) w.stats.bonuses.binomialPity.lastConfidence = 0;
+  if (w.stats.bonuses.binomialPity.lastTotalGames === undefined) w.stats.bonuses.binomialPity.lastTotalGames = 0;
+  if (!Array.isArray(w.stats.netWorthHistory)) w.stats.netWorthHistory = [];
+  if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
+  if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
+}
+
+function getCombinedGameWinStats(stats) {
+  let wins = 0;
+  let total = 0;
+  for (const game of GAME_KEYS) {
+    const gs = stats[game] || { wins: 0, losses: 0 };
+    wins += gs.wins || 0;
+    total += (gs.wins || 0) + (gs.losses || 0);
+  }
+  return { wins, total };
+}
+
+function refreshBinomialPityStacks(pity, now = Date.now()) {
+  const stacks = Array.isArray(pity.stacks) ? pity.stacks : [];
+  const activeStacks = stacks.filter((stack) => {
+    const rate = normalizeNumeric(stack.rate, 0);
+    const expiresAt = normalizeNumeric(stack.expiresAt, 0);
+    return rate > 0 && expiresAt > now;
+  }).map((stack) => ({
+    rate: normalizeNumeric(stack.rate, 0),
+    expiresAt: normalizeNumeric(stack.expiresAt, 0),
+    reason: typeof stack.reason === 'string' ? stack.reason : 'threshold',
+  }));
+
+  let runningRate = 0;
+  const cappedStacks = [];
+  for (const stack of activeStacks) {
+    if (runningRate >= PITY_MAX_BOOST_RATE) break;
+    const remainingCap = PITY_MAX_BOOST_RATE - runningRate;
+    if (stack.rate > remainingCap) continue;
+    cappedStacks.push(stack);
+    runningRate += stack.rate;
+  }
+
+  pity.stacks = cappedStacks;
+  pity.boostRate = cappedStacks.reduce((sum, stack) => sum + stack.rate, 0);
+  pity.activeUntil = cappedStacks.reduce((max, stack) => Math.max(max, stack.expiresAt), 0);
+}
+
+function getBinomialPityBoostState(w, now = Date.now()) {
+  ensureWalletStatsShape(w);
+  const pity = w.stats.bonuses.binomialPity;
+  refreshBinomialPityStacks(pity, now);
+  const active = pity.activeUntil > now && pity.boostRate > 0;
+  return {
+    active,
+    boostRate: active ? pity.boostRate : 0,
+    activeUntil: pity.activeUntil || 0,
+    expiresInMs: active ? (pity.activeUntil - now) : 0,
+    triggers: pity.triggers || 0,
+    lastTriggeredAt: pity.lastTriggeredAt || 0,
+    lastDirection: pity.lastDirection || 'neutral',
+    lastConfidence: pity.lastConfidence || 0,
+    lastTotalGames: pity.lastTotalGames || 0,
+    activeStacks: (pity.stacks || []).length,
+  };
+}
+
+function evaluateBinomialPity(w, now = Date.now()) {
+  ensureWalletStatsShape(w);
+  const tuning = getRuntimeTuning();
+  const pity = w.stats.bonuses.binomialPity;
+  const previousDirection = pity.lastDirection || 'neutral';
+  const previousConfidence = normalizeNumeric(pity.lastConfidence, 0);
+  const { wins, total } = getCombinedGameWinStats(w.stats);
+  const assessment = binomial.getLuckAssessment(wins, total, 0.5);
+  if (!assessment) {
+    getBinomialPityBoostState(w, now);
+    return { triggered: false };
+  }
+
+  pity.lastDirection = assessment.direction;
+  pity.lastConfidence = assessment.confidence;
+  pity.lastTotalGames = total;
+  refreshBinomialPityStacks(pity, now);
+
+  if (assessment.direction !== 'unlucky') {
+    return { triggered: false };
+  }
+
+  const thresholdFloor = Math.max(50, Math.min(99, normalizeNumeric(tuning.binomialPityThreshold, 97)));
+  const thresholds = [60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99].filter((value) => value >= thresholdFloor);
+  const prior = previousDirection === 'unlucky' ? previousConfidence : 0;
+  const crossedThresholds = thresholds.filter((threshold) => prior < threshold && assessment.confidence >= threshold);
+
+  const perTriggerRate = Math.max(0, tuning.binomialPityBoostRate || 0.01);
+  const durationMs = Math.max(1, tuning.binomialPityDurationMinutes) * 60 * 1000;
+  const availableHeadroom = Math.max(0, PITY_MAX_BOOST_RATE - (pity.boostRate || 0));
+  const maxTriggersByCap = perTriggerRate > 0 ? Math.floor((availableHeadroom + 1e-12) / perTriggerRate) : 0;
+  const triggerCount = Math.min(crossedThresholds.length, maxTriggersByCap);
+  if (triggerCount <= 0 || perTriggerRate <= 0) {
+    return { triggered: false };
+  }
+
+  const appliedThresholds = crossedThresholds.slice(0, triggerCount);
+  for (const threshold of appliedThresholds) {
+    pity.stacks.push({
+      rate: perTriggerRate,
+      expiresAt: now + durationMs,
+      reason: `threshold:${threshold}`,
+    });
+  }
+  refreshBinomialPityStacks(pity, now);
+  pity.lastTriggeredAt = now;
+  pity.triggers = (pity.triggers || 0) + triggerCount;
+
+  return {
+    triggered: true,
+    addedStacks: triggerCount,
+    addedBoostRate: perTriggerRate * triggerCount,
+    totalBoostRate: pity.boostRate,
+    activeUntil: pity.activeUntil,
+    confidence: assessment.confidence,
+    totalGames: total,
+    crossedThresholds: appliedThresholds,
+    highBonusTriggered: false,
+  };
+}
+
+function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto', options = {}) {
+  ensureWalletStatsShape(w);
+  const history = w.stats.netWorthHistory;
+  const total = normalizeCoins((w.balance || 0) + (w.bank || 0), 0);
+  const last = history.length ? history[history.length - 1] : null;
+  const minMs = Number.isFinite(options.minMs) ? Math.max(0, options.minMs) : (15 * 60 * 1000);
+  const minDelta = 1000;
+  const force = !!options.force;
+  const shouldWrite = force || !last || (now - last.t >= minMs) || Math.abs(total - last.v) >= minDelta;
+  if (!shouldWrite) return false;
+  history.push({ t: now, v: total, r: reason });
+  if (history.length > 240) {
+    history.splice(0, history.length - 240);
+  }
+  return true;
+}
+
+function trackLifeStatsHeartbeat(now = Date.now()) {
+  let wroteAny = false;
+  for (const wallet of Object.values(wallets)) {
+    const wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', { minMs: 10 * 1000 });
+    if (wrote) wroteAny = true;
+  }
+  if (wroteAny) saveWallets();
+  return wroteAny;
+}
 
 // Prepared SQL statements.
 const stmts = {
@@ -121,7 +438,7 @@ function migrateFromJson() {
         for (const [userId, w] of Object.entries(jsonWallets)) {
           const stats = w.stats || DEFAULT_STATS();
           // Ensure every game stat bucket exists.
-          for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
+          for (const g of GAME_KEYS) {
             if (!stats[g]) stats[g] = { wins: 0, losses: 0 };
           }
           if (stats.lifetimeEarnings === undefined) stats.lifetimeEarnings = 0;
@@ -228,6 +545,44 @@ function removeRuntimeState(key) {
   stmts.deleteRuntimeState.run(key);
 }
 
+function sanitizeRuntimeTuning(partial = {}) {
+  const merged = { ...DEFAULT_RUNTIME_TUNING, ...(partial || {}) };
+  const intervalMs = Math.max(10000, Math.min(600000, Math.trunc(normalizeNumeric(merged.lifeStatsIntervalMs, DEFAULT_RUNTIME_TUNING.lifeStatsIntervalMs))));
+  const globalEvScalar = Math.max(0, Math.min(5, normalizeNumeric(merged.globalEvScalar, DEFAULT_RUNTIME_TUNING.globalEvScalar)));
+  const threshold = Math.max(50, Math.min(99.999, normalizeNumeric(merged.binomialPityThreshold, DEFAULT_RUNTIME_TUNING.binomialPityThreshold)));
+  const boostRate = Math.max(0, Math.min(0.5, normalizeNumeric(merged.binomialPityBoostRate, DEFAULT_RUNTIME_TUNING.binomialPityBoostRate)));
+  const durationMinutes = Math.max(1, Math.min(1440, normalizeNumeric(merged.binomialPityDurationMinutes, DEFAULT_RUNTIME_TUNING.binomialPityDurationMinutes)));
+  const cooldownMinutes = Math.max(0, Math.min(1440, normalizeNumeric(merged.binomialPityCooldownMinutes, DEFAULT_RUNTIME_TUNING.binomialPityCooldownMinutes)));
+  return {
+    lifeStatsIntervalMs: intervalMs,
+    globalEvScalar,
+    binomialPityThreshold: threshold,
+    binomialPityBoostRate: boostRate,
+    binomialPityDurationMinutes: durationMinutes,
+    binomialPityCooldownMinutes: cooldownMinutes,
+  };
+}
+
+function getRuntimeTuning() {
+  const raw = getRuntimeState('runtime:tuning', null);
+  return sanitizeRuntimeTuning(raw || {});
+}
+
+function updateRuntimeTuning(partial = {}) {
+  const next = sanitizeRuntimeTuning({ ...getRuntimeTuning(), ...(partial || {}) });
+  setRuntimeState('runtime:tuning', next);
+  return next;
+}
+
+function resetRuntimeTuning() {
+  setRuntimeState('runtime:tuning', { ...DEFAULT_RUNTIME_TUNING });
+  return getRuntimeTuning();
+}
+
+function getDefaultRuntimeTuning() {
+  return { ...DEFAULT_RUNTIME_TUNING };
+}
+
 // Backfill missing fields on existing wallets.
 for (const id in wallets) {
   const w = wallets[id];
@@ -235,21 +590,8 @@ for (const id in wallets) {
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
   if (w.universalIncomeMultLevel === undefined) w.universalIncomeMultLevel = 0;
   if (w.lastBankPayout === undefined) w.lastBankPayout = Date.now();
-  if (!w.stats) w.stats = DEFAULT_STATS();
-  for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
-    if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
-  }
-  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
-  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
-  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
-  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
-  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
-  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
-  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
-  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
-  if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
-  if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
+  ensureWalletStatsShape(w);
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'migration');
 }
 saveWallets();
 console.log('Wallets loaded from SQLite. Fields migrated.');
@@ -280,6 +622,8 @@ function addToLossPool(amount) {
 function saveWallets() {
   const upsertAll = db.transaction(() => {
     for (const [userId, w] of Object.entries(wallets)) {
+      ensureWalletStatsShape(w);
+      maybeTrackNetWorthSnapshotForWallet(w);
       stmts.upsertWallet.run(
         userId,
         w.balance, w.lastDaily || 0, w.streak || 0,
@@ -317,21 +661,7 @@ function getWallet(userId) {
   if (w.spinMultLevel === undefined) w.spinMultLevel = 0;
   if (w.universalIncomeMultLevel === undefined) w.universalIncomeMultLevel = 0;
   if (!w.inventory) w.inventory = [];
-  if (!w.stats) w.stats = DEFAULT_STATS();
-  for (const g of ['flip','dice','roulette','blackjack','mines','letitride','duel']) {
-    if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
-  }
-  if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
-  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
-  if (!w.stats.dailySpin) w.stats.dailySpin = { won: 0, amountWon: 0 };
-  if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
-  if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
-  if (w.stats.interest.pendingCoins === undefined) w.stats.interest.pendingCoins = 0;
-  if (w.stats.interest.pendingMinutes === undefined) w.stats.interest.pendingMinutes = 0;
-  if (w.stats.interest.lastAccrualAt === undefined) w.stats.interest.lastAccrualAt = 0;
-  if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
-  if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
-  if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
+  ensureWalletStatsShape(w);
   return w;
 }
 
@@ -343,16 +673,22 @@ function deleteWallet(userId) {
 function getBalance(userId) { return normalizeCoins(getWallet(userId).balance, 0); }
 
 function setBalance(userId, amount) {
-  getWallet(userId).balance = normalizeCoins(amount, 0);
+  const w = getWallet(userId);
+  w.balance = normalizeCoins(amount, 0);
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'balance');
   saveWallets();
 }
 
 function getInterestRate(userId) {
-  return BASE_INVEST_RATE + (getWallet(userId).interestLevel * 0.01);
+  const w = getWallet(userId);
+  const bonuses = getInventoryBonuses(w.inventory);
+  return BASE_INVEST_RATE + (w.interestLevel * 0.01) + bonuses.interestRateBonus;
 }
 
 function getCashbackRate(userId) {
-  return getWallet(userId).cashbackLevel * 0.001;
+  const w = getWallet(userId);
+  const bonuses = getInventoryBonuses(w.inventory);
+  return (w.cashbackLevel * 0.001) + bonuses.cashbackRateBonus;
 }
 
 function applyCashback(userId, lossAmount) {
@@ -368,8 +704,143 @@ function getSpinWeight(userId) {
 }
 
 function getUniversalIncomeDoubleChance(userId) {
-  const level = getWallet(userId).universalIncomeMultLevel || 0;
-  return Math.max(0, Math.min(10, level)) * 0.01;
+  const w = getWallet(userId);
+  const level = w.universalIncomeMultLevel || 0;
+  const bonuses = getInventoryBonuses(w.inventory);
+  const chance = (Math.max(0, Math.min(10, level)) * 0.01) + bonuses.universalDoubleChanceBonus;
+  return Math.max(0, Math.min(0.75, chance));
+}
+
+function getMysteryBoxLuckInfo(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const inventoryBonuses = getInventoryBonuses(w.inventory);
+  const pityStreak = Math.max(0, w.stats.mysteryBox.pityStreak || 0);
+  const pityLuckBonus = Math.min(0.5, pityStreak * 0.02);
+  const totalLuck = inventoryBonuses.mysteryBoxLuckBonus + pityLuckBonus;
+  return {
+    pityStreak,
+    pityLuckBonus,
+    inventoryLuckBonus: inventoryBonuses.mysteryBoxLuckBonus,
+    totalLuck,
+  };
+}
+
+function getUserBonuses(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const tuning = getRuntimeTuning();
+  const invBonuses = getInventoryBonuses(w.inventory);
+  const luck = getMysteryBoxLuckInfo(userId);
+  const pity = getBinomialPityBoostState(w);
+  const evBoostByGame = { ...invBonuses.evBoostByGame };
+  if (pity.boostRate > 0) {
+    for (const game of GAME_KEYS) {
+      evBoostByGame[game] += pity.boostRate;
+    }
+  }
+  return {
+    interestRate: getInterestRate(userId),
+    cashbackRate: getCashbackRate(userId),
+    spinWeight: getSpinWeight(userId),
+    universalIncomeDoubleChance: getUniversalIncomeDoubleChance(userId),
+    mysteryBoxLuck: luck.totalLuck,
+    pityStreak: luck.pityStreak,
+    pityLuckBonus: luck.pityLuckBonus,
+    inventoryLuckBonus: luck.inventoryLuckBonus,
+    minesRevealChance: invBonuses.minesRevealChance,
+    evBoostByGame,
+    inventoryEffects: invBonuses.effectLines,
+    binomialPity: {
+      active: pity.active,
+      boostRate: pity.boostRate,
+      activeUntil: pity.activeUntil,
+      expiresInMs: pity.expiresInMs,
+      triggers: pity.triggers,
+      thresholdConfidence: tuning.binomialPityThreshold,
+      thresholdStep: 1,
+      lastDirection: pity.lastDirection,
+      lastConfidence: pity.lastConfidence,
+      lastTotalGames: pity.lastTotalGames,
+      activeStacks: pity.activeStacks,
+      highBonusCooldownMinutes: tuning.binomialPityCooldownMinutes,
+    },
+    runtimeTuning: tuning,
+  };
+}
+
+function getUserPityStatus(userId, now = Date.now()) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const pity = w.stats.bonuses.binomialPity;
+  refreshBinomialPityStacks(pity, now);
+
+  const stacks = (pity.stacks || [])
+    .map((stack, idx) => {
+      const rate = normalizeNumeric(stack.rate, 0);
+      const expiresAt = normalizeNumeric(stack.expiresAt, 0);
+      const reason = typeof stack.reason === 'string' ? stack.reason : 'threshold';
+      let threshold = null;
+      if (reason.startsWith('threshold:')) {
+        const parsed = Number(reason.slice('threshold:'.length));
+        if (Number.isFinite(parsed)) threshold = parsed;
+      }
+      return {
+        id: idx + 1,
+        rate,
+        threshold,
+        reason,
+        expiresAt,
+        remainingMs: Math.max(0, expiresAt - now),
+      };
+    })
+    .sort((a, b) => {
+      if ((a.threshold || 0) !== (b.threshold || 0)) return (a.threshold || 0) - (b.threshold || 0);
+      return a.expiresAt - b.expiresAt;
+    });
+
+  const totalBoostRate = stacks.reduce((sum, s) => sum + s.rate, 0);
+  return {
+    active: totalBoostRate > 0,
+    totalBoostRate,
+    activeUntil: pity.activeUntil || 0,
+    triggers: pity.triggers || 0,
+    lastDirection: pity.lastDirection || 'neutral',
+    lastConfidence: pity.lastConfidence || 0,
+    lastTotalGames: pity.lastTotalGames || 0,
+    stacks,
+  };
+}
+
+function applyProfitBoost(userId, gameName, baseProfit) {
+  const profit = normalizeCoins(baseProfit, 0);
+  if (profit <= 0) return profit;
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const tuning = getRuntimeTuning();
+  const bonuses = getInventoryBonuses(w.inventory);
+  const pity = getBinomialPityBoostState(w);
+  const boost = ((bonuses.evBoostByGame[gameName] || 0) + (pity.boostRate || 0)) * (tuning.globalEvScalar || 1);
+  if (boost <= 0) return profit;
+  const boosted = Math.floor(profit * (1 + boost));
+  const extra = boosted - profit;
+  if (extra > 0) {
+    w.stats.bonuses.evBoostProfit += extra;
+  }
+  return boosted;
+}
+
+function tryTriggerMinesReveal(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const bonuses = getInventoryBonuses(w.inventory);
+  if (bonuses.minesRevealChance <= 0) return false;
+  const triggered = Math.random() < bonuses.minesRevealChance;
+  if (triggered) {
+    w.stats.bonuses.minesSaves += 1;
+    saveWallets();
+  }
+  return triggered;
 }
 
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
@@ -425,6 +896,7 @@ function processBank(userId) {
   if (totalPayout > 0) {
     w.stats.interest.totalEarned += totalPayout;
     w.stats.lifetimeEarnings += totalPayout;
+    maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'interest');
   }
 
   saveWallets();
@@ -457,24 +929,68 @@ function claimDaily(userId) {
   const reward = DAILY_BASE + (DAILY_STREAK_BONUS * (w.streak - 1));
   w.balance += reward;
   w.lastDaily = now;
+  maybeTrackNetWorthSnapshotForWallet(w, now, 'daily');
   saveWallets();
   return { newBalance: w.balance, streak: w.streak, reward };
 }
 
 // Mystery box helpers.
-function rollMysteryBox() {
-  const totalW = Object.values(MYSTERY_BOX_POOLS).reduce((s, p) => s + p.weight, 0);
+function rollMysteryBox(userId = null) {
+  let luck = 0;
+  let w = null;
+  if (userId) {
+    w = getWallet(userId);
+    ensureWalletStatsShape(w);
+    const luckInfo = getMysteryBoxLuckInfo(userId);
+    luck = Math.max(0, luckInfo.totalLuck);
+  }
+
+  const adjustedPools = Object.entries(MYSTERY_BOX_POOLS).map(([rarity, pool]) => {
+    let mult = 1;
+    if (luck > 0) {
+      if (rarity === 'common') mult = Math.max(0.25, 1 - (luck * 0.6));
+      if (rarity === 'uncommon') mult = Math.max(0.35, 1 - (luck * 0.35));
+      if (rarity === 'rare') mult = 1 + (luck * 0.8);
+      if (rarity === 'legendary') mult = 1 + (luck * 1.4);
+      if (rarity === 'epic') mult = 1 + (luck * 1.8);
+      if (rarity === 'mythic') mult = 1 + (luck * 2.6);
+      if (rarity === 'divine') mult = 1 + (luck * 3.2);
+    }
+    return [rarity, { ...pool, adjustedWeight: pool.weight * mult }];
+  });
+
+  const totalW = adjustedPools.reduce((s, [, p]) => s + p.adjustedWeight, 0);
   let roll = Math.random() * totalW;
-  for (const [rarity, pool] of Object.entries(MYSTERY_BOX_POOLS)) {
-    roll -= pool.weight;
+  for (const [rarity, pool] of adjustedPools) {
+    roll -= pool.adjustedWeight;
     if (roll <= 0) {
       const it = pool.items;
       const item = it[Math.floor(Math.random() * it.length)];
+      if (w) {
+        w.stats.mysteryBox.opened += 1;
+        const highRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER.legendary;
+        if (highRarity) {
+          w.stats.mysteryBox.luckyHighRarity += 1;
+          w.stats.mysteryBox.pityStreak = 0;
+        } else {
+          w.stats.mysteryBox.pityStreak += 1;
+          if (w.stats.mysteryBox.pityStreak > w.stats.mysteryBox.bestPityStreak) {
+            w.stats.mysteryBox.bestPityStreak = w.stats.mysteryBox.pityStreak;
+          }
+        }
+      }
       return { ...item, _rarity: rarity };
     }
   }
   const c = MYSTERY_BOX_POOLS.common.items;
   const item = c[Math.floor(Math.random() * c.length)];
+  if (w) {
+    w.stats.mysteryBox.opened += 1;
+    w.stats.mysteryBox.pityStreak += 1;
+    if (w.stats.mysteryBox.pityStreak > w.stats.mysteryBox.bestPityStreak) {
+      w.stats.mysteryBox.bestPityStreak = w.stats.mysteryBox.pityStreak;
+    }
+  }
   return { ...item, _rarity: 'common' };
 }
 
@@ -612,20 +1128,28 @@ function removeGiveaway(id) {
 // Basic stats tracking.
 function recordWin(userId, gameName, amount) {
   const w = getWallet(userId);
+  ensureWalletStatsShape(w);
   if (w.stats[gameName]) {
     w.stats[gameName].wins += 1;
   }
   w.stats.lifetimeEarnings += amount;
+  const pityResult = evaluateBinomialPity(w);
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
   saveWallets();
+  return pityResult;
 }
 
 function recordLoss(userId, gameName, amount) {
   const w = getWallet(userId);
+  ensureWalletStatsShape(w);
   if (w.stats[gameName]) {
     w.stats[gameName].losses += 1;
   }
   w.stats.lifetimeLosses += amount;
+  const pityResult = evaluateBinomialPity(w);
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
   saveWallets();
+  return pityResult;
 }
 
 // Extended stats tracking helpers.
@@ -642,12 +1166,33 @@ function resetStats(userId) {
   saveWallets();
 }
 
+function resetAllActivePity() {
+  let usersCleared = 0;
+  let stacksCleared = 0;
+  for (const wallet of Object.values(wallets)) {
+    ensureWalletStatsShape(wallet);
+    const pity = wallet.stats.bonuses.binomialPity;
+    const activeStacks = Array.isArray(pity.stacks) ? pity.stacks.length : 0;
+    const hadActive = activeStacks > 0 || (pity.boostRate || 0) > 0 || (pity.activeUntil || 0) > Date.now();
+    if (!hadActive) continue;
+
+    usersCleared += 1;
+    stacksCleared += activeStacks;
+    pity.stacks = [];
+    pity.boostRate = 0;
+    pity.activeUntil = 0;
+  }
+  if (usersCleared > 0) saveWallets();
+  return { usersCleared, stacksCleared };
+}
+
 function trackGiveawayWin(userId, amount) {
   const w = getWallet(userId);
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
   w.stats.giveaway.won += 1;
   w.stats.giveaway.amountWon += amount;
   w.stats.lifetimeEarnings += amount;
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'giveawayWin');
 }
 
 function trackGiveawayCreated(userId, amount) {
@@ -656,6 +1201,7 @@ function trackGiveawayCreated(userId, amount) {
   w.stats.giveaway.created += 1;
   w.stats.giveaway.amountGiven += amount;
   w.stats.lifetimeLosses += amount;
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'giveawayCreate');
 }
 
 function trackDailySpinWin(userId, amount) {
@@ -664,6 +1210,7 @@ function trackDailySpinWin(userId, amount) {
   w.stats.dailySpin.won += 1;
   w.stats.dailySpin.amountWon += amount;
   w.stats.lifetimeEarnings += amount;
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'dailySpin');
 }
 
 function trackUniversalIncome(userId, amount) {
@@ -671,6 +1218,7 @@ function trackUniversalIncome(userId, amount) {
   if (!w.stats.universalIncome) w.stats.universalIncome = { totalEarned: 0 };
   w.stats.universalIncome.totalEarned += amount;
   w.stats.lifetimeEarnings += amount;
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'universalIncome');
 }
 
 function trackMysteryBoxDuplicateComp(userId, amount) {
@@ -678,6 +1226,7 @@ function trackMysteryBoxDuplicateComp(userId, amount) {
   if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0 };
   w.stats.mysteryBox.duplicateCompEarned += amount;
   w.stats.lifetimeEarnings += amount;
+  maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'mysteryComp');
 }
 
 module.exports = {
@@ -687,14 +1236,18 @@ module.exports = {
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback,
   getSpinWeight, getUniversalIncomeDoubleChance, processBank,
+  getUserBonuses, getMysteryBoxLuckInfo, getUserPityStatus,
+  applyProfitBoost, tryTriggerMinesReveal,
   checkDaily, claimDaily,
   rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
-  recordWin, recordLoss, resetStats,
+  recordWin, recordLoss, resetStats, resetAllActivePity,
   saveWallets,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
   setGiveawayMessageRef,
   trackGiveawayWin, trackGiveawayCreated, trackDailySpinWin, trackUniversalIncome,
   trackMysteryBoxDuplicateComp,
+  trackLifeStatsHeartbeat,
+  getRuntimeTuning, updateRuntimeTuning, resetRuntimeTuning, getDefaultRuntimeTuning,
   setRuntimeState, getRuntimeState, removeRuntimeState,
 };

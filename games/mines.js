@@ -4,6 +4,23 @@ const store = require('../data/store');
 
 const activeMines = new Map();
 
+async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
+  if (!pityResult || !pityResult.triggered) return;
+  const channel = interaction.channel;
+  if (!channel || typeof channel.send !== 'function') return;
+
+  const addedPct = (pityResult.addedBoostRate * 100).toFixed(2);
+  const totalPct = (pityResult.totalBoostRate * 100).toFixed(2);
+  const thresholds = Array.isArray(pityResult.crossedThresholds) && pityResult.crossedThresholds.length
+    ? pityResult.crossedThresholds.map(v => `${v}%`).join(', ')
+    : 'none';
+
+  await channel.send(
+    `⚡ <@${userId}> pity triggered: +${addedPct}% EV (${pityResult.addedStacks} stack${pityResult.addedStacks === 1 ? '' : 's'}) | ` +
+    `active total +${totalPct}% | probability of being this lucky/unlucky ${Number(pityResult.confidence || 0).toFixed(2)}% | crossed: ${thresholds}`
+  ).catch(() => null);
+}
+
 function persistMinesSessions() {
   store.setRuntimeState('session:mines', {
     activeMines: Object.fromEntries(activeMines),
@@ -118,15 +135,21 @@ async function handleButton(interaction, parts) {
 
   // Cashout
   if (parts[1] === 'cashout') {
-    const win = Math.floor(game.bet * game.multiplier);
-    if (win > game.bet) store.recordWin(uid, 'mines', win - game.bet);
-    store.setBalance(uid, store.getBalance(uid) + win);
-    if (win > game.bet) store.addToUniversalPool(win - game.bet);
+    const baseWin = Math.floor(game.bet * game.multiplier);
+    let finalWin = baseWin;
+    if (baseWin > game.bet) {
+      const baseProfit = baseWin - game.bet;
+      const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
+      finalWin = game.bet + boostedProfit;
+      store.recordWin(uid, 'mines', boostedProfit);
+      store.addToUniversalPool(boostedProfit);
+    }
+    store.setBalance(uid, store.getBalance(uid) + finalWin);
     activeMines.delete(uid);
     persistMinesSessions();
     const gr = gridToString(game);
     return interaction.update({
-      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **${store.formatNumber(win)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }
@@ -137,8 +160,50 @@ async function handleButton(interaction, parts) {
 
   // Hit a mine
   if (game.grid[ti]) {
+    const savedByCharm = store.tryTriggerMinesReveal(uid);
+    if (savedByCharm) {
+      game.revealed[ti] = true;
+      game.revealedCount++;
+      game.multiplier = getMinesMultiplier(game.revealedCount, game.mineCount);
+      persistMinesSessions();
+
+      if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
+        const baseWin = Math.floor(game.bet * game.multiplier);
+        let finalWin = baseWin;
+        if (baseWin > game.bet) {
+          const baseProfit = baseWin - game.bet;
+          const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
+          finalWin = game.bet + boostedProfit;
+          const pityResult = store.recordWin(uid, 'mines', boostedProfit);
+          await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+          store.addToUniversalPool(boostedProfit);
+        }
+        store.setBalance(uid, store.getBalance(uid) + finalWin);
+        activeMines.delete(uid);
+        persistMinesSessions();
+        let gr = '';
+        for (let r = 0; r < MINES_ROWS; r++) {
+          for (let c = 0; c < MINES_COLS; c++) {
+            const i = r * MINES_COLS + c;
+            gr += game.grid[i] ? 'X ' : 'O ';
+          }
+          gr += '\n';
+        }
+        return interaction.update({
+          content: `✨ **Mines Charm Proc** saved you from a mine\n\`\`\`\n${gr}\`\`\`\nPerfect clear payout: **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+          components: [],
+        });
+      }
+
+      return interaction.update({
+        content: `✨ **Mines Charm Proc** saved you from a mine\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **${store.formatNumber(Math.floor(game.bet * game.multiplier))}**`,
+        components: renderMinesGrid(game),
+      });
+    }
+
     const potentialCashout = Math.floor(game.bet * game.multiplier);
-    store.recordLoss(uid, 'mines', game.bet);
+    const pityResult = store.recordLoss(uid, 'mines', game.bet);
+    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const cb = store.applyCashback(uid, game.bet);
     store.addToLossPool(game.bet);
     activeMines.delete(uid);
@@ -163,10 +228,17 @@ async function handleButton(interaction, parts) {
 
   // Perfect clear
   if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
-    const win = Math.floor(game.bet * game.multiplier);
-    store.recordWin(uid, 'mines', win - game.bet);
-    store.setBalance(uid, store.getBalance(uid) + win);
-    if (win > game.bet) store.addToUniversalPool(win - game.bet);
+    const baseWin = Math.floor(game.bet * game.multiplier);
+    let finalWin = baseWin;
+    if (baseWin > game.bet) {
+      const baseProfit = baseWin - game.bet;
+      const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
+      finalWin = game.bet + boostedProfit;
+      const pityResult = store.recordWin(uid, 'mines', boostedProfit);
+      await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+      store.addToUniversalPool(boostedProfit);
+    }
+    store.setBalance(uid, store.getBalance(uid) + finalWin);
     activeMines.delete(uid);
     persistMinesSessions();
     let gr = '';
@@ -178,7 +250,7 @@ async function handleButton(interaction, parts) {
       gr += '\n';
     }
     return interaction.update({
-      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **${store.formatNumber(win)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }

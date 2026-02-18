@@ -7,8 +7,10 @@ It includes:
 - Daily rewards with streak scaling
 - Multiple games (flip, dice, roulette, blackjack, mines, duel, let-it-ride)
 - Upgrade system (interest, cashback, spin multiplier)
+- Item-driven bonus system (interest, cashback, luck, EV boosts, mines save proc)
 - Collectibles + mystery boxes + trading
 - Universal income pool (hourly) + loss pool daily spin
+- Multi-page stats dashboard with button navigation and net worth trend graph
 - Giveaways and persistent interactive sessions
 
 ---
@@ -141,6 +143,29 @@ In-progress interactions survive restarts via `runtime_state`, including:
 - **Hourly Universal Income Mult Level** (0–10)
 	- Gives `level%` chance to receive double hourly universal income payout
 
+### Item effects and luck
+
+- Collectibles now provide passive stat bonuses while in inventory
+- Effects include:
+	- extra bank interest
+	- higher cashback
+	- better mystery box luck
+	- game-specific EV boosts
+	- a rare mines auto-save reveal proc
+- Mystery boxes now track pity streak and apply pity-based luck scaling
+- Use `/stats` and open the `Bonuses` page to see your live modifiers
+
+### Live economy channel
+
+- The bot keeps a live economy snapshot message in channel `1473753550332104746`
+- It shows:
+	- current universal pool
+	- current loss pool
+	- estimated current hourly payout per player
+	- active player counts
+	- a master net worth graph for tracked players with separate line colors
+- Refresh cadence is set to every 10 seconds
+
 ---
 
 ## Games
@@ -194,6 +219,7 @@ All bet amount inputs support abbreviated formats like:
 
 - `/mysterybox [quantity]` buys boxes (cost: `5,000` each)
 - 120 placeholder collectibles across 7 rarities
+- Mystery box odds are affected by item luck and pity streak
 - Duplicate placeholder drops pay rarity-based compensation instead
 - `/inventory` shows owned collectibles
 - `/collection` shows top collectors by unique count
@@ -244,7 +270,7 @@ Rarities used:
 - `/leaderboard`
 - `/pool`
 - `/upgrades`
-- `/stats [user|username]`
+- `/stats [user|username]` (overview, win/loss, binomial, net worth, bonuses)
 
 ### Games
 - `/flip amount [quantity]`
