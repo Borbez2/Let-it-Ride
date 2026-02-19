@@ -74,45 +74,58 @@ async function resolveSplitGame(interaction, uid, game) {
   while (dv < 17) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
 
   const totalStake = game.hands.reduce((sum, hand) => sum + hand.bet, 0);
+  let totalLosingStake = 0;
+  let totalWinningProfit = 0;
   let payout = 0, rt = '';
   for (let h = 0; h < game.hands.length; h++) {
     const hh = game.hands[h], v = getHandValue(hh.cards);
     let o = '';
-    if (hh.busted) { o = `BUST -${store.formatNumber(hh.bet)}`; }
+    if (hh.busted) {
+      totalLosingStake += hh.bet;
+      o = `BUST -${store.formatNumber(hh.bet)}`;
+    }
     else if (dv > 21) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      totalWinningProfit += boostedProfit;
       payout += hh.bet + boostedProfit;
       o = `Dealer busts +${store.formatNumber(boostedProfit)}`;
     }
     else if (v > dv) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      totalWinningProfit += boostedProfit;
       payout += hh.bet + boostedProfit;
       o = `Win +${store.formatNumber(boostedProfit)}`;
     }
-    else if (v < dv) { o = `Lose -${store.formatNumber(hh.bet)}`; }
+    else if (v < dv) {
+      totalLosingStake += hh.bet;
+      o = `Lose -${store.formatNumber(hh.bet)}`;
+    }
     else { payout += hh.bet; o = `Push`; }
     rt += `Hand ${h + 1}: ${formatHand(hh.cards)} (${v}) ${o}\n`;
   }
 
   const profit = payout - totalStake;
+  let cashback = 0;
 
   store.setBalance(uid, store.getBalance(uid) + payout);
-  if (profit > 0) {
-    const pityResult = store.recordWin(uid, 'blackjack', profit);
+  if (totalWinningProfit > 0) {
+    const pityResult = store.recordWin(uid, 'blackjack', totalWinningProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.addToUniversalPool(profit);
+    store.addToUniversalPool(totalWinningProfit);
   }
-  if (profit < 0) {
-    const pityResult = store.recordLoss(uid, 'blackjack', Math.abs(profit));
+  if (totalLosingStake > 0) {
+    const pityResult = store.recordLoss(uid, 'blackjack', totalLosingStake);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.applyCashback(uid, Math.abs(profit));
-    store.addToLossPool(Math.abs(profit));
+    cashback = store.applyCashback(uid, totalLosingStake);
+    store.addToLossPool(totalLosingStake);
   }
   activeSplitGames.delete(uid);
   persistBlackjackSessions();
 
+  const cashbackLine = cashback > 0 ? `\nCashback: **+${store.formatNumber(cashback)}**` : '';
+
   return interaction.update({
-    content: `🃏 **Blackjack Split Results**\n\n${rt}\nDealer: ${formatHand(game.dealerHand)} (${dv})\n\nNet: **${profit >= 0 ? '+' : ''}${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+    content: `🃏 **Blackjack Split Results**\n\n${rt}\nDealer: ${formatHand(game.dealerHand)} (${dv})\n\nNet: **${profit >= 0 ? '+' : ''}${store.formatNumber(profit)}**${cashbackLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
     components: [],
   });
 }
