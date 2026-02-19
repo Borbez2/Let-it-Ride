@@ -74,30 +74,24 @@ async function resolveSplitGame(interaction, uid, game) {
   while (dv < 17) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
 
   const totalStake = game.hands.reduce((sum, hand) => sum + hand.bet, 0);
-  let totalLosingStake = 0;
-  let totalWinningProfit = 0;
   let payout = 0, rt = '';
   for (let h = 0; h < game.hands.length; h++) {
     const hh = game.hands[h], v = getHandValue(hh.cards);
     let o = '';
     if (hh.busted) {
-      totalLosingStake += hh.bet;
       o = `BUST -${store.formatNumber(hh.bet)}`;
     }
     else if (dv > 21) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
-      totalWinningProfit += boostedProfit;
       payout += hh.bet + boostedProfit;
       o = `Dealer busts +${store.formatNumber(boostedProfit)}`;
     }
     else if (v > dv) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
-      totalWinningProfit += boostedProfit;
       payout += hh.bet + boostedProfit;
       o = `Win +${store.formatNumber(boostedProfit)}`;
     }
     else if (v < dv) {
-      totalLosingStake += hh.bet;
       o = `Lose -${store.formatNumber(hh.bet)}`;
     }
     else { payout += hh.bet; o = `Push`; }
@@ -105,19 +99,21 @@ async function resolveSplitGame(interaction, uid, game) {
   }
 
   const profit = payout - totalStake;
+  const netProfit = Math.max(0, profit);
+  const netLoss = Math.max(0, -profit);
   let cashback = 0;
 
   store.setBalance(uid, store.getBalance(uid) + payout);
-  if (totalWinningProfit > 0) {
-    const pityResult = store.recordWin(uid, 'blackjack', totalWinningProfit);
+  if (netProfit > 0) {
+    const pityResult = store.recordWin(uid, 'blackjack', netProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.addToUniversalPool(totalWinningProfit);
+    store.addToUniversalPool(netProfit);
   }
-  if (totalLosingStake > 0) {
-    const pityResult = store.recordLoss(uid, 'blackjack', totalLosingStake);
+  if (netLoss > 0) {
+    const pityResult = store.recordLoss(uid, 'blackjack', netLoss);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    cashback = store.applyCashback(uid, totalLosingStake);
-    store.addToLossPool(totalLosingStake);
+    cashback = store.applyCashback(uid, netLoss);
+    store.addToLossPool(netLoss);
   }
   activeSplitGames.delete(uid);
   persistBlackjackSessions();

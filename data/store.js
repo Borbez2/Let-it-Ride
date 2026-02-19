@@ -692,9 +692,11 @@ function getCashbackRate(userId) {
 }
 
 function applyCashback(userId, lossAmount) {
+  const loss = normalizeCoins(lossAmount, 0);
+  if (loss <= 0) return 0;
   const rate = getCashbackRate(userId);
   if (rate <= 0) return 0;
-  const cashback = Math.floor(lossAmount * rate);
+  const cashback = Math.floor(loss * rate);
   if (cashback > 0) { getWallet(userId).balance += cashback; saveWallets(); }
   return cashback;
 }
