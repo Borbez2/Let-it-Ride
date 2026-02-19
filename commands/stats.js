@@ -63,7 +63,7 @@ function capitalize(str) {
 function parseStatsCustomId(customId) {
   const parts = customId.split('_');
   if (parts.length < 4) return null;
-  const page = parts[1];
+  const page = parts[1] === 'tf' ? 'networth' : parts[1];
   const viewerId = parts[2];
   const targetId = parts[3];
   const timeframeKey = parts[4] || STATS_DEFAULT_TIMEFRAME_KEY;
@@ -102,7 +102,7 @@ function getTimeframeRows(viewerId, targetId, activeTimeframeKey) {
     for (const timeframe of STATS_TIMEFRAMES.slice(i, i + 5)) {
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(`stats_networth_${viewerId}_${targetId}_${timeframe.key}`)
+          .setCustomId(`stats_tf_${viewerId}_${targetId}_${timeframe.key}`)
           .setLabel(timeframe.label)
           .setStyle(timeframe.key === activeTimeframeKey ? ButtonStyle.Success : ButtonStyle.Secondary)
       );
