@@ -315,8 +315,6 @@ const commands = [
   new SlashCommandBuilder().setName('flip').setDescription('Flip coins, instant 50/50')
     .addStringOption(o => o.setName('amount').setDescription(`Bet per flip (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true))
     .addIntegerOption(o => o.setName('quantity').setDescription(`Number of flips (${CONFIG.commands.limits.flipQuantity.min}-${CONFIG.commands.limits.flipQuantity.max})`).setMinValue(CONFIG.commands.limits.flipQuantity.min).setMaxValue(CONFIG.commands.limits.flipQuantity.max)),
-  new SlashCommandBuilder().setName('dice').setDescription('Roll dice, win on 4-6')
-    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('blackjack').setDescription('Play blackjack')
     .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('roulette').setDescription('Play roulette')
@@ -349,8 +347,7 @@ const commands = [
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
   new SlashCommandBuilder().setName('stats').setDescription('Open the multi-page stats dashboard with graphs and bonus details')
-    .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false))
-    .addStringOption(o => o.setName('username').setDescription('Username to check stats for (optional)').setRequired(false)),
+    .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('pity').setDescription('View your active pity stacks and per-stack timers'),
   new SlashCommandBuilder().setName('mysterybox').setDescription(`Buy mystery boxes for ${CONFIG.collectibles.mysteryBox.cost.toLocaleString()} coins each`)
     .addIntegerOption(o => o.setName('quantity').setDescription(`Number of boxes to buy (${CONFIG.commands.limits.mysteryBoxQuantity.min}-${CONFIG.commands.limits.mysteryBoxQuantity.max})`).setMinValue(CONFIG.commands.limits.mysteryBoxQuantity.min).setMaxValue(CONFIG.commands.limits.mysteryBoxQuantity.max)),
@@ -997,7 +994,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('bj_'))       return await blackjack.handleButton(interaction, parts);
       if (interaction.customId.startsWith('allin17_'))  return await simple.handleAllIn17Button(interaction, parts);
       if (interaction.customId.startsWith('roulette_')) return await simple.handleRouletteButton(interaction, parts);
-      if (interaction.customId.startsWith('dice_'))     return await simple.handleDiceButton(interaction, parts);
+
       if (interaction.customId.startsWith('giveaway_join_')) {
         const giveawayId = interaction.customId.slice('giveaway_join_'.length);
         return await economy.handleGiveawayJoin(interaction, giveawayId);
@@ -1024,7 +1021,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'balance':      return await economy.handleBalance(interaction);
       case 'daily':        return await economy.handleDaily(interaction);
       case 'flip':         return await simple.handleFlip(interaction);
-      case 'dice':         return await simple.handleDice(interaction);
+
       case 'blackjack':    return await blackjack.handleCommand(interaction);
       case 'roulette':     return await simple.handleRoulette(interaction);
       case 'allin17black': return await simple.handleAllIn17(interaction);

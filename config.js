@@ -109,15 +109,6 @@ const CONFIG = {
       winMarker: 'W',
       lossMarker: 'L',
     },
-    dice: {
-      minRoll: 1,
-      maxRoll: 6,
-      highMin: 4,
-      labels: {
-        high: 'High (4-6)',
-        low: 'Low (1-3)',
-      },
-    },
     roulette: {
       wheelSize: 37,
       greenNumber: 0,
@@ -240,10 +231,9 @@ const CONFIG = {
       { key: '1y', label: '1y', seconds: 31536000 },
       { key: 'all', label: 'all', seconds: null },
     ],
-    games: ['flip', 'dice', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'],
+    games: ['flip', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'],
     theoreticalWinChance: {
       flip: 0.5,
-      dice: 0.5,
       roulette: 18 / 37,
       blackjack: 0.48,
       mines: null,

@@ -97,7 +97,7 @@ async function handleHelp(interaction) {
     let text = `**Games + EV (Quick)**\n\n`;
     text += `EV = expected value per round.\n\n`;
     text += `• **Flip**: 50/50, EV ~0 before cashback\n`;
-    text += `• **Dice (high/low)**: 50/50, EV ~0 before cashback\n`;
+
     text += `• **Roulette red/black**: EV = -1/37 = **-2.70%**\n`;
     text += `• **Roulette green 0**: EV = -23/37 = **-62.16%**\n`;
     text += `• **/allin17black**: same straight-up EV style (~-2.70%)\n`;
@@ -186,7 +186,7 @@ async function handleHelp(interaction) {
     text += `• /deposit /invest /withdraw\n`;
     text += `• /upgrades\n\n`;
     text += `**Games**\n`;
-    text += `• /flip /dice /roulette /allin17black\n`;
+    text += `• /flip /roulette /allin17black\n`;
     text += `• /blackjack /mines /letitride /duel\n\n`;
     text += `**Economy + Social**\n`;
     text += `• /give /trade /leaderboard /stats /pity /giveaway\n\n`;

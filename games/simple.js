@@ -112,58 +112,6 @@ async function handleFlip(interaction) {
   return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${boostedNet >= 0 ? '+' : ''}${store.formatNumber(boostedNet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
-// Dice command.
-async function handleDice(interaction) {
-  const userId = interaction.user.id;
-  const rawAmount = interaction.options.getString('amount');
-  const balance = store.getBalance(userId);
-  if (balance <= 0) return interaction.reply(`Not enough coins. You only have **${store.formatNumber(balance)}**`);
-  
-  const bet = store.parseAmount(rawAmount, balance);
-  if (!bet || bet <= 0) {
-    return interaction.reply(CONFIG.commands.invalidAmountText);
-  }
-  
-  const bal = store.getBalance(userId);
-  if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
-
-  activeGames.set(userId, { bet, game: 'dice' });
-  persistSimpleSessions();
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`dice_high_${userId}`).setLabel(CONFIG.games.dice.labels.high).setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`dice_low_${userId}`).setLabel(CONFIG.games.dice.labels.low).setStyle(ButtonStyle.Danger),
-  );
-  return interaction.reply({ content: `**Dice** - Bet: ${store.formatNumber(bet)}`, components: [row] });
-}
-
-async function handleDiceButton(interaction, parts) {
-  const uid = interaction.user.id;
-  const game = activeGames.get(uid);
-  if (!game) return interaction.reply({ content: "Expired!", ephemeral: true });
-
-  const choice = parts[1];
-  const roll = Math.floor(Math.random() * CONFIG.games.dice.maxRoll) + CONFIG.games.dice.minRoll;
-  const hi = roll >= CONFIG.games.dice.highMin;
-  const bal = store.getBalance(uid), won = (choice === 'high' && hi) || (choice === 'low' && !hi);
-
-  if (won) {
-    const profit = store.applyProfitBoost(uid, 'dice', game.bet);
-    const pityResult = store.recordWin(uid, 'dice', profit);
-    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.setBalance(uid, bal + profit); store.addToUniversalPool(profit);
-    await interaction.update({ content: `✅ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Won **${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
-  } else {
-    const pityResult = store.recordLoss(uid, 'dice', game.bet);
-    await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.setBalance(uid, bal - game.bet);
-    const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
-    const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
-    await interaction.update({ content: `❌ **Dice** Rolled **${roll}** (${hi ? 'HIGH' : 'LOW'})\nPicked ${choice} - Lost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
-  }
-  activeGames.delete(uid);
-  persistSimpleSessions();
-}
-
 // Roulette command.
 const REDS = CONFIG.games.roulette.redNumbers;
 
@@ -464,7 +412,7 @@ async function handleDuelButton(interaction, parts) {
 
 module.exports = {
   activeGames, activeRides, activeDuels,
-  handleFlip, handleDice, handleDiceButton,
+  handleFlip,
   handleRoulette, handleRouletteButton,
   handleAllIn17, handleAllIn17Button, handleLetItRide, handleRideButton,
   handleDuel, handleDuelButton,

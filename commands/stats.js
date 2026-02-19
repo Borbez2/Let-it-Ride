@@ -122,7 +122,6 @@ function getStatsComponents(viewerId, targetId, activePage, timeframeKey) {
 
 async function resolveTargetFromOptions(interaction) {
   const targetUser = interaction.options.getUser('user');
-  const targetUsername = interaction.options.getString('username');
 
   let userId = interaction.user.id;
   let username = interaction.user.username;
@@ -130,19 +129,6 @@ async function resolveTargetFromOptions(interaction) {
   if (targetUser) {
     userId = targetUser.id;
     username = targetUser.username;
-  } else if (targetUsername) {
-    const lookup = targetUsername.trim().toLowerCase();
-    const wallets = store.getAllWallets();
-    const ids = Object.keys(wallets);
-
-    for (const id of ids) {
-      const u = await interaction.client.users.fetch(id).catch(() => null);
-      if (u && u.username.toLowerCase() === lookup) {
-        userId = u.id;
-        username = u.username;
-        break;
-      }
-    }
   }
 
   if (!store.hasWallet(userId)) {
@@ -160,18 +146,6 @@ function renderOverview(username, wallet) {
   const overallWinRate = totalGames > 0 ? ((totalWins / totalGames) * 100).toFixed(1) : '0.0';
   const netProfit = (stats.lifetimeEarnings || 0) - (stats.lifetimeLosses || 0);
 
-  let text = `**Stats Dashboard: ${username}**\n\n`;
-  text += `**Economy Snapshot**\n`;
-  text += `• Purse: ${store.formatNumber(wallet.balance || 0)}\n`;
-  text += `• Bank: ${store.formatNumber(wallet.bank || 0)}\n`;
-  text += `• Total Net Worth: ${store.formatNumber(currentTotalBalance)}\n\n`;
-
-  text += `**Lifetime Summary**\n`;
-  text += `• Total Earnings: ${store.formatNumber(stats.lifetimeEarnings || 0)}\n`;
-  text += `• Total Losses: ${store.formatNumber(stats.lifetimeLosses || 0)}\n`;
-  text += `• Net: ${netProfit >= 0 ? '+' : ''}${store.formatNumber(netProfit)}\n`;
-  text += `• Overall Win Rate: ${overallWinRate}% (${totalWins}/${totalGames})\n\n`;
-
   const topGames = GAMES
     .map((game) => {
       const gs = stats[game] || { wins: 0, losses: 0 };
@@ -181,40 +155,68 @@ function renderOverview(username, wallet) {
     .sort((a, b) => b.plays - a.plays)
     .slice(0, 3);
 
-  text += `**Most Played Games**\n`;
+  let topGamesText = '';
   for (const item of topGames) {
     if (item.plays === 0) continue;
     const wr = ((item.wins / item.plays) * 100).toFixed(1);
-    text += `• ${capitalize(item.game)}: ${item.wins}W ${item.losses}L (${wr}% win rate)\n`;
+    topGamesText += `> **${capitalize(item.game)}**: ${item.wins}W / ${item.losses}L (${wr}%)\n`;
   }
-  if (topGames.every((g) => g.plays === 0)) {
-    text += `• No game history yet\n`;
-  }
+  if (!topGamesText) topGamesText = '> No game history yet\n';
 
-  return text;
+  return {
+    title: `📊 ${username}'s Stats`,
+    color: 0x2b2d31,
+    fields: [
+      {
+        name: '💰 Economy Snapshot',
+        value: `> Purse: **${store.formatNumber(wallet.balance || 0)}**\n> Bank: **${store.formatNumber(wallet.bank || 0)}**\n> Net Worth: **${store.formatNumber(currentTotalBalance)}**`,
+        inline: true,
+      },
+      {
+        name: '📈 Lifetime Summary',
+        value: `> Earnings: **${store.formatNumber(stats.lifetimeEarnings || 0)}**\n> Losses: **${store.formatNumber(stats.lifetimeLosses || 0)}**\n> Net: **${netProfit >= 0 ? '+' : ''}${store.formatNumber(netProfit)}**\n> Win Rate: **${overallWinRate}%** (${totalWins}/${totalGames})`,
+        inline: true,
+      },
+      {
+        name: '🎮 Most Played',
+        value: topGamesText,
+        inline: false,
+      },
+    ],
+  };
 }
 
 function renderWinLossPage(username, wallet) {
   const stats = wallet.stats;
-  let text = `**Win Loss Profile: ${username}**\n\n`;
+  const fields = [];
 
   for (const game of GAMES) {
     const gs = stats[game] || { wins: 0, losses: 0 };
     const plays = gs.wins + gs.losses;
     if (plays === 0) {
-      text += `• ${capitalize(game)}: No plays\n`;
+      fields.push({ name: capitalize(game), value: '> No plays yet', inline: true });
       continue;
     }
 
     const actual = (gs.wins / plays) * 100;
     const expected = THEORETICAL_WIN_CHANCE[game] == null ? null : (THEORETICAL_WIN_CHANCE[game] * 100);
+    const deltaVal = expected == null ? null : actual - expected;
+    const deltaIcon = deltaVal == null ? '' : (deltaVal >= 0 ? '🟢' : '🔴');
+    const deltaText = deltaVal == null ? 'n/a' : `${deltaVal >= 0 ? '+' : ''}${deltaVal.toFixed(1)}%`;
     const expectedText = expected == null ? 'n/a' : `${expected.toFixed(1)}%`;
-    const deltaText = expected == null ? 'n/a' : `${(actual - expected) >= 0 ? '+' : ''}${(actual - expected).toFixed(1)}%`;
 
-    text += `• ${capitalize(game)}: ${gs.wins}W ${gs.losses}L | Actual ${actual.toFixed(1)}% | Baseline ${expectedText} | Delta ${deltaText}\n`;
+    fields.push({
+      name: `${deltaIcon} ${capitalize(game)}`,
+      value: `> **${gs.wins}**W / **${gs.losses}**L\n> Actual: **${actual.toFixed(1)}%**\n> Baseline: ${expectedText}\n> Delta: **${deltaText}**`,
+      inline: true,
+    });
   }
 
-  return text;
+  return {
+    title: `⚔️ ${username}'s Win/Loss`,
+    color: 0x2b2d31,
+    fields,
+  };
 }
 
 function renderBinomialPage(username, userId, wallet) {
@@ -226,65 +228,80 @@ function renderBinomialPage(username, userId, wallet) {
   const bonusStats = wallet.stats.bonuses || {};
   const binomialPity = bonuses.binomialPity || {};
 
-  let text = `**Pity, Luck, and EV: ${username}**\n\n`;
+  const fields = [];
+
+  // Binomial luck analysis
   if (totalGames === 0) {
-    text += `No game rounds recorded yet.\n\n`;
+    fields.push({ name: '🎲 Binomial Luck Analysis', value: '> No game rounds recorded yet.', inline: false });
   } else {
     const luck = binomial.getLuckAssessment(totalWins, totalGames, 0.5);
-    text += `**Binomial Luck Analysis**\n`;
-    text += `Assumption: 50/50 baseline across rounds\n`;
-    text += `• Wins: ${totalWins}/${totalGames}\n`;
-    text += `• Expected Wins: ${(luck.expectedWins || 0).toFixed(1)}\n`;
-    text += `• Win Rate Delta: ${luck.winRateDelta >= 0 ? '+' : ''}${luck.winRateDelta.toFixed(2)}%\n`;
-    if (luck.direction === 'neutral') {
-      text += `• Result: Neutral\n\n`;
-    } else {
-      text += `• Result: ${capitalize(luck.direction)} (${luck.confidence.toFixed(2)}% probability of being this lucky/unlucky)\n\n`;
-    }
+    const resultText = luck.direction === 'neutral'
+      ? 'Neutral'
+      : `${capitalize(luck.direction)} (${luck.confidence.toFixed(2)}%)`;
+    fields.push({
+      name: '🎲 Binomial Luck Analysis',
+      value: `> *50/50 baseline assumed*\n> Wins: **${totalWins}** / ${totalGames}\n> Expected: **${(luck.expectedWins || 0).toFixed(1)}**\n> Delta: **${luck.winRateDelta >= 0 ? '+' : ''}${luck.winRateDelta.toFixed(2)}%**\n> Result: **${resultText}**`,
+      inline: false,
+    });
   }
 
-  text += `**Luck and Pity**\n`;
-  text += `• Box Luck (items + pity): ${(bonuses.mysteryBoxLuck * 100).toFixed(2)}%\n`;
-  text += `• Pity Streak: ${bonuses.pityStreak || 0}\n`;
-  text += `• Pity Luck Bonus: ${(bonuses.pityLuckBonus * 100).toFixed(2)}%\n`;
-  text += `• Boxes Opened: ${mb.opened || 0}\n`;
-  text += `• High Rarity Hits (legendary+): ${mb.luckyHighRarity || 0}\n`;
-  text += `• Best Pity Streak: ${mb.bestPityStreak || 0}\n`;
+  // Luck and pity
+  let pityBoostText;
   if (binomialPity.active) {
     const minsLeft = Math.max(0, Math.ceil((binomialPity.expiresInMs || 0) / 60000));
-    text += `• Pity Boost: ACTIVE (+${(binomialPity.boostRate * 100).toFixed(2)}% all games, ${minsLeft}m left, ${binomialPity.activeStacks || 0} stacks)\n`;
+    pityBoostText = `🟢 **ACTIVE** (+${(binomialPity.boostRate * 100).toFixed(2)}%, ${minsLeft}m left, ${binomialPity.activeStacks || 0} stacks)`;
   } else {
-    text += `• Pity Boost: inactive\n`;
+    pityBoostText = '⚫ Inactive';
   }
-  text += `• Last Pity State: ${capitalize(binomialPity.lastDirection || 'neutral')} (${(binomialPity.lastConfidence || 0).toFixed(2)}%, ${binomialPity.lastTotalGames || 0} games)\n`;
-  text += `• Pity Triggers: ${binomialPity.triggers || 0}\n\n`;
+  fields.push({
+    name: '🍀 Luck & Pity',
+    value: `> Box Luck: **${(bonuses.mysteryBoxLuck * 100).toFixed(2)}%**\n> Pity Streak: **${bonuses.pityStreak || 0}** (Best: ${mb.bestPityStreak || 0})\n> Pity Luck Bonus: **${(bonuses.pityLuckBonus * 100).toFixed(2)}%**\n> Boxes Opened: **${mb.opened || 0}**\n> Legendary+ Hits: **${mb.luckyHighRarity || 0}**`,
+    inline: true,
+  });
 
-  text += `**EV and Special Effects**\n`;
-  text += `• EV Boost Profit Earned: ${store.formatNumber(bonusStats.evBoostProfit || 0)}\n`;
-  text += `• Pity Trigger Rule: unlucky thresholds at 60/70/80/90%, then +1% thresholds from 91% to 99%, applying only thresholds >= ${Number(binomialPity.thresholdConfidence || 97).toFixed(2)}%\n`;
-  text += `• Per Trigger EV Stack: +${(Number((bonuses.runtimeTuning || {}).binomialPityBoostRate || 0) * 100).toFixed(2)}%\n`;
+  fields.push({
+    name: '📋 Pity Status',
+    value: `> Boost: ${pityBoostText}\n> Last State: **${capitalize(binomialPity.lastDirection || 'neutral')}** (${(binomialPity.lastConfidence || 0).toFixed(2)}%)\n> Games Checked: ${binomialPity.lastTotalGames || 0}\n> Triggers: **${binomialPity.triggers || 0}**`,
+    inline: true,
+  });
+
+  // Spacer
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
+
+  // EV and special effects
   const evPairs = Object.entries(bonuses.evBoostByGame || {}).filter(([, value]) => value > 0);
-  if (evPairs.length > 0) {
-    text += `• EV Boost by Game: ${evPairs.map(([k, v]) => `${capitalize(k)} +${(v * 100).toFixed(2)}%`).join(', ')}\n`;
-  } else {
-    text += `• EV Boost by Game: none active\n`;
-  }
+  const evGameText = evPairs.length > 0
+    ? evPairs.map(([k, v]) => `${capitalize(k)} **+${(v * 100).toFixed(2)}%**`).join(', ')
+    : 'None active';
+  fields.push({
+    name: '⚡ EV & Special Effects',
+    value: `> EV Boost Profit: **${store.formatNumber(bonusStats.evBoostProfit || 0)}**\n> Per Trigger Stack: **+${(Number((bonuses.runtimeTuning || {}).binomialPityBoostRate || 0) * 100).toFixed(2)}%**\n> EV Boost by Game: ${evGameText}`,
+    inline: false,
+  });
 
-  if (totalGames === 0) {
-    text += `\nPlay more rounds to improve confidence calculations.`;
-  }
+  const footer = totalGames === 0 ? { text: 'Play more rounds to improve confidence calculations.' } : undefined;
 
-  return text;
+  return {
+    title: `🔮 ${username}'s Pity, Luck & EV`,
+    color: 0x2b2d31,
+    fields,
+    ...(footer ? { footer } : {}),
+  };
 }
 
 async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   const history = Array.isArray(wallet.stats.netWorthHistory) ? wallet.stats.netWorthHistory : [];
-  let text = `**Networth: ${username}**\n\n`;
   const timeframe = getStatsTimeframeByKey(timeframeKey);
 
   if (history.length < 2) {
-    text += `Not enough history yet. Keep playing and this chart will fill in automatically.`;
-    return { content: text, embeds: [] };
+    return {
+      content: '',
+      embeds: [{
+        title: `📈 ${username}'s Networth`,
+        color: 0x2b2d31,
+        description: 'Not enough history yet. Keep playing and this chart will fill in automatically.',
+      }],
+    };
   }
 
   const now = Date.now();
@@ -293,8 +310,14 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
     : history.filter((point) => (point?.t || 0) >= (now - timeframe.seconds * 1000));
 
   if (filteredHistory.length < 2) {
-    text += `Not enough history in the last ${timeframe.label} yet. Keep playing and this chart will fill in automatically.`;
-    return { content: text, embeds: [] };
+    return {
+      content: '',
+      embeds: [{
+        title: `📈 ${username}'s Networth`,
+        color: 0x2b2d31,
+        description: `Not enough history in the last ${timeframe.label} yet. Keep playing and this chart will fill in automatically.`,
+      }],
+    };
   }
 
   const trimmed = downsampleSeries(filteredHistory, 240);
@@ -337,58 +360,74 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
   };
   const chartUrl = await createQuickChartUrl(chartConfig, 980, 420);
 
-  text += `• Purse: ${store.formatNumber(wallet.balance || 0)}\n`;
-  text += `• Bank: ${store.formatNumber(wallet.bank || 0)}\n`;
-  text += `• Total Net Worth: ${store.formatNumber((wallet.balance || 0) + (wallet.bank || 0))}\n`;
-  text += `• Timeframe: ${timeframe.label}\n`;
-  text += `• Samples: ${values.length}\n`;
-  text += `• Start: ${store.formatNumber(first)}\n`;
-  text += `• Current: ${store.formatNumber(last)}\n`;
-  text += `• Change: ${delta >= 0 ? '+' : ''}${store.formatNumber(delta)}\n`;
-  text += `• Range: ${store.formatNumber(low)} - ${store.formatNumber(high)}\n`;
+  const changeIcon = delta >= 0 ? '📈' : '📉';
+  const networthEmbed = {
+    title: `${changeIcon} ${username}'s Networth`,
+    color: 0x2b2d31,
+    fields: [
+      {
+        name: '💰 Current Balance',
+        value: `> Purse: **${store.formatNumber(wallet.balance || 0)}**\n> Bank: **${store.formatNumber(wallet.bank || 0)}**\n> Net Worth: **${store.formatNumber((wallet.balance || 0) + (wallet.bank || 0))}**`,
+        inline: true,
+      },
+      {
+        name: `📊 ${timeframe.label} Overview`,
+        value: `> Start: **${store.formatNumber(first)}**\n> Current: **${store.formatNumber(last)}**\n> Change: **${delta >= 0 ? '+' : ''}${store.formatNumber(delta)}**\n> Range: ${store.formatNumber(low)} - ${store.formatNumber(high)}\n> Samples: ${values.length}`,
+        inline: true,
+      },
+    ],
+  };
+  if (chartUrl) networthEmbed.image = { url: chartUrl };
 
   return {
-    content: text,
-    embeds: chartUrl ? [{ title: `Player Networth (${timeframe.label})`, image: { url: chartUrl } }] : [],
+    content: '',
+    embeds: [networthEmbed],
   };
 }
 
 function renderBonusesPage(username, userId, wallet) {
   const bonuses = store.getUserBonuses(userId);
-  let text = `**Bonuses and Modifiers: ${username}**\n\n`;
 
-  text += `**Upgrade Totals**\n`;
-  text += `• Bank Interest: ${(bonuses.interestRate * 100).toFixed(2)}%/day\n`;
-  text += `• Cashback: ${(bonuses.cashbackRate * 100).toFixed(2)}%\n`;
-  text += `• Daily Spin Weight: ${bonuses.spinWeight.toFixed(2)}x\n`;
-  text += `• Universal Double Chance: ${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%\n\n`;
-
-  text += `**Other Modifiers**\n`;
-  text += `• Mines Save Chance: ${(bonuses.minesRevealChance * 100).toFixed(2)}%\n`;
-  text += `• Mystery Box Base Luck (from items): ${(bonuses.inventoryLuckBonus * 100).toFixed(2)}%\n`;
-
-  text += `\n**Inventory Effects**\n`;
+  let inventoryText = '';
   if (!bonuses.inventoryEffects.length) {
-    text += `• No item effects active yet\n`;
+    inventoryText = '> No item effects active yet';
   } else {
-    for (const line of bonuses.inventoryEffects) {
-      text += `• ${line}\n`;
-    }
+    inventoryText = bonuses.inventoryEffects.map((line) => `> ${line}`).join('\n');
   }
 
-  return text;
+  return {
+    title: `🎁 ${username}'s Bonuses`,
+    color: 0x2b2d31,
+    fields: [
+      {
+        name: '⬆️ Upgrade Totals',
+        value: `> Bank Interest: **${(bonuses.interestRate * 100).toFixed(2)}%**/day\n> Cashback: **${(bonuses.cashbackRate * 100).toFixed(2)}%**\n> Daily Spin Weight: **${bonuses.spinWeight.toFixed(2)}x**\n> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
+        inline: true,
+      },
+      {
+        name: '🛡️ Other Modifiers',
+        value: `> Mines Save: **${(bonuses.minesRevealChance * 100).toFixed(2)}%**\n> Box Luck (items): **${(bonuses.inventoryLuckBonus * 100).toFixed(2)}%**`,
+        inline: true,
+      },
+      {
+        name: '🎒 Inventory Effects',
+        value: inventoryText,
+        inline: false,
+      },
+    ],
+  };
 }
 
 async function renderPage(page, username, userId, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   switch (page) {
     case 'winloss':
-      return { content: renderWinLossPage(username, wallet), embeds: [] };
+      return { content: '', embeds: [renderWinLossPage(username, wallet)] };
     case 'binomial':
-      return { content: renderBinomialPage(username, userId, wallet), embeds: [] };
+      return { content: '', embeds: [renderBinomialPage(username, userId, wallet)] };
     case 'networth':
       return renderNetWorthPage(username, wallet, timeframeKey);
     case 'bonuses':
-      return { content: renderBonusesPage(username, userId, wallet), embeds: [] };
+      return { content: '', embeds: [renderBonusesPage(username, userId, wallet)] };
     case 'overview':
     default:
       return renderNetWorthPage(username, wallet, timeframeKey);
