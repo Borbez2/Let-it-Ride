@@ -92,11 +92,12 @@ async function handleFlip(interaction) {
   store.setBalance(userId, bal + boostedNet);
 
   let cbm = '';
-  if (net < 0) {
-    const cb = store.applyCashback(userId, Math.abs(net));
-    store.addToLossPool(Math.abs(net));
+  if (qty - wins > 0) {
+    const cb = store.applyCashback(userId, (qty - wins) * bet);
+    store.addToLossPool((qty - wins) * bet);
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
-  } else if (boostedNet > 0) {
+  }
+  if (boostedNet > 0) {
     store.addToUniversalPool(boostedNet);
   }
 
