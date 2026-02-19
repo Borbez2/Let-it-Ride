@@ -1,41 +1,13 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
 const { CONFIG, RARITIES } = require('../config');
 const store = require('../data/store');
+const { renderChartToBuffer } = require('../utils/renderChart');
 const GIVEAWAY_CHANNEL_ID = CONFIG.bot.channels.giveaway;
 
 const activeTrades = new Map();
 const pendingGiveawayMessages = new Map();
 const RARITY_ORDER = CONFIG.ui.rarityOrder;
 
-async function createQuickChartUrl(chartConfig, width = 980, height = 420) {
-  const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
-  if (directChartUrl.length <= 2000) return directChartUrl;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    const resp = await fetch('https://quickchart.io/chart/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        width,
-        height,
-        devicePixelRatio: 1.5,
-        backgroundColor: '#1f1f1f',
-        chart: chartConfig,
-        format: 'png',
-      }),
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const body = await resp.json().catch(() => null);
-    if (!body || typeof body.url !== 'string') return null;
-    return body.url;
-  } catch {
-    return null;
-  }
-}
 
 function buildMonospaceTable(columns, rows) {
   const widths = columns.map((column) => {
@@ -85,7 +57,7 @@ function seriesForRange(history, startTs, slotCount, slotSeconds) {
   return data;
 }
 
-async function buildAllPlayersGraphUrl(client, wallets) {
+async function buildAllPlayersGraphBuffer(client, wallets) {
   const palette = [
     '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#8dd17e', '#ff7aa2', '#00bcd4', '#cddc39',
     '#f06292', '#64b5f6', '#ffd54f', '#4db6ac', '#9575cd', '#ffb74d', '#81c784', '#ba68c8', '#90a4ae', '#ef5350',
@@ -149,7 +121,7 @@ async function buildAllPlayersGraphUrl(client, wallets) {
     },
   };
 
-  return createQuickChartUrl(chartConfig, 980, 420);
+  return renderChartToBuffer(chartConfig, 980, 420).catch(() => null);
 }
 
 function persistTradeSessions() {
@@ -178,7 +150,7 @@ function renderUpgradesPage(userId) {
   const spinCosts = CONFIG.economy.upgrades.costs.spinMult;
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
   const bonuses = store.getUserBonuses(userId);
-  const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sW = 1 + sLvl, uChance = bonuses.universalIncomeDoubleChance * 100;
+  const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sMult = (1 + sLvl * 0.1), uChance = bonuses.universalIncomeDoubleChance * 100;
   const iBaseRate = CONFIG.economy.bank.baseInvestRate + (iLvl * CONFIG.economy.upgrades.interestPerLevel);
   const cBaseRatePct = cLvl * 0.1;
   const iCost = iLvl < maxLevel ? standardCosts[iLvl] : null;
@@ -191,8 +163,8 @@ function renderUpgradesPage(userId) {
   text += iCost ? `Next upgrade base: ${((iBaseRate + 0.01) * 100).toFixed(2)}% for ${store.formatNumber(iCost)}\n\n` : `MAXED\n\n`;
   text += `**Loss Cashback** Lv ${cLvl}/${maxLevel} — ${cRatePct.toFixed(2)}% back\n`;
   text += cCost ? `Next upgrade base: ${(cBaseRatePct + 0.1).toFixed(2)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
-  text += `**Daily Spin Mult** Lv ${sLvl}/${maxLevel} — ${sW}x weight\n`;
-  text += sCost ? `Next: ${sW + 1}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
+  text += `**Daily Spin Payout Mult** Lv ${sLvl}/${maxLevel} — ${sMult.toFixed(1)}x payout\n`;
+  text += sCost ? `Next: ${(sMult + 0.1).toFixed(1)}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
   text += `**Hourly Universal Income Mult** Lv ${uLvl}/${maxLevel} — ${uChance.toFixed(2)}% chance to double income\n`;
   text += uCost ? `Next base: ${(uLvl + 1).toFixed(0)}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
   text += `**Item and Collection Effects**\n`;
@@ -217,7 +189,7 @@ function renderUpgradesPage(userId) {
   ));
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
-      .setLabel(sCost ? `Daily Spin Mult (${store.formatNumberShort(sCost)})` : 'Daily Spin Mult MAXED')
+      .setLabel(sCost ? `Spin Payout Mult (${store.formatNumberShort(sCost)})` : 'Spin Payout Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
       .setLabel(uCost ? `Hourly Income Mult (${store.formatNumberShort(uCost)})` : 'Hourly Income Mult MAXED')
@@ -501,10 +473,14 @@ async function handleLeaderboard(interaction, client) {
     description: lines.join('\n'),
   };
 
-  const graphUrl = await buildAllPlayersGraphUrl(client, wallets);
-  if (graphUrl) tableEmbed.image = { url: graphUrl };
+  const graphBuffer = await buildAllPlayersGraphBuffer(client, wallets);
+  const replyPayload = { embeds: [tableEmbed] };
+  if (graphBuffer) {
+    tableEmbed.image = { url: 'attachment://networth.png' };
+    replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'networth.png' })];
+  }
 
-  return interaction.reply({ embeds: [tableEmbed] });
+  return interaction.reply(replyPayload);
 }
 
 async function handleUpgrades(interaction) {
@@ -655,8 +631,8 @@ async function handlePool(interaction) {
   const minsH = Math.max(0, Math.floor((nextHourly - Date.now()) / 60000));
   const players = Object.keys(wallets).length;
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
-  let text = `**Universal Pool**\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
-  text += `**Daily Spin Pool**\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, weighted by Daily Spin Mult upgrade`;
+  let text = `**Universal Pool** (5% win tax)\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
+  text += `**Daily Spin Pool** (5% loss tax)\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, winnings multiplied by Spin Payout Mult upgrade`;
   return interaction.reply(text);
 }
 
@@ -697,7 +673,7 @@ async function handleUpgradeButton(interaction, parts) {
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Daily Spin Mult → Lv ${w.spinMultLevel} (${1 + w.spinMultLevel}x)`, components: rows });
+    return interaction.update({ content: text + `\n✅ Daily Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * 0.1).toFixed(1)}x)`, components: rows });
   }
   if (action === 'universalmult') {
     const lvl = w.universalIncomeMultLevel || 0;

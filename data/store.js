@@ -373,6 +373,60 @@ function evaluateBinomialPity(w, now = Date.now()) {
   };
 }
 
+/**
+ * Compact a networth history array using tiered retention.
+ * Recent data is kept at full resolution; older data is downsampled
+ * to coarser time buckets so the array stays bounded while still
+ * providing useful data across all graph timeframes.
+ *
+ * The algorithm mirrors the backup retention approach:
+ * each tier defines a maxAgeMs threshold and a bucketMs resolution.
+ * Within each bucket only the latest point is kept.
+ */
+function compactNetworthHistory(history, now = Date.now()) {
+  const tiers = CONFIG.runtime.networthHistory.retentionTiers;
+  if (!tiers || !tiers.length || history.length <= 1) return history;
+
+  const result = [];
+  let lastBucketKey = null;
+
+  for (const point of history) {
+    const ageMs = now - point.t;
+
+    // Find the tier for this point's age (first tier whose maxAgeMs > ageMs).
+    let tierIdx = tiers.length - 1;
+    for (let i = 0; i < tiers.length; i++) {
+      if (ageMs < tiers[i].maxAgeMs) {
+        tierIdx = i;
+        break;
+      }
+    }
+
+    const bucketMs = tiers[tierIdx].bucketMs;
+
+    // bucketMs === 0 means raw – keep every point as-is.
+    if (bucketMs === 0) {
+      result.push(point);
+      lastBucketKey = null;
+      continue;
+    }
+
+    // Compute a unique bucket key (tier + aligned bucket start).
+    const bucketStart = Math.floor(point.t / bucketMs) * bucketMs;
+    const bucketKey = `${tierIdx}:${bucketStart}`;
+
+    if (bucketKey === lastBucketKey && result.length > 0) {
+      // Same bucket – replace with the later (more recent) point.
+      result[result.length - 1] = point;
+    } else {
+      result.push(point);
+    }
+    lastBucketKey = bucketKey;
+  }
+
+  return result;
+}
+
 function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto', options = {}) {
   ensureWalletStatsShape(w);
   const history = w.stats.netWorthHistory;
@@ -386,8 +440,12 @@ function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto
   const shouldWrite = force || !last || (now - last.t >= minMs) || Math.abs(total - last.v) >= minDelta;
   if (!shouldWrite) return false;
   history.push({ t: now, v: total, r: reason });
-  if (history.length > CONFIG.runtime.networthHistory.maxEntries) {
-    history.splice(0, history.length - CONFIG.runtime.networthHistory.maxEntries);
+
+  // Apply tiered compaction instead of a hard entry cap.
+  const compacted = compactNetworthHistory(history, now);
+  if (compacted.length !== history.length) {
+    history.length = 0;
+    history.push(...compacted);
   }
   return true;
 }
@@ -741,7 +799,7 @@ function applyCashback(userId, lossAmount) {
 }
 
 function getSpinWeight(userId) {
-  return 1 + (getWallet(userId).spinMultLevel || 0);
+  return 1 + (getWallet(userId).spinMultLevel || 0) * 0.1;
 }
 
 function getUniversalIncomeDoubleChance(userId) {

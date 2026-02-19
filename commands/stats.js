@@ -1,7 +1,8 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 const { CONFIG } = require('../config');
 const store = require('../data/store');
 const binomial = require('../utils/binomial');
+const { renderChartToBuffer } = require('../utils/renderChart');
 
 const STATS_DEFAULT_TIMEFRAME_KEY = CONFIG.stats.defaultTimeframeKey;
 const STATS_TIMEFRAMES = CONFIG.stats.timeframes;
@@ -26,35 +27,6 @@ function formatClock(ts) {
   return `${hh}:${mm}`;
 }
 
-async function createQuickChartUrl(chartConfig, width = 980, height = 420) {
-  const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
-  if (directChartUrl.length <= 2000) return directChartUrl;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    const resp = await fetch('https://quickchart.io/chart/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        width,
-        height,
-        devicePixelRatio: 1.5,
-        backgroundColor: '#1f1f1f',
-        chart: chartConfig,
-        format: 'png',
-      }),
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const body = await resp.json().catch(() => null);
-    if (!body || typeof body.url !== 'string') return null;
-    return body.url;
-  } catch {
-    return null;
-  }
-}
 
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -358,7 +330,7 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
       layout: { padding: 8 },
     },
   };
-  const chartUrl = await createQuickChartUrl(chartConfig, 980, 420);
+  const chartBuffer = await renderChartToBuffer(chartConfig, 980, 420).catch(() => null);
 
   const changeIcon = delta >= 0 ? '📈' : '📉';
   const networthEmbed = {
@@ -377,12 +349,13 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
       },
     ],
   };
-  if (chartUrl) networthEmbed.image = { url: chartUrl };
 
-  return {
-    content: '',
-    embeds: [networthEmbed],
-  };
+  const result = { content: '', embeds: [networthEmbed] };
+  if (chartBuffer) {
+    networthEmbed.image = { url: 'attachment://networth.png' };
+    result.files = [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })];
+  }
+  return result;
 }
 
 function renderBonusesPage(username, userId, wallet) {
@@ -401,7 +374,7 @@ function renderBonusesPage(username, userId, wallet) {
     fields: [
       {
         name: '⬆️ Upgrade Totals',
-        value: `> Bank Interest: **${(bonuses.interestRate * 100).toFixed(2)}%**/day\n> Cashback: **${(bonuses.cashbackRate * 100).toFixed(2)}%**\n> Daily Spin Weight: **${bonuses.spinWeight.toFixed(2)}x**\n> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
+        value: `> Bank Interest: **${(bonuses.interestRate * 100).toFixed(2)}%**/day\n> Cashback: **${(bonuses.cashbackRate * 100).toFixed(2)}%**\n> Spin Payout Mult: **${bonuses.spinWeight.toFixed(1)}x**\n> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
         inline: true,
       },
       {
@@ -446,7 +419,7 @@ async function handleStats(interaction) {
   const wallet = store.getWallet(target.userId);
   const rendered = await renderPage('networth', target.username, target.userId, wallet, STATS_DEFAULT_TIMEFRAME_KEY);
   const components = getStatsComponents(interaction.user.id, target.userId, 'networth', STATS_DEFAULT_TIMEFRAME_KEY);
-  return interaction.reply({ content: rendered.content, embeds: rendered.embeds, components });
+  return interaction.reply({ content: rendered.content, embeds: rendered.embeds, files: rendered.files || [], components });
 }
 
 async function handleStatsButton(interaction) {
@@ -468,7 +441,7 @@ async function handleStatsButton(interaction) {
   const timeframeKey = getStatsTimeframeByKey(parsed.timeframeKey).key;
   const rendered = await renderPage(page, username, parsed.targetId, wallet, timeframeKey);
   const components = getStatsComponents(parsed.viewerId, parsed.targetId, page, timeframeKey);
-  return interaction.update({ content: rendered.content, embeds: rendered.embeds, components });
+  return interaction.update({ content: rendered.content, embeds: rendered.embeds, files: rendered.files || [], components });
 }
 
 module.exports = { handleStats, handleStatsButton };

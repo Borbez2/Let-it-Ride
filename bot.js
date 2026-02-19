@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 require('dotenv').config();
 
 const { CONFIG } = require('./config');
@@ -12,6 +12,7 @@ const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
 const pityCmd = require('./commands/pity');
 const dbBackup = require('./utils/dbBackup');
+const { renderChartToBuffer } = require('./utils/renderChart');
 
 // Load required environment values from .env.
 const TOKEN = process.env.TOKEN;
@@ -42,7 +43,7 @@ const LIVE_GRAPH_TIMEFRAMES = CONFIG.bot.graph.timeframes;
 const liveGraphSessions = new Map();
 const PUBLIC_GRAPH_REFRESH_MS = CONFIG.bot.graph.publicRefreshMs;
 const publicGraphState = {
-  chartUrl: null,
+  chartBuffer: null,
   datasetsCount: 0,
   generatedAt: 0,
 };
@@ -145,36 +146,7 @@ function buildSeriesByRange(history, startTs, slotCount, slotSeconds = LIVE_GRAP
   return values;
 }
 
-async function createQuickChartUrl(chartConfig, width, height) {
-  const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
-  if (directChartUrl.length <= 2000) return directChartUrl;
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    const resp = await fetch('https://quickchart.io/chart/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        width,
-        height,
-        devicePixelRatio: 1.5,
-        backgroundColor: '#1f1f1f',
-        chart: chartConfig,
-        format: 'png',
-      }),
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const body = await resp.json().catch(() => null);
-    if (!body || typeof body.url !== 'string') return null;
-    return body.url;
-  } catch (err) {
-    console.error('QuickChart short URL generation failed:', err?.message || err);
-    return null;
-  }
-}
 
 function resolveGraphWindow({ wallets, selectedIds, timeframeSec = DEFAULT_GRAPH_TIMEFRAME_SEC, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
   const safeEnd = Math.max(0, endTs || Date.now());
@@ -222,7 +194,6 @@ async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, in
     const user = usersById.get(id) || client.users.cache.get(id);
     const color = palette[index % palette.length];
     const name = (user?.username || `User ${id.slice(-4)}`).slice(0, 16);
-    const avatarUrl = includeAvatars && user ? user.displayAvatarURL({ extension: 'png', size: 64, forceStatic: true }) : null;
     const lastNonNull = series.reduce((acc, val, idx) => (val !== null ? idx : acc), -1);
     const pointRadius = series.map((value, pointIndex) => {
       if (value === null) return 0;
@@ -237,7 +208,7 @@ async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, in
       borderWidth: 2,
       pointRadius,
       pointHoverRadius: pointRadius,
-      pointStyle: avatarUrl || 'circle',
+      pointStyle: 'circle',
       tension: 0.25,
       spanGaps: true,
       fill: false,
@@ -263,7 +234,7 @@ function getOrCreateLiveGraphSession(viewerId, candidateIds) {
     timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
     candidateIds,
     selectedIds: candidateIds.slice(0, LIVE_GRAPH_MAX_USERS),
-    lastChartUrl: null,
+    lastChartBuffer: null,
     expiresAt: now + LIVE_GRAPH_SESSION_TTL_MS,
   };
   liveGraphSessions.set(viewerId, next);
@@ -461,8 +432,8 @@ async function postLifeStatistics() {
   const candidateIds = getGraphCandidateIds(wallets);
   let datasets = [];
   let labels = [];
-  let chartUrl = publicGraphState.chartUrl;
-  const shouldRefreshGraph = !publicGraphState.generatedAt || (now - publicGraphState.generatedAt >= PUBLIC_GRAPH_REFRESH_MS) || !publicGraphState.chartUrl;
+  let chartBuffer = publicGraphState.chartBuffer;
+  const shouldRefreshGraph = !publicGraphState.generatedAt || (now - publicGraphState.generatedAt >= PUBLIC_GRAPH_REFRESH_MS) || !publicGraphState.chartBuffer;
 
   if (shouldRefreshGraph) {
     const graph = await buildPlayerNetworthGraph({
@@ -496,15 +467,14 @@ async function postLifeStatistics() {
       },
     };
 
-    const freshUrl = datasets.length > 0 ? await createQuickChartUrl(chartConfig, 980, 420) : null;
-    if (freshUrl) {
-      chartUrl = freshUrl;
-      publicGraphState.chartUrl = freshUrl;
+    const freshBuffer = datasets.length > 0 ? await renderChartToBuffer(chartConfig, 980, 420).catch((err) => { console.error('Chart render failed:', err); return null; }) : null;
+    if (freshBuffer) {
+      chartBuffer = freshBuffer;
+      publicGraphState.chartBuffer = freshBuffer;
       publicGraphState.datasetsCount = datasets.length;
       publicGraphState.generatedAt = now;
-      store.setRuntimeState('lifeStatsLastChartUrl', freshUrl);
     } else {
-      chartUrl = publicGraphState.chartUrl || store.getRuntimeState('lifeStatsLastChartUrl', null);
+      chartBuffer = publicGraphState.chartBuffer || null;
     }
   } else {
     datasets = Array.from({ length: publicGraphState.datasetsCount });
@@ -528,13 +498,14 @@ async function postLifeStatistics() {
     ),
   ];
 
-  const payload = chartUrl
+  const payload = chartBuffer
     ? {
         content: text,
-        embeds: [{ title: 'Player Networth', image: { url: chartUrl } }],
+        embeds: [{ title: 'Player Networth', image: { url: 'attachment://networth.png' } }],
+        files: [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })],
         components: controls,
       }
-    : { content: text, embeds: [], components: controls };
+    : { content: text, embeds: [], files: [], components: controls };
 
   const state = store.getRuntimeState('lifeStatsMessageRef', null);
   if (state && state.messageId) {
@@ -594,9 +565,9 @@ async function buildLiveBigGraphPayload(viewerId) {
     },
   };
 
-  let chartUrl = datasets.length > 0 ? await createQuickChartUrl(chartConfig, 1600, 900) : null;
-  if (!chartUrl && session.lastChartUrl) chartUrl = session.lastChartUrl;
-  if (chartUrl) session.lastChartUrl = chartUrl;
+  let chartBuffer = datasets.length > 0 ? await renderChartToBuffer(chartConfig, 1600, 900).catch(() => null) : null;
+  if (!chartBuffer && session.lastChartBuffer) chartBuffer = session.lastChartBuffer;
+  if (chartBuffer) session.lastChartBuffer = chartBuffer;
 
   const content =
     `**Player Networth (Big Picture)**\n` +
@@ -607,7 +578,8 @@ async function buildLiveBigGraphPayload(viewerId) {
   const components = buildLiveGraphControlRows(session, usersById);
   return {
     content,
-    embeds: chartUrl ? [{ title: 'Player Networth', image: { url: chartUrl } }] : [],
+    embeds: chartBuffer ? [{ title: 'Player Networth', image: { url: 'attachment://networth.png' } }] : [],
+    files: chartBuffer ? [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })] : [],
     components,
     ephemeral: true,
   };
@@ -739,16 +711,17 @@ async function runDailySpin() {
     if (!channel) return;
     const wallets = store.getAllWallets();
     const entries = Object.entries(wallets)
-      .map(([id, d]) => ({ id, total: (d.balance || 0) + (d.bank || 0), weight: store.getSpinWeight(id) }))
+      .map(([id, d]) => ({ id, total: (d.balance || 0) + (d.bank || 0) }))
       .filter(e => e.total > 0);
     if (entries.length === 0) return;
 
-    const totalWeight = entries.reduce((s, e) => s + e.weight, 0);
-    const prize = poolData.lossPool;
-    let roll = Math.random() * totalWeight;
+    const basePrize = poolData.lossPool;
+    let roll = Math.random() * entries.length;
     let winner = entries[0];
-    for (const e of entries) { roll -= e.weight; if (roll <= 0) { winner = e; break; } }
+    for (const e of entries) { roll -= 1; if (roll <= 0) { winner = e; break; } }
 
+    const spinMult = store.getSpinWeight(winner.id);
+    const prize = Math.floor(basePrize * spinMult);
     store.getWallet(winner.id).balance += prize;
     store.trackDailySpinWin(winner.id, prize);
     poolData.lossPool = 0;
@@ -762,22 +735,22 @@ async function runDailySpin() {
     }
     const winnerUser = await client.users.fetch(winner.id).catch(() => null);
     const winnerName = winnerUser ? winnerUser.username : 'Unknown';
-    const winnerWeight = store.getSpinWeight(winner.id);
+    const winnerMult = store.getSpinWeight(winner.id);
 
     const arrows = ['▶', '▷', '►', '▹'];
-    let msg = await channel.send(`🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\nSpinning...`);
+    let msg = await channel.send(`🎰 **DAILY SPIN** 🎰\nBase Pool: **${store.formatNumber(basePrize)}** coins\n\nSpinning...`);
     for (let f = 0; f < 8; f++) {
       await new Promise(r => setTimeout(r, 500 + f * 80));
       const rn = names[Math.floor(Math.random() * names.length)];
-      await msg.edit(`🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\n${arrows[f % 4]} ${rn} ${arrows[f % 4]}`);
+      await msg.edit(`🎰 **DAILY SPIN** 🎰\nBase Pool: **${store.formatNumber(basePrize)}** coins\n\n${arrows[f % 4]} ${rn} ${arrows[f % 4]}`);
     }
     await new Promise(r => setTimeout(r, 1200));
     await msg.edit(
-      `🎰 **DAILY SPIN** 🎰\nPrize Pool: **${store.formatNumber(prize)}** coins\n\n` +
-      `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\nSpin Mult Applied: **x${winnerWeight}**\n🎉🎉🎉`
+      `🎰 **DAILY SPIN** 🎰\nBase Pool: **${store.formatNumber(basePrize)}** coins\n\n` +
+      `🎉🎉🎉\n<@${winner.id}> (**${winnerName}**) WINS **${store.formatNumber(prize)}** COINS!\nPayout Mult: **x${winnerMult.toFixed(1)}**\n🎉🎉🎉`
     );
     await postLifeStatistics().catch(() => null);
-    console.log(`Daily spin: ${winnerName} won ${prize}`);
+    console.log(`Daily spin: ${winnerName} won ${prize} (base ${basePrize}, mult x${spinMult.toFixed(1)})`);
   } catch (err) { console.error("Daily spin error:", err); }
 }
 

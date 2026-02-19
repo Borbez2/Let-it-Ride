@@ -54,12 +54,12 @@ async function handleHelp(interaction) {
     text += `• Win tax: ${taxPct}% of profit -> Universal Pool\n`;
     text += `• Loss tax: ${lossPct}% of losses -> Daily Spin Pool\n`;
     text += `• Universal Pool pays all players hourly to bank\n`;
-    text += `• Daily Spin Pool pays one weighted winner daily\n\n`;
+    text += `• Daily Spin Pool pays one random winner daily (winnings multiplied by Spin Payout Mult)\n\n`;
 
     text += `**Upgrades**\n`;
-    text += `• Interest: +1% daily per level (Lv0 1% -> Lv10 11%)\n`;
+    text += `• Interest: +1% daily per level (Lv0 0% -> Lv10 10%)\n`;
     text += `• Cashback: +0.1% loss refund per level (Lv10 = 1.0%)\n`;
-    text += `• Spin Mult: weight = 1 + level\n`;
+    text += `• Spin Payout Mult: multiplies daily spin winnings (1.0x → 2.0x over 10 levels)\n`;
     text += `• Universal Mult: level% chance to double hourly universal payout\n`;
     text += `• Manage in **/upgrades**\n\n`;
 

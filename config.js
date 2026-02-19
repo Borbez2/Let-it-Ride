@@ -21,7 +21,7 @@ const CONFIG = {
       streakBreakMs: 48 * 60 * 60 * 1000,
     },
     bank: {
-      baseInvestRate: 0.01,
+      baseInvestRate: 0,
       interestAccrualMinuteMs: 60 * 1000,
       payoutIntervalMinutes: 60,
     },
@@ -270,7 +270,18 @@ const CONFIG = {
       defaultMinWriteMs: 15 * 60 * 1000,
       heartbeatMinWriteMs: 10 * 1000,
       minDelta: 1000,
-      maxEntries: 240,
+      // Tiered retention: older data is compacted to coarser resolution.
+      // Each tier keeps at most 1 point per bucketMs (0 = keep all raw).
+      // Tiers are evaluated oldest-first; the first tier whose maxAgeMs
+      // exceeds the point's age determines its bucket size.
+      retentionTiers: [
+        { maxAgeMs: 1 * 60 * 60 * 1000,       bucketMs: 0 },                     // < 1h:   raw
+        { maxAgeMs: 6 * 60 * 60 * 1000,       bucketMs: 2 * 60 * 1000 },         // 1h-6h:  1 per 2 min
+        { maxAgeMs: 24 * 60 * 60 * 1000,      bucketMs: 10 * 60 * 1000 },        // 6h-1d:  1 per 10 min
+        { maxAgeMs: 7 * 24 * 60 * 60 * 1000,  bucketMs: 30 * 60 * 1000 },        // 1d-7d:  1 per 30 min
+        { maxAgeMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 3 * 60 * 60 * 1000 },    // 7d-30d: 1 per 3 h
+        { maxAgeMs: Infinity,                  bucketMs: 24 * 60 * 60 * 1000 },   // >30d:   1 per day
+      ],
     },
   },
 
