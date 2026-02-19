@@ -1,6 +1,10 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { MINES_ROWS, MINES_COLS, MINES_TOTAL } = require('../config');
+const { CONFIG } = require('../config');
 const store = require('../data/store');
+
+const MINES_ROWS = CONFIG.games.mines.rows;
+const MINES_COLS = CONFIG.games.mines.cols;
+const MINES_TOTAL = CONFIG.games.mines.total;
 
 const activeMines = new Map();
 
@@ -66,8 +70,8 @@ function renderMinesGrid(game) {
       const btn = new ButtonBuilder()
         .setCustomId(`mines_${idx}_${game.oddsUserId}`)
         .setStyle(game.revealed[idx] ? ButtonStyle.Success : ButtonStyle.Secondary);
-      if (game.revealed[idx]) btn.setLabel('O').setDisabled(true);
-      else btn.setLabel('·');
+      if (game.revealed[idx]) btn.setLabel(CONFIG.games.mines.symbols.revealedSafe).setDisabled(true);
+      else btn.setLabel(CONFIG.games.mines.symbols.hidden);
       row.addComponents(btn);
     }
     rows.push(row);
@@ -87,10 +91,10 @@ function gridToString(game, hitIdx) {
   for (let r = 0; r < MINES_ROWS; r++) {
     for (let c = 0; c < MINES_COLS; c++) {
       const i = r * MINES_COLS + c;
-      if (hitIdx !== undefined && i === hitIdx) gr += '! ';
-      else if (game.grid[i]) gr += 'X ';
-      else if (game.revealed[i]) gr += 'O ';
-      else gr += '· ';
+      if (hitIdx !== undefined && i === hitIdx) gr += `${CONFIG.games.mines.symbols.explodedMine} `;
+      else if (game.grid[i]) gr += `${CONFIG.games.mines.symbols.mine} `;
+      else if (game.revealed[i]) gr += `${CONFIG.games.mines.symbols.revealedSafe} `;
+      else gr += `${CONFIG.games.mines.symbols.hidden} `;
     }
     gr += '\n';
   }
@@ -105,7 +109,7 @@ async function handleCommand(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const mc = interaction.options.getInteger('mines');
@@ -185,7 +189,7 @@ async function handleButton(interaction, parts) {
         for (let r = 0; r < MINES_ROWS; r++) {
           for (let c = 0; c < MINES_COLS; c++) {
             const i = r * MINES_COLS + c;
-            gr += game.grid[i] ? 'X ' : 'O ';
+            gr += game.grid[i] ? `${CONFIG.games.mines.symbols.mine} ` : `${CONFIG.games.mines.symbols.revealedSafe} `;
           }
           gr += '\n';
         }
@@ -245,7 +249,7 @@ async function handleButton(interaction, parts) {
     for (let r = 0; r < MINES_ROWS; r++) {
       for (let c = 0; c < MINES_COLS; c++) {
         const i = r * MINES_COLS + c;
-        gr += game.grid[i] ? 'X ' : 'O ';
+        gr += game.grid[i] ? `${CONFIG.games.mines.symbols.mine} ` : `${CONFIG.games.mines.symbols.revealedSafe} `;
       }
       gr += '\n';
     }

@@ -1,5 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { createDeck, getHandValue, formatCard, formatHand, canSplit } = require('./cards');
+const { CONFIG } = require('../config');
 const store = require('../data/store');
 
 const activeGames = new Map();
@@ -58,7 +59,7 @@ function bjButtons(userId, canDbl, canSplt, handIdx) {
 }
 
 function renderSplitStatus(game) {
-  let t = `🃏 **Blackjack (Split)** - ${store.formatNumber(game.betPerHand)} per hand\n\n`;
+  let t = `${CONFIG.games.blackjack.labels.splitTitle} - ${store.formatNumber(game.betPerHand)} per hand\n\n`;
   for (let h = 0; h < game.hands.length; h++) {
     const hand = game.hands[h], val = getHandValue(hand.cards);
     const st = hand.done ? (val > 21 ? ' BUST' : ' ✓') : (h === game.activeHand ? ' ◀' : '');
@@ -71,7 +72,7 @@ function renderSplitStatus(game) {
 // Resolve the dealer hand and all split hands.
 async function resolveSplitGame(interaction, uid, game) {
   let dv = getHandValue(game.dealerHand);
-  while (dv < 17) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
+  while (dv < CONFIG.games.blackjack.dealerStandValue) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
 
   const totalStake = game.hands.reduce((sum, hand) => sum + hand.bet, 0);
   let payout = 0, rt = '';
@@ -135,7 +136,7 @@ async function resolveStandard(interaction, uid, game, doubled) {
   const pv = getHandValue(game.playerHand);
   const bal = store.getBalance(uid);
   let dv = getHandValue(game.dealerHand);
-  while (dv < 17) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
+  while (dv < CONFIG.games.blackjack.dealerStandValue) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
 
   let res;
   if (dv > 21) {
@@ -165,7 +166,7 @@ async function resolveStandard(interaction, uid, game, doubled) {
 
   activeGames.delete(uid);
   persistBlackjackSessions();
-  const label = doubled ? 'Blackjack - Doubled' : 'Blackjack';
+  const label = doubled ? CONFIG.games.blackjack.labels.resultDoubled : CONFIG.games.blackjack.labels.resultBase;
   return interaction.update({
     content: `🃏 **${label}**\nYou: ${formatHand(game.playerHand)} (${pv})\nDealer: ${formatHand(game.dealerHand)} (${dv})\n${res}`,
     components: [],
@@ -181,7 +182,7 @@ async function handleCommand(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const bal = store.getBalance(userId);
@@ -208,7 +209,7 @@ async function handleCommand(interaction) {
       return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit).
-    const baseProfit = Math.floor(bet * 1.5);
+    const baseProfit = Math.floor(bet * CONFIG.games.blackjack.naturalBlackjackProfitMultiplier);
     const boostedProfit = store.applyProfitBoost(userId, 'blackjack', baseProfit);
     const pityResult = store.recordWin(userId, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);

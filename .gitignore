@@ -1,5 +1,7 @@
 .env
 .env.bak
+.env.*
+!.env.example
 wallets.json
 pool.json
 bot.log
@@ -10,3 +12,9 @@ node_modules/
 data/gambling.db
 data/gambling.db-wal
 data/gambling.db-shm
+data/*.pre-restore*
+data/gambling.db-*
+
+# Generated backup snapshots (dynamic timestamp folders)
+backups/**
+!backups/README.md

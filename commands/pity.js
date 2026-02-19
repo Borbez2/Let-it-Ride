@@ -1,4 +1,5 @@
 const store = require('../data/store');
+const { CONFIG } = require('../config');
 
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -14,7 +15,7 @@ async function handlePity(interaction) {
   let text = `**Pity Status: ${interaction.user.username}**\n\n`;
   text += `• Last luck state: ${(status.lastDirection || 'neutral').toUpperCase()} (${(status.lastConfidence || 0).toFixed(2)}% probability of being this lucky/unlucky, ${status.lastTotalGames || 0} games)\n`;
   text += `• Total pity triggers: ${status.triggers || 0}\n`;
-  text += `• Pity cap: +10.00%\n`;
+  text += `• Pity cap: +${(CONFIG.runtime.pity.maxBoostRate * 100).toFixed(2)}%\n`;
 
   if (!status.active || !status.stacks.length) {
     text += `• Active pity boost: none\n`;

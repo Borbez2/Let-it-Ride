@@ -1,4 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { CONFIG } = require('../config');
 const store = require('../data/store');
 
 const activeGames = new Map();   // shared for dice + roulette
@@ -55,7 +56,7 @@ async function handleFlip(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const qty = interaction.options.getInteger('quantity') || 1;
@@ -64,8 +65,8 @@ async function handleFlip(interaction) {
 
   let wins = 0, results = [];
   for (let i = 0; i < qty; i++) {
-    const r = Math.random() < 0.5;
-    results.push(r ? 'W' : 'L');
+    const r = Math.random() < CONFIG.games.flip.winChance;
+    results.push(r ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
     if (r) wins++;
   }
 
@@ -120,7 +121,7 @@ async function handleDice(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const bal = store.getBalance(userId);
@@ -129,8 +130,8 @@ async function handleDice(interaction) {
   activeGames.set(userId, { bet, game: 'dice' });
   persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`dice_high_${userId}`).setLabel('High (4-6)').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`dice_low_${userId}`).setLabel('Low (1-3)').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`dice_high_${userId}`).setLabel(CONFIG.games.dice.labels.high).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`dice_low_${userId}`).setLabel(CONFIG.games.dice.labels.low).setStyle(ButtonStyle.Danger),
   );
   return interaction.reply({ content: `**Dice** - Bet: ${store.formatNumber(bet)}`, components: [row] });
 }
@@ -140,7 +141,9 @@ async function handleDiceButton(interaction, parts) {
   const game = activeGames.get(uid);
   if (!game) return interaction.reply({ content: "Expired!", ephemeral: true });
 
-  const choice = parts[1], roll = Math.floor(Math.random() * 6) + 1, hi = roll >= 4;
+  const choice = parts[1];
+  const roll = Math.floor(Math.random() * CONFIG.games.dice.maxRoll) + CONFIG.games.dice.minRoll;
+  const hi = roll >= CONFIG.games.dice.highMin;
   const bal = store.getBalance(uid), won = (choice === 'high' && hi) || (choice === 'low' && !hi);
 
   if (won) {
@@ -162,7 +165,7 @@ async function handleDiceButton(interaction, parts) {
 }
 
 // Roulette command.
-const REDS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+const REDS = CONFIG.games.roulette.redNumbers;
 
 async function handleRoulette(interaction) {
   const userId = interaction.user.id;
@@ -172,7 +175,7 @@ async function handleRoulette(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const bal = store.getBalance(userId);
@@ -181,9 +184,9 @@ async function handleRoulette(interaction) {
   activeGames.set(userId, { bet, game: 'roulette' });
   persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`roulette_red_${userId}`).setLabel('Red (2x)').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`roulette_black_${userId}`).setLabel('Black (2x)').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`roulette_green_${userId}`).setLabel('Green 0 (14x)').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`roulette_red_${userId}`).setLabel(CONFIG.games.roulette.labels.red).setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`roulette_black_${userId}`).setLabel(CONFIG.games.roulette.labels.black).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`roulette_green_${userId}`).setLabel(CONFIG.games.roulette.labels.green).setStyle(ButtonStyle.Success),
   );
   return interaction.reply({ content: `**Roulette** - Bet: ${store.formatNumber(bet)}`, components: [row] });
 }
@@ -194,13 +197,13 @@ async function handleRouletteButton(interaction, parts) {
   if (!game) return interaction.reply({ content: "Expired!", ephemeral: true });
 
   const choice = parts[1];
-  const num = Math.floor(Math.random() * 37);
-  const col = num === 0 ? 'green' : (REDS.includes(num) ? 'red' : 'black');
+  const num = Math.floor(Math.random() * CONFIG.games.roulette.wheelSize);
+  const col = num === CONFIG.games.roulette.greenNumber ? 'green' : (REDS.includes(num) ? 'red' : 'black');
 
   // profit is what the player gains ON TOP of their bet back
   let profit = 0;
-  if (choice === 'green' && num === 0) profit = game.bet * 13;   // 14x total means 13x profit
-  else if (choice === col && choice !== 'green') profit = game.bet; // 2x total means 1x profit
+  if (choice === 'green' && num === CONFIG.games.roulette.greenNumber) profit = game.bet * CONFIG.games.roulette.payoutProfitMultipliers.green;
+  else if (choice === col && choice !== 'green') profit = game.bet * CONFIG.games.roulette.payoutProfitMultipliers.redOrBlack;
 
   const bal = store.getBalance(uid);
   if (profit > 0) {
@@ -271,11 +274,11 @@ async function handleAllIn17Button(interaction, parts) {
     });
   }
 
-  const num = Math.floor(Math.random() * 37);
-  const col = num === 0 ? 'green' : (REDS.includes(num) ? 'red' : 'black');
+  const num = Math.floor(Math.random() * CONFIG.games.roulette.wheelSize);
+  const col = num === CONFIG.games.roulette.greenNumber ? 'green' : (REDS.includes(num) ? 'red' : 'black');
 
-  if (num === 17) {
-    const baseProfit = purse * 35;
+  if (num === CONFIG.games.roulette.allIn.luckyNumber) {
+    const baseProfit = purse * CONFIG.games.roulette.payoutProfitMultipliers.allIn17;
     const boostedProfit = store.applyProfitBoost(uid, 'roulette', baseProfit);
     const payout = purse + boostedProfit;
     const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
@@ -309,14 +312,14 @@ async function handleLetItRide(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
   store.setBalance(userId, bal - bet);
-  if (Math.random() >= 0.5) {
+  if (Math.random() >= CONFIG.games.letItRide.winChancePerRide) {
     const pityResult = store.recordLoss(userId, 'letitride', bet);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet); store.addToLossPool(bet);
@@ -357,7 +360,7 @@ async function handleRideButton(interaction, parts) {
   }
 
   if (action === 'ride') {
-    if (Math.random() < 0.5) {
+    if (Math.random() < CONFIG.games.letItRide.winChancePerRide) {
       ride.current *= 2; ride.wins++;
       persistSimpleSessions();
       const row = new ActionRowBuilder().addComponents(
@@ -387,7 +390,7 @@ async function handleDuel(interaction) {
   
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   const bal = store.getBalance(userId);
@@ -436,7 +439,7 @@ async function handleDuelButton(interaction, parts) {
     // Hold opponent's money
     store.setBalance(oid, oppBal - duel.bet);
     
-    const w = Math.random() < 0.5 ? cid : oid;
+    const w = Math.random() < CONFIG.games.duel.winChance ? cid : oid;
     const wn = w === cid ? duel.challengerName : duel.opponentName;
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;

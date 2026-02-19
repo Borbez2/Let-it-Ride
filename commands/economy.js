@@ -1,14 +1,11 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const {
-  MYSTERY_BOX_COST, UPGRADE_COSTS, SPIN_MULT_COSTS,
-  BASE_INVEST_RATE, RARITIES,
-} = require('../config');
+const { CONFIG, RARITIES } = require('../config');
 const store = require('../data/store');
-const GIVEAWAY_CHANNEL_ID = '1467976012645269676';
+const GIVEAWAY_CHANNEL_ID = CONFIG.bot.channels.giveaway;
 
 const activeTrades = new Map();
 const pendingGiveawayMessages = new Map();
-const RARITY_ORDER = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
+const RARITY_ORDER = CONFIG.ui.rarityOrder;
 
 async function createQuickChartUrl(chartConfig, width = 980, height = 420) {
   const directChartUrl = `https://quickchart.io/chart?width=${width}&height=${height}&devicePixelRatio=1.5&backgroundColor=%231f1f1f&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
@@ -176,24 +173,27 @@ restoreTradeSessions();
 // Build the upgrades page text and buttons.
 function renderUpgradesPage(userId) {
   const w = store.getWallet(userId);
+  const maxLevel = CONFIG.economy.upgrades.maxLevel;
+  const standardCosts = CONFIG.economy.upgrades.costs.standard;
+  const spinCosts = CONFIG.economy.upgrades.costs.spinMult;
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
   const bonuses = store.getUserBonuses(userId);
   const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sW = 1 + sLvl, uChance = bonuses.universalIncomeDoubleChance * 100;
-  const iBaseRate = BASE_INVEST_RATE + (iLvl * 0.01);
+  const iBaseRate = CONFIG.economy.bank.baseInvestRate + (iLvl * CONFIG.economy.upgrades.interestPerLevel);
   const cBaseRatePct = cLvl * 0.1;
-  const iCost = iLvl < 10 ? UPGRADE_COSTS[iLvl] : null;
-  const cCost = cLvl < 10 ? UPGRADE_COSTS[cLvl] : null;
-  const sCost = sLvl < 10 ? SPIN_MULT_COSTS[sLvl] : null;
-  const uCost = uLvl < 10 ? UPGRADE_COSTS[uLvl] : null;
+  const iCost = iLvl < maxLevel ? standardCosts[iLvl] : null;
+  const cCost = cLvl < maxLevel ? standardCosts[cLvl] : null;
+  const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
+  const uCost = uLvl < maxLevel ? standardCosts[uLvl] : null;
 
   let text = `**Upgrades**\n\nPurse: ${store.formatNumber(w.balance)} coins\n\n--------------------\n\n`;
-  text += `**Bank Interest** Lv ${iLvl}/10 — ${(iRate * 100).toFixed(2)}% daily (hourly)\n`;
+  text += `**Bank Interest** Lv ${iLvl}/${maxLevel} — ${(iRate * 100).toFixed(2)}% daily (hourly)\n`;
   text += iCost ? `Next upgrade base: ${((iBaseRate + 0.01) * 100).toFixed(2)}% for ${store.formatNumber(iCost)}\n\n` : `MAXED\n\n`;
-  text += `**Loss Cashback** Lv ${cLvl}/10 — ${cRatePct.toFixed(2)}% back\n`;
+  text += `**Loss Cashback** Lv ${cLvl}/${maxLevel} — ${cRatePct.toFixed(2)}% back\n`;
   text += cCost ? `Next upgrade base: ${(cBaseRatePct + 0.1).toFixed(2)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
-  text += `**Daily Spin Mult** Lv ${sLvl}/10 — ${sW}x weight\n`;
+  text += `**Daily Spin Mult** Lv ${sLvl}/${maxLevel} — ${sW}x weight\n`;
   text += sCost ? `Next: ${sW + 1}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
-  text += `**Hourly Universal Income Mult** Lv ${uLvl}/10 — ${uChance.toFixed(2)}% chance to double income\n`;
+  text += `**Hourly Universal Income Mult** Lv ${uLvl}/${maxLevel} — ${uChance.toFixed(2)}% chance to double income\n`;
   text += uCost ? `Next base: ${(uLvl + 1).toFixed(0)}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
   text += `**Item and Collection Effects**\n`;
   if (bonuses.inventoryEffects.length === 0) {
@@ -365,11 +365,12 @@ async function handleBalance(interaction) {
 
 async function handleDaily(interaction) {
   const userId = interaction.user.id;
-  const { DAILY_STREAK_BONUS } = require('../config');
   const c = store.checkDaily(userId);
   if (!c.canClaim) return interaction.reply(`Already claimed. **${c.hours}h ${c.mins}m** left\n🔥 Streak: ${c.streak}`);
   const r = store.claimDaily(userId);
-  const sm = r.streak > 1 ? `\n🔥 ${r.streak} day streak! (+${store.formatNumber(DAILY_STREAK_BONUS * (r.streak - 1))} bonus)` : '';
+  const sm = r.streak > 1
+    ? `\n🔥 ${r.streak} day streak! (+${store.formatNumber(CONFIG.economy.daily.streakBonusPerDay * (r.streak - 1))} bonus)`
+    : '';
   return interaction.reply(`Claimed **${store.formatNumber(r.reward)}** coins!${sm}\nBalance: **${store.formatNumber(r.newBalance)}**`);
 }
 
@@ -384,7 +385,7 @@ async function handleDeposit(interaction) {
     : interaction.options.getInteger('amount');
   
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   if (amount > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
@@ -408,7 +409,7 @@ async function handleWithdraw(interaction) {
     : interaction.options.getInteger('amount');
   
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   if (amount > w.bank) return interaction.reply(`❌ Insufficient bank funds. You only have **${store.formatNumber(w.bank)}** in your bank (you tried to withdraw **${store.formatNumber(amount)}**).`);
@@ -441,7 +442,7 @@ async function handleGive(interaction) {
   
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
-    return interaction.reply('Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"');
+    return interaction.reply(CONFIG.commands.invalidAmountText);
   }
   
   if (target.id === userId) return interaction.reply("Can't give to yourself");
@@ -515,7 +516,7 @@ async function handleMysteryBox(interaction) {
   const userId = interaction.user.id;
   const quantity = interaction.options.getInteger('quantity') || 1;
   const w = store.getWallet(userId);
-  const totalCost = quantity * MYSTERY_BOX_COST;
+  const totalCost = quantity * CONFIG.collectibles.mysteryBox.cost;
   
   if (w.balance < totalCost) {
     return interaction.reply(`Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`);
@@ -585,7 +586,7 @@ async function handleInventory(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
   const w = store.getWallet(userId);
   const page = (interaction.options.getInteger('page') || 1) - 1;
-  const perPage = 15;
+  const perPage = CONFIG.commands.limits.inventoryPerPage;
   if (!w.inventory.length) return interaction.reply("Your inventory is empty. Buy a /mysterybox!");
   const total = Math.ceil(w.inventory.length / perPage);
   const safePage = Math.max(0, Math.min(page, total - 1));
@@ -602,7 +603,7 @@ async function handleInventoryButton(interaction, parts) {
   const w = store.getWallet(userId);
   if (!w.inventory.length) return interaction.update({ content: "Your inventory is empty. Buy a /mysterybox!", components: [] });
 
-  const perPage = 15;
+  const perPage = CONFIG.commands.limits.inventoryPerPage;
   const total = Math.ceil(w.inventory.length / perPage);
   const safePage = Math.max(0, Math.min(Number.isNaN(requestedPage) ? 0 : requestedPage, total - 1));
   const username = interaction.user.username;
@@ -673,8 +674,8 @@ async function handleUpgradeButton(interaction, parts) {
   if (action === 'interest') {
     store.processBank(uid);
     const lvl = w.interestLevel || 0;
-    if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = UPGRADE_COSTS[lvl];
+    if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
+    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.interestLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
@@ -682,8 +683,8 @@ async function handleUpgradeButton(interaction, parts) {
   }
   if (action === 'cashback') {
     const lvl = w.cashbackLevel || 0;
-    if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = UPGRADE_COSTS[lvl];
+    if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
+    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.cashbackLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
@@ -691,8 +692,8 @@ async function handleUpgradeButton(interaction, parts) {
   }
   if (action === 'spinmult') {
     const lvl = w.spinMultLevel || 0;
-    if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = SPIN_MULT_COSTS[lvl];
+    if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
+    const cost = CONFIG.economy.upgrades.costs.spinMult[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
@@ -700,8 +701,8 @@ async function handleUpgradeButton(interaction, parts) {
   }
   if (action === 'universalmult') {
     const lvl = w.universalIncomeMultLevel || 0;
-    if (lvl >= 10) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = UPGRADE_COSTS[lvl];
+    if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
+    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
     const { text, rows } = renderUpgradesPage(uid);
@@ -965,7 +966,7 @@ async function handleGiveawayModal(interaction) {
 
   const amount = store.parseAmount(rawAmount, bal);
   if (!amount || amount <= 0) {
-    return interaction.reply({ content: 'Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all".', ephemeral: true });
+    return interaction.reply({ content: `${CONFIG.commands.invalidAmountText}.`, ephemeral: true });
   }
 
   if (amount > bal) {

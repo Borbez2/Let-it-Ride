@@ -1,4 +1,4 @@
-const { MYSTERY_BOX_COST, MYSTERY_BOX_POOLS, POOL_TAX_RATE, LOSS_POOL_RATE, RARITIES } = require('../config');
+const { CONFIG, MYSTERY_BOX_POOLS, RARITIES } = require('../config');
 const store = require('../data/store');
 
 async function replyHelp(interaction, text) {
@@ -41,8 +41,8 @@ async function handleHelp(interaction) {
   const topic = interaction.options.getString('topic') || 'general';
 
   if (topic === 'general') {
-    const taxPct = (POOL_TAX_RATE * 100).toFixed(0);
-    const lossPct = (LOSS_POOL_RATE * 100).toFixed(0);
+    const taxPct = (CONFIG.economy.pools.universalTaxRate * 100).toFixed(0);
+    const lossPct = (CONFIG.economy.pools.lossTaxRate * 100).toFixed(0);
 
     let text = `**General Economy**\n\n`;
     text += `**Money**\n`;
@@ -72,7 +72,7 @@ async function handleHelp(interaction) {
   }
 
   if (topic === 'universalincome') {
-    const taxPct = (POOL_TAX_RATE * 100).toFixed(0);
+    const taxPct = (CONFIG.economy.pools.universalTaxRate * 100).toFixed(0);
     let text = `**Universal Income**\n\n`;
     text += `• Source: ${taxPct}% of win profit goes to Universal Pool\n`;
     text += `• Payout: every hour, shared across all registered players\n`;
@@ -140,7 +140,7 @@ async function handleHelp(interaction) {
   }
 
   if (topic === 'mysterybox' || topic === 'mysteryboxes' || topic === 'boxes') {
-    const rarityOrder = ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'];
+    const rarityOrder = CONFIG.ui.rarityOrder;
     const poolEntries = rarityOrder
       .map((rarity) => [rarity, MYSTERY_BOX_POOLS[rarity]])
       .filter(([, pool]) => !!pool);
@@ -149,7 +149,7 @@ async function handleHelp(interaction) {
 
     let text = `**Mystery Boxes**\n\n`;
     text += `• **/mysterybox quantity:<1-50 optional>** uses **purse only**\n`;
-    text += `• Cost: **${store.formatNumber(MYSTERY_BOX_COST)}** per box\n`;
+    text += `• Cost: **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** per box\n`;
     text += `• 120 collectibles across 7 rarities\n`;
     text += `• Luck = item luck + pity luck\n\n`;
 
@@ -197,7 +197,8 @@ async function handleHelp(interaction) {
     return replyHelp(interaction, text);
   }
 
-  return interaction.reply(`Unknown help topic. Try **/help general**, **/help universalincome**, **/help collectibles**, **/help games**, **/help modifiers**, **/help mysteryboxes**, or **/help commands**.`);
+  const options = CONFIG.help.topics.map((entry) => `**/help ${entry.value}**`).join(', ');
+  return interaction.reply(`Unknown help topic. Try ${options}.`);
 }
 
 module.exports = { handleHelp };

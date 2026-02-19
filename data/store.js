@@ -3,11 +3,12 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const binomial = require('../utils/binomial');
 const {
+  CONFIG,
   STARTING_COINS, BASE_INVEST_RATE,
   POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS,
 } = require('../config');
 
-const GAME_KEYS = ['flip', 'dice', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'];
+const GAME_KEYS = CONFIG.stats.games;
 const RARITY_TIER = {
   common: 1,
   uncommon: 2,
@@ -17,15 +18,8 @@ const RARITY_TIER = {
   mythic: 6,
   divine: 7,
 };
-const DEFAULT_RUNTIME_TUNING = {
-  lifeStatsIntervalMs: 10000,
-  globalEvScalar: 1,
-  binomialPityThreshold: 97,
-  binomialPityBoostRate: 0.01,
-  binomialPityDurationMinutes: 30,
-  binomialPityCooldownMinutes: 15,
-};
-const PITY_MAX_BOOST_RATE = 0.10;
+const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
+const PITY_MAX_BOOST_RATE = CONFIG.runtime.pity.maxBoostRate;
 
 const COLLECTIBLE_EFFECTS = (() => {
   const map = {};
@@ -55,6 +49,29 @@ const COLLECTIBLE_EFFECTS = (() => {
 const DB_PATH = path.join(__dirname, 'gambling.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
+
+function checkpointWal(mode = 'PASSIVE') {
+  const normalized = String(mode || 'PASSIVE').toUpperCase();
+  if (!['PASSIVE', 'FULL', 'RESTART', 'TRUNCATE'].includes(normalized)) return null;
+  try {
+    return db.pragma(`wal_checkpoint(${normalized})`);
+  } catch (err) {
+    console.error('WAL checkpoint failed:', err?.message || err);
+    return null;
+  }
+}
+
+function backupDatabaseToFile(destinationPath) {
+  return db.backup(destinationPath);
+}
+
+function getDbFilePaths() {
+  return {
+    db: DB_PATH,
+    wal: `${DB_PATH}-wal`,
+    shm: `${DB_PATH}-shm`,
+  };
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS wallets (
@@ -318,7 +335,7 @@ function evaluateBinomialPity(w, now = Date.now()) {
   }
 
   const thresholdFloor = Math.max(50, Math.min(99, normalizeNumeric(tuning.binomialPityThreshold, 97)));
-  const thresholds = [60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99].filter((value) => value >= thresholdFloor);
+  const thresholds = CONFIG.runtime.pity.thresholds.filter((value) => value >= thresholdFloor);
   const prior = previousDirection === 'unlucky' ? previousConfidence : 0;
   const crossedThresholds = thresholds.filter((threshold) => prior < threshold && assessment.confidence >= threshold);
 
@@ -361,14 +378,16 @@ function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto
   const history = w.stats.netWorthHistory;
   const total = normalizeCoins((w.balance || 0) + (w.bank || 0), 0);
   const last = history.length ? history[history.length - 1] : null;
-  const minMs = Number.isFinite(options.minMs) ? Math.max(0, options.minMs) : (15 * 60 * 1000);
-  const minDelta = 1000;
+  const minMs = Number.isFinite(options.minMs)
+    ? Math.max(0, options.minMs)
+    : CONFIG.runtime.networthHistory.defaultMinWriteMs;
+  const minDelta = CONFIG.runtime.networthHistory.minDelta;
   const force = !!options.force;
   const shouldWrite = force || !last || (now - last.t >= minMs) || Math.abs(total - last.v) >= minDelta;
   if (!shouldWrite) return false;
   history.push({ t: now, v: total, r: reason });
-  if (history.length > 240) {
-    history.splice(0, history.length - 240);
+  if (history.length > CONFIG.runtime.networthHistory.maxEntries) {
+    history.splice(0, history.length - CONFIG.runtime.networthHistory.maxEntries);
   }
   return true;
 }
@@ -376,7 +395,9 @@ function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto
 function trackLifeStatsHeartbeat(now = Date.now()) {
   let wroteAny = false;
   for (const wallet of Object.values(wallets)) {
-    const wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', { minMs: 10 * 1000 });
+    const wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', {
+      minMs: CONFIG.runtime.networthHistory.heartbeatMinWriteMs,
+    });
     if (wrote) wroteAny = true;
   }
   if (wroteAny) saveWallets();
@@ -547,12 +568,30 @@ function removeRuntimeState(key) {
 
 function sanitizeRuntimeTuning(partial = {}) {
   const merged = { ...DEFAULT_RUNTIME_TUNING, ...(partial || {}) };
-  const intervalMs = Math.max(10000, Math.min(600000, Math.trunc(normalizeNumeric(merged.lifeStatsIntervalMs, DEFAULT_RUNTIME_TUNING.lifeStatsIntervalMs))));
-  const globalEvScalar = Math.max(0, Math.min(5, normalizeNumeric(merged.globalEvScalar, DEFAULT_RUNTIME_TUNING.globalEvScalar)));
-  const threshold = Math.max(50, Math.min(99.999, normalizeNumeric(merged.binomialPityThreshold, DEFAULT_RUNTIME_TUNING.binomialPityThreshold)));
-  const boostRate = Math.max(0, Math.min(0.5, normalizeNumeric(merged.binomialPityBoostRate, DEFAULT_RUNTIME_TUNING.binomialPityBoostRate)));
-  const durationMinutes = Math.max(1, Math.min(1440, normalizeNumeric(merged.binomialPityDurationMinutes, DEFAULT_RUNTIME_TUNING.binomialPityDurationMinutes)));
-  const cooldownMinutes = Math.max(0, Math.min(1440, normalizeNumeric(merged.binomialPityCooldownMinutes, DEFAULT_RUNTIME_TUNING.binomialPityCooldownMinutes)));
+  const intervalMs = Math.max(
+    CONFIG.runtime.bounds.lifeStatsIntervalMs.min,
+    Math.min(CONFIG.runtime.bounds.lifeStatsIntervalMs.max, Math.trunc(normalizeNumeric(merged.lifeStatsIntervalMs, DEFAULT_RUNTIME_TUNING.lifeStatsIntervalMs)))
+  );
+  const globalEvScalar = Math.max(
+    CONFIG.runtime.bounds.globalEvScalar.min,
+    Math.min(CONFIG.runtime.bounds.globalEvScalar.max, normalizeNumeric(merged.globalEvScalar, DEFAULT_RUNTIME_TUNING.globalEvScalar))
+  );
+  const threshold = Math.max(
+    CONFIG.runtime.bounds.binomialPityThreshold.min,
+    Math.min(CONFIG.runtime.bounds.binomialPityThreshold.max, normalizeNumeric(merged.binomialPityThreshold, DEFAULT_RUNTIME_TUNING.binomialPityThreshold))
+  );
+  const boostRate = Math.max(
+    CONFIG.runtime.bounds.binomialPityBoostRate.min,
+    Math.min(CONFIG.runtime.bounds.binomialPityBoostRate.max, normalizeNumeric(merged.binomialPityBoostRate, DEFAULT_RUNTIME_TUNING.binomialPityBoostRate))
+  );
+  const durationMinutes = Math.max(
+    CONFIG.runtime.bounds.binomialPityDurationMinutes.min,
+    Math.min(CONFIG.runtime.bounds.binomialPityDurationMinutes.max, normalizeNumeric(merged.binomialPityDurationMinutes, DEFAULT_RUNTIME_TUNING.binomialPityDurationMinutes))
+  );
+  const cooldownMinutes = Math.max(
+    CONFIG.runtime.bounds.binomialPityCooldownMinutes.min,
+    Math.min(CONFIG.runtime.bounds.binomialPityCooldownMinutes.max, normalizeNumeric(merged.binomialPityCooldownMinutes, DEFAULT_RUNTIME_TUNING.binomialPityCooldownMinutes))
+  );
   return {
     lifeStatsIntervalMs: intervalMs,
     globalEvScalar,
@@ -682,13 +721,13 @@ function setBalance(userId, amount) {
 function getInterestRate(userId) {
   const w = getWallet(userId);
   const bonuses = getInventoryBonuses(w.inventory);
-  return BASE_INVEST_RATE + (w.interestLevel * 0.01) + bonuses.interestRateBonus;
+  return BASE_INVEST_RATE + (w.interestLevel * CONFIG.economy.upgrades.interestPerLevel) + bonuses.interestRateBonus;
 }
 
 function getCashbackRate(userId) {
   const w = getWallet(userId);
   const bonuses = getInventoryBonuses(w.inventory);
-  return (w.cashbackLevel * 0.001) + bonuses.cashbackRateBonus;
+  return (w.cashbackLevel * CONFIG.economy.upgrades.cashbackPerLevel) + bonuses.cashbackRateBonus;
 }
 
 function applyCashback(userId, lossAmount) {
@@ -709,8 +748,8 @@ function getUniversalIncomeDoubleChance(userId) {
   const w = getWallet(userId);
   const level = w.universalIncomeMultLevel || 0;
   const bonuses = getInventoryBonuses(w.inventory);
-  const chance = (Math.max(0, Math.min(10, level)) * 0.01) + bonuses.universalDoubleChanceBonus;
-  return Math.max(0, Math.min(0.75, chance));
+  const chance = (Math.max(0, Math.min(CONFIG.economy.upgrades.maxLevel, level)) * CONFIG.economy.upgrades.universalIncomePerLevelChance) + bonuses.universalDoubleChanceBonus;
+  return Math.max(0, Math.min(CONFIG.economy.upgrades.universalIncomeChanceCap, chance));
 }
 
 function getMysteryBoxLuckInfo(userId) {
@@ -718,7 +757,10 @@ function getMysteryBoxLuckInfo(userId) {
   ensureWalletStatsShape(w);
   const inventoryBonuses = getInventoryBonuses(w.inventory);
   const pityStreak = Math.max(0, w.stats.mysteryBox.pityStreak || 0);
-  const pityLuckBonus = Math.min(0.5, pityStreak * 0.02);
+  const pityLuckBonus = Math.min(
+    CONFIG.collectibles.mysteryBox.pity.maxLuckBonus,
+    pityStreak * CONFIG.collectibles.mysteryBox.pity.luckPerStreakStep
+  );
   const totalLuck = inventoryBonuses.mysteryBoxLuckBonus + pityLuckBonus;
   return {
     pityStreak,
@@ -859,7 +901,7 @@ function processBank(userId) {
   if (!hasPrincipal && !hasPending) return 0;
 
   const now = Date.now();
-  const minuteMs = 60 * 1000;
+  const minuteMs = CONFIG.economy.bank.interestAccrualMinuteMs;
   const baseLast = w.stats.interest.lastAccrualAt || w.lastBankPayout || now;
   const elapsedMinutes = Math.floor((now - baseLast) / minuteMs);
   if (elapsedMinutes < 1) return 0;
@@ -879,7 +921,7 @@ function processBank(userId) {
     pendingMinutes += 1;
     processedAt += minuteMs;
 
-    if (pendingMinutes >= 60) {
+    if (pendingMinutes >= CONFIG.economy.bank.payoutIntervalMinutes) {
       if (pendingCoins > 0) {
         w.bank += pendingCoins;
         totalPayout += pendingCoins;
@@ -909,7 +951,7 @@ function processBank(userId) {
 function checkDaily(userId) {
   const w = getWallet(userId);
   const now = Date.now(), last = w.lastDaily || 0;
-  const dayMs = 86400000;
+  const dayMs = CONFIG.economy.daily.claimCooldownMs;
   if (now - last < dayMs) {
     const rem = (last + dayMs) - now;
     return {
@@ -919,16 +961,15 @@ function checkDaily(userId) {
       streak: w.streak || 0,
     };
   }
-  return { canClaim: true, streakBroken: (now - last) > 172800000, streak: w.streak || 0 };
+  return { canClaim: true, streakBroken: (now - last) > CONFIG.economy.daily.streakBreakMs, streak: w.streak || 0 };
 }
 
 function claimDaily(userId) {
-  const { DAILY_BASE, DAILY_STREAK_BONUS } = require('../config');
   const w = getWallet(userId);
   const now = Date.now(), last = w.lastDaily || 0;
-  if ((now - last) > 172800000 && last !== 0) w.streak = 1;
+  if ((now - last) > CONFIG.economy.daily.streakBreakMs && last !== 0) w.streak = 1;
   else w.streak = (w.streak || 0) + 1;
-  const reward = DAILY_BASE + (DAILY_STREAK_BONUS * (w.streak - 1));
+  const reward = CONFIG.economy.daily.baseReward + (CONFIG.economy.daily.streakBonusPerDay * (w.streak - 1));
   w.balance += reward;
   w.lastDaily = now;
   maybeTrackNetWorthSnapshotForWallet(w, now, 'daily');
@@ -949,14 +990,14 @@ function rollMysteryBox(userId = null) {
 
   const adjustedPools = Object.entries(MYSTERY_BOX_POOLS).map(([rarity, pool]) => {
     let mult = 1;
+    const rules = CONFIG.collectibles.mysteryBox.luckWeightMultipliers[rarity];
     if (luck > 0) {
-      if (rarity === 'common') mult = Math.max(0.25, 1 - (luck * 0.6));
-      if (rarity === 'uncommon') mult = Math.max(0.35, 1 - (luck * 0.35));
-      if (rarity === 'rare') mult = 1 + (luck * 0.8);
-      if (rarity === 'legendary') mult = 1 + (luck * 1.4);
-      if (rarity === 'epic') mult = 1 + (luck * 1.8);
-      if (rarity === 'mythic') mult = 1 + (luck * 2.6);
-      if (rarity === 'divine') mult = 1 + (luck * 3.2);
+      if (rules) {
+        mult = 1 + (luck * rules.slope);
+        if (Number.isFinite(rules.floor)) {
+          mult = Math.max(rules.floor, mult);
+        }
+      }
     }
     return [rarity, { ...pool, adjustedWeight: pool.weight * mult }];
   });
@@ -970,7 +1011,7 @@ function rollMysteryBox(userId = null) {
       const item = it[Math.floor(Math.random() * it.length)];
       if (w) {
         w.stats.mysteryBox.opened += 1;
-        const highRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER.legendary;
+        const highRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER[CONFIG.collectibles.mysteryBox.highRarityThreshold];
         if (highRarity) {
           w.stats.mysteryBox.luckyHighRarity += 1;
           w.stats.mysteryBox.pityStreak = 0;
@@ -998,28 +1039,12 @@ function rollMysteryBox(userId = null) {
 
 // Calculate duplicate compensation by rarity.
 function getDuplicateCompensation(itemId, rarity) {
-  const COMP_BY_RARITY = {
-    common: 2000,
-    uncommon: 3500,
-    rare: 6000,
-    epic: 12000,
-    legendary: 20000,
-    mythic: 60000,
-    divine: 150000,
-  };
+  const COMP_BY_RARITY = CONFIG.collectibles.mysteryBox.duplicateCompensationByRarity;
   return COMP_BY_RARITY[rarity] || 0;
 }
 
 function getDuplicateCompensationTable() {
-  return {
-    common: 2000,
-    uncommon: 3500,
-    rare: 6000,
-    epic: 12000,
-    legendary: 20000,
-    mythic: 60000,
-    divine: 150000,
-  };
+  return { ...CONFIG.collectibles.mysteryBox.duplicateCompensationByRarity };
 }
 
 // Number formatting helpers.
@@ -1252,4 +1277,7 @@ module.exports = {
   trackLifeStatsHeartbeat,
   getRuntimeTuning, updateRuntimeTuning, resetRuntimeTuning, getDefaultRuntimeTuning,
   setRuntimeState, getRuntimeState, removeRuntimeState,
+  checkpointWal,
+  backupDatabaseToFile,
+  getDbFilePaths,
 };

@@ -1,53 +1,30 @@
 # Let it Ride
 
-A Discord economy + gambling bot built with `discord.js` and `better-sqlite3`.
+Let it Ride is a Discord economy + gambling bot built on `discord.js` and `better-sqlite3`.
 
-It includes:
-- Wallets with purse + bank
-- Daily rewards with streak scaling
-- Multiple games (flip, dice, roulette, blackjack, mines, duel, let-it-ride)
-- Upgrade system (interest, cashback, spin multiplier)
-- Item-driven bonus system (interest, cashback, luck, EV boosts, mines save proc)
-- Collectibles + mystery boxes + trading
-- Universal income pool (hourly) + loss pool daily spin
-- Multi-page stats dashboard with button navigation and net worth trend graph
-- Giveaways and persistent interactive sessions
+It has wallets (purse + bank), daily streak rewards, multiple games, upgrades, collectibles, mystery boxes, trading, giveaways, persistent sessions, and scheduled economy events.
 
----
+## What it runs on
 
-## Tech Stack
-
-- Node.js (CommonJS)
-- `discord.js` v14
-- `better-sqlite3`
-- `dotenv`
+- Node.js (CommonJS), `discord.js` v14, `better-sqlite3`, `dotenv`
 - SQLite database at `data/gambling.db`
 
----
+## Setup
 
-## Requirements
+Requirements:
 
 - Node.js 18+
-- A Discord application + bot token
-- Bot invited to your server with application commands permissions
+- Discord application + bot token
+- Bot invited with app commands permission
 
----
-
-## Installation
-
-1. Install dependencies:
+Install:
 
 ```bash
 npm install
-```
-
-2. Copy the example env file:
-
-```bash
 cp .env.example .env
 ```
 
-3. Edit `.env` with your values (template below):
+Fill in `.env`:
 
 ```env
 TOKEN=your_bot_token
@@ -58,324 +35,189 @@ ADMIN_IDS=comma,separated,discord_user_ids
 STATS_RESET_ADMIN_IDS=comma,separated,discord_user_ids_optional
 ```
 
-### Environment variables
+Notes:
 
-- `TOKEN` (required): bot token
-- `CLIENT_ID` (required): Discord application ID
-- `GUILD_ID` (required): guild where slash commands are registered
-- `ANNOUNCE_CHANNEL_ID` (optional): used for announcement flows
-- `ADMIN_IDS` (optional but recommended): IDs allowed to use `/admin`
-- `STATS_RESET_ADMIN_IDS` (optional): IDs allowed to use `/admin resetstats`
-	- Falls back to `ADMIN_IDS` if not set
+- `TOKEN`, `CLIENT_ID`, `GUILD_ID` are required.
+- `STATS_RESET_ADMIN_IDS` falls back to `ADMIN_IDS` when omitted.
 
-If `TOKEN`, `CLIENT_ID`, or `GUILD_ID` are missing, bot startup exits immediately.
-
----
-
-## Running
+Run:
 
 ```bash
 node bot.js
 ```
 
-On startup, the bot:
-1. Logs in
-2. Registers guild slash commands
-3. Schedules recurring jobs
-4. Restores persisted runtime sessions (active games/trades/giveaways)
+On startup the bot registers slash commands, restores active sessions from `runtime_state`, starts scheduled jobs, and starts database backups.
 
----
+## Data model and persistence
 
-## Data & Persistence
+Primary tables in `data/gambling.db`:
 
-Primary storage is SQLite (`data/gambling.db`) with these main tables:
 - `wallets`
 - `pool`
 - `runtime_state`
 
-### Migration behavior
+On first run, if `wallets` is empty, old JSON files are migrated when present.
 
-On first run with an empty `wallets` table:
-- If `wallets.json` exists, wallet data is migrated into SQLite
-- If `pool.json` exists and pool row is empty, pool data is migrated
+Persistent session state (so interactions survive restart) includes:
 
-### Persisted runtime sessions
+- blackjack
+- mines
+- simple games (dice/roulette/ride/duel)
+- trades
+- giveaways
 
-In-progress interactions survive restarts via `runtime_state`, including:
-- blackjack sessions
-- mines sessions
-- simple game sessions (dice/roulette/ride/duel)
-- trade sessions
-- giveaway state
+## Economy and gameplay summary
 
----
+- New wallet starts with `1000` coins.
+- Daily base reward is `500` with `+50` per streak day.
+- Bank pays hourly from accrued interest (base `1%` daily + upgrades + item bonuses).
+- Universal pool is funded by win tax and distributed hourly.
+- Loss pool is funded by loss tax and used for daily spin payout.
+- Upgrades cover interest, cashback, spin weight, and universal-income double chance.
+- Collectibles can add passive bonuses (interest, cashback, mystery luck, EV boosts, mines reveal save).
 
-## Economy Model
+Supported games:
 
-### Starting values
-
-- New wallet starts with `1000` coins (purse)
-- Daily base reward is `500`
-- Daily streak bonus is `+50` per extra streak day
-
-### Bank system
-
-- Players can move coins between purse and bank
-- Base bank rate: `1%` daily
-- Interest upgrade adds `+1%` daily per level (up to level 10)
-- Interest is processed hourly (compounded by whole elapsed hours)
-
-### Pools
-
-- **Universal Pool**: funded by win tax (`5%` of profits)
-	- Distributed equally to all wallets every hour
-	- Paid into bank
-- **Loss Pool**: funded by loss tax (`5%` of losses)
-	- Paid once daily at scheduled spin time to one weighted winner
-
-### Upgrade paths
-
-- **Interest Level** (0–10)
-- **Cashback Level** (0–10)
-	- Cashback is currently `level * 0.1%` on losses
-- **Spin Mult Level** (0–10)
-	- Adds daily spin weight (`1 + level`)
-- **Hourly Universal Income Mult Level** (0–10)
-	- Gives `level%` chance to receive double hourly universal income payout
-
-### Item effects and luck
-
-- Collectibles now provide passive stat bonuses while in inventory
-- Effects include:
-	- extra bank interest
-	- higher cashback
-	- better mystery box luck
-	- game-specific EV boosts
-	- a rare mines auto-save reveal proc
-- Mystery boxes now track pity streak and apply pity-based luck scaling
-- Use `/stats` and open the `Bonuses` page to see your live modifiers
-
-### Live economy channel
-
-- The bot keeps a live economy snapshot message in channel `1473753550332104746`
-- It shows:
-	- current universal pool
-	- current loss pool
-	- estimated current hourly payout per player
-	- active player counts
-	- a master net worth graph for tracked players with separate line colors
-- Refresh cadence is set to every 10 seconds
-
----
-
-## Games
-
-All bet amount inputs support abbreviated formats like:
-- `100`
-- `4.7k`, `1.2m`, `1b`
-- `all`
-
-### `/flip`
-- 50/50 coin flip
-- Optional quantity `1-10`
-- Multi-flip returns net result across all flips
-
-### `/dice`
-- Pick high (`4-6`) or low (`1-3`)
-- Win doubles stake outcome style (profit = bet)
-
-### `/roulette`
-- Bets on red, black, or green `0`
-- Red/black: 2x total return style (profit = bet)
-- Green: 14x total return style (profit = 13x bet)
-
-### `/allin17black`
-- Special high-risk roulette mode
-- Bets full current balance on exact `17`
-- Hit pays `36x` total
-
-### `/blackjack`
-- Supports hit, stand, double, split
-- Natural blackjack payout: 2.5x total return (1.5x profit)
-- Active hands persist across bot restarts
-
-### `/mines`
-- 4x5 grid (20 tiles), choose `1-15` mines
-- Revealing safe tiles increases multiplier
-- Can cash out anytime after first reveal
-
-### `/letitride`
-- First win check, then optional repeated double-or-bust rides
-- Cash out at any step or risk for another double
-
-### `/duel`
-- Challenge another user
-- Both sides stake the same amount
-- Winner takes both stakes
-
----
-
-## Collectibles & Mystery Boxes
-
-- `/mysterybox [quantity]` buys boxes (cost: `5,000` each)
-- 120 placeholder collectibles across 7 rarities
-- Mystery box odds are affected by item luck and pity streak
-- Duplicate placeholder drops pay rarity-based compensation instead
-- `/inventory` shows owned collectibles
-- `/collection` shows top collectors by unique count
-- `/trade` allows user-to-user coin + item trades
-
-Duplicate compensation values:
-- ⬜ Common: `2,000`
-- 🟩 Uncommon: `3,500`
-- 🟦 Rare: `6,000`
-- 🟪 Epic: `12,000`
-- 🟨 Legendary: `20,000`
-- 🩷 Mythic: `60,000`
-- 🩵 Divine: `150,000`
-
-Rarities used:
-- common
-- uncommon
-- rare
-- epic
-- legendary
-- mythic
-- divine
-
----
-
-## Giveaways
-
-- `/giveaway` opens modal to create giveaway
-- Host sets amount + duration (1 to 1440 minutes)
-- Coins are held from host immediately
-- Participants join via button in giveaway channel
-- Expired giveaways are checked every 30 seconds
-	- If participants exist: random winner gets prize
-	- If none: host is refunded
-
----
-
-## Commands Reference
-
-### Economy / Progress
-- `/balance`
-- `/daily`
-- `/deposit amount`
-- `/invest amount` (alias of deposit)
-- `/withdraw amount`
-- `/bank`
-- `/give user amount`
-- `/leaderboard`
-- `/pool`
-- `/upgrades`
-- `/stats [user|username]` (overview, win/loss, binomial, net worth, bonuses)
-
-### Games
-- `/flip amount [quantity]`
-- `/dice amount`
-- `/roulette amount`
+- `/flip` (single or multi)
+- `/dice`
+- `/roulette`
 - `/allin17black`
-- `/blackjack amount`
-- `/mines amount mines`
-- `/letitride amount`
-- `/duel opponent amount`
+- `/blackjack`
+- `/mines`
+- `/letitride`
+- `/duel`
 
-### Collectibles / Social
-- `/mysterybox [quantity]`
-- `/inventory [page]`
-- `/collection`
-- `/trade user`
-- `/help [topic]`
+Amount parsing supports `100`, `4.7k`, `1.2m`, `1b`, and `all`.
+
+## Commands
+
+Economy / utility:
+
+- `/balance`, `/daily`, `/deposit`, `/invest`, `/withdraw`, `/bank`
+- `/give`, `/leaderboard`, `/pool`, `/upgrades`
+- `/stats [user|username]`
+
+Collectibles / social:
+
+- `/mysterybox [quantity]`, `/inventory [page]`, `/collection`, `/trade user`
 - `/giveaway`
+- `/help [topic]`
 
-### Admin
-- Single entrypoint: `/admin <subcommand>`
-- `/admin give user amount`
-- `/admin set user amount`
-- `/admin reset user`
-- `/admin resetupgrades user`
-- `/admin forcespin`
-- `/admin forcepoolpayout`
-- `/admin testannounce`
-- `/admin start`
-- `/admin stop`
-- `/admin resetstats user` (restricted to `STATS_RESET_ADMIN_IDS`)
+Admin entrypoint:
 
----
+- `/admin <subcommand>`
 
-## Scheduled Jobs
+## Scheduled jobs
 
-Configured in `bot.js`:
+- Hourly: bank processing + universal pool distribution
+- Daily at 11:15 local server time: daily spin cycle
+- Every 30s: giveaway expiry check
+- Hourly (top of hour): database backup creation
 
-- **Hourly (aligned to next UTC hour):**
-	- bank interest processing
-	- universal pool distribution
+## Database backups (detailed)
 
-- **Daily at 11:15 (server local time):**
-	- daily spin execution
-	- daily leaderboard post
+The bot now performs automatic local backups in `backups/` with tiered retention.
 
-- **Every 30 seconds:**
-	- giveaway expiration check
+### What gets backed up
 
-> Note: channel IDs for daily spin and hourly payout are currently hardcoded in `bot.js`.
+Each snapshot writes:
 
----
+- `gambling.db` (created via SQLite online backup API, not a blind file copy)
+- `gambling.db-wal` if present
+- `gambling.db-shm` if present
+- `meta.json` with timestamp and backup metadata
 
-## Project Layout
+Before snapshotting, the bot runs a passive WAL checkpoint to improve consistency of sidecar files.
+
+### When backups run
+
+- Once on startup (`reason: startup`)
+- Then every hour, aligned to the next hour boundary (`reason: hourly`)
+
+### Folder layout
+
+Backups are organized as:
 
 ```text
-bot.js                # startup, command registration, scheduling, interaction router
-config.js             # economy constants, upgrade costs, collectible pools
-commands/
-	admin.js            # admin slash command logic
-	economy.js          # economy, upgrades, collectibles, trading, giveaway flow
-	help.js             # help topics
-	stats.js            # user stats rendering
-games/
-	blackjack.js        # blackjack gameplay + split/double flow
-	mines.js            # mines game logic
-	simple.js           # flip, dice, roulette, duel, let-it-ride
-	cards.js            # deck + card utilities
-data/
-	store.js            # sqlite access layer, migration, persistence, stats tracking
+backups/
+  hourly/
+    YYYY-MM-DD/
+      HH-mm-ss/
+        gambling.db
+        gambling.db-wal (if present)
+        gambling.db-shm (if present)
+        meta.json
+  legacy/
+    flat-backup-files/
+    data-pre-restore/
 ```
 
----
+Old loose backup clutter is automatically moved into `backups/legacy/...`.
 
-## Operational Notes
+### Retention policy
 
-- Command registration is guild-scoped (fast updates, one guild target)
-- Wallet is auto-created the first time a user interacts
-- Most user-facing balance changes are persisted immediately
-- If bot is stopped with `/admin stop`, non-admin interactions are blocked
-- On any interaction error, bot attempts a safe fallback reply
+Retention is automatic and runs after each snapshot:
 
----
+1. Keep all hourly snapshots for the last 7 days.
+2. For snapshots older than 7 days and newer than 30 days, keep only the latest snapshot per day.
+3. For snapshots older than 30 days, keep only the latest snapshot per month.
+
+This gives:
+
+- up to `24 * 7 = 168` recent hourly points
+- then one per day for the rest of the month window
+- then one per month indefinitely
+
+### Git behavior (no commits of backups)
+
+Generated backup folders are ignored with:
+
+- `backups/**`
+- exception for `backups/README.md`
+
+So backup data stays local and won’t be committed unless you intentionally override ignore rules.
+
+### Safe restore guidance
+
+If you need to restore manually:
+
+1. Stop the bot.
+2. Choose one snapshot folder in `backups/hourly/...`.
+3. Copy `gambling.db` to `data/gambling.db`.
+4. If that snapshot includes `gambling.db-wal` and `gambling.db-shm`, copy those too.
+5. Start the bot.
+
+Do not mix `db` from one snapshot with `wal/shm` from another snapshot.
+
+## Project layout
+
+```text
+bot.js                startup, command registration, scheduling, routing
+config.js             central config and legacy export aliases
+commands/             command handlers
+games/                game logic
+data/store.js         sqlite access, migration, state persistence
+utils/dbBackup.js     backup scheduler + retention + legacy cleanup
+```
 
 ## Troubleshooting
 
-### Bot exits with "Missing env vars."
-Ensure `TOKEN`, `CLIENT_ID`, and `GUILD_ID` are set in `.env`.
+Bot exits with missing env vars:
 
-### Slash commands not updating
-- Confirm bot started successfully and command registration completed
-- Ensure `CLIENT_ID` and `GUILD_ID` match the target application/server
+- Set `TOKEN`, `CLIENT_ID`, and `GUILD_ID` in `.env`.
 
-### No messages in scheduled channels
-- Verify bot has access to channel IDs used by scheduler/giveaway flows
-- Check `View Channel`, `Send Messages`, `Manage Messages` permissions
+Slash commands not updating:
 
-### Database issues
-- Ensure process has write permission to `data/`
-- Stop bot before replacing DB files manually
+- Check that the bot logged in and command registration succeeded.
+- Confirm `CLIENT_ID` and `GUILD_ID` are correct for the target server.
 
----
+Database restore/backup confusion:
 
-## Security / Fairness Notes
+- Stop the bot before replacing database files.
+- Restore matching `db`/`wal`/`shm` from the same timestamp folder.
 
-- Random outcomes rely on `Math.random()` (not cryptographically secure)
-- Admin commands can directly alter balances and states
-- This bot is for community entertainment, not regulated wagering
+## Notes
+
+- Random outcomes use `Math.random()` (not cryptographic randomness).
+- Admin commands can directly alter balances and state.
+- Intended for community entertainment, not regulated wagering.

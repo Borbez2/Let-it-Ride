@@ -1,32 +1,13 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { CONFIG } = require('../config');
 const store = require('../data/store');
 const binomial = require('../utils/binomial');
 
-const STATS_DEFAULT_TIMEFRAME_KEY = '1w';
-const STATS_TIMEFRAMES = [
-  { key: '1min', label: '1min', seconds: 60 },
-  { key: '5min', label: '5min', seconds: 300 },
-  { key: '10min', label: '10min', seconds: 600 },
-  { key: '30min', label: '30min', seconds: 1800 },
-  { key: '1h', label: '1h', seconds: 3600 },
-  { key: '6h', label: '6h', seconds: 21600 },
-  { key: '1d', label: '1d', seconds: 86400 },
-  { key: '1w', label: '1w', seconds: 604800 },
-  { key: '6m', label: '6m', seconds: 15552000 },
-  { key: '1y', label: '1y', seconds: 31536000 },
-  { key: 'all', label: 'all', seconds: null },
-];
+const STATS_DEFAULT_TIMEFRAME_KEY = CONFIG.stats.defaultTimeframeKey;
+const STATS_TIMEFRAMES = CONFIG.stats.timeframes;
 
-const GAMES = ['flip', 'dice', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'];
-const THEORETICAL_WIN_CHANCE = {
-  flip: 0.5,
-  dice: 0.5,
-  roulette: 18 / 37,
-  blackjack: 0.48,
-  mines: null,
-  letitride: 0.5,
-  duel: 0.5,
-};
+const GAMES = CONFIG.stats.games;
+const THEORETICAL_WIN_CHANCE = CONFIG.stats.theoreticalWinChance;
 
 function downsampleSeries(points, maxPoints = 180) {
   if (points.length <= maxPoints) return points;

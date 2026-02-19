@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
+const { CONFIG } = require('./config');
 const store = require('./data/store');
 const blackjack = require('./games/blackjack');
 const mines = require('./games/mines');
@@ -10,15 +11,16 @@ const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
 const pityCmd = require('./commands/pity');
+const dbBackup = require('./utils/dbBackup');
 
 // Load required environment values from .env.
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const ANNOUNCE_CHANNEL_ID = process.env.ANNOUNCE_CHANNEL_ID;
-const DAILY_EVENTS_CHANNEL_ID = '1467976012645269676';
-const HOURLY_PAYOUT_CHANNEL_ID = '1473595731893027000';
-const LIFE_STATS_CHANNEL_ID = '1473753550332104746';
+const DAILY_EVENTS_CHANNEL_ID = CONFIG.bot.channels.dailyEvents;
+const HOURLY_PAYOUT_CHANNEL_ID = CONFIG.bot.channels.hourlyPayout;
+const LIFE_STATS_CHANNEL_ID = CONFIG.bot.channels.lifeStats;
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
 const STATS_RESET_ADMIN_IDS = (process.env.STATS_RESET_ADMIN_IDS || process.env.ADMIN_IDS || '')
   .split(',')
@@ -32,25 +34,13 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let isBotActive = true;
-const LIVE_GRAPH_SLOT_SECONDS = 10;
-const LIVE_GRAPH_MAX_USERS = 20;
-const LIVE_GRAPH_SESSION_TTL_MS = 30 * 60 * 1000;
-const DEFAULT_GRAPH_TIMEFRAME_SEC = 7 * 24 * 60 * 60;
-const LIVE_GRAPH_TIMEFRAMES = [
-  { key: '1min', label: '1min', seconds: 60 },
-  { key: '5min', label: '5min', seconds: 300 },
-  { key: '10min', label: '10min', seconds: 600 },
-  { key: '30min', label: '30min', seconds: 1800 },
-  { key: '1h', seconds: 3600 },
-  { key: '6h', seconds: 21600 },
-  { key: '1d', seconds: 86400 },
-  { key: '1w', seconds: 604800 },
-  { key: '6m', seconds: 15552000 },
-  { key: '1y', seconds: 31536000 },
-  { key: 'all', seconds: null },
-];
+const LIVE_GRAPH_SLOT_SECONDS = CONFIG.bot.graph.liveSlotSeconds;
+const LIVE_GRAPH_MAX_USERS = CONFIG.bot.graph.maxUsers;
+const LIVE_GRAPH_SESSION_TTL_MS = CONFIG.bot.graph.sessionTtlMs;
+const DEFAULT_GRAPH_TIMEFRAME_SEC = CONFIG.bot.graph.defaultTimeframeSec;
+const LIVE_GRAPH_TIMEFRAMES = CONFIG.bot.graph.timeframes;
 const liveGraphSessions = new Map();
-const PUBLIC_GRAPH_REFRESH_MS = 60000;
+const PUBLIC_GRAPH_REFRESH_MS = CONFIG.bot.graph.publicRefreshMs;
 const publicGraphState = {
   chartUrl: null,
   datasetsCount: 0,
@@ -61,6 +51,7 @@ const lifeStatsLoopState = {
   running: false,
   stopped: false,
 };
+let stopDbBackupScheduler = null;
 
 function withTimeout(promise, timeoutMs = 2000) {
   return Promise.race([
@@ -322,35 +313,35 @@ const commands = [
   new SlashCommandBuilder().setName('balance').setDescription('Check your coin balance'),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily coins'),
   new SlashCommandBuilder().setName('flip').setDescription('Flip coins, instant 50/50')
-    .addStringOption(o => o.setName('amount').setDescription('Bet per flip (e.g. 100, 4.7k, 1.2m, all)').setRequired(true))
-    .addIntegerOption(o => o.setName('quantity').setDescription('Number of flips (1-10)').setMinValue(1).setMaxValue(10)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet per flip (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true))
+    .addIntegerOption(o => o.setName('quantity').setDescription(`Number of flips (${CONFIG.commands.limits.flipQuantity.min}-${CONFIG.commands.limits.flipQuantity.max})`).setMinValue(CONFIG.commands.limits.flipQuantity.min).setMaxValue(CONFIG.commands.limits.flipQuantity.max)),
   new SlashCommandBuilder().setName('dice').setDescription('Roll dice, win on 4-6')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('blackjack').setDescription('Play blackjack')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('roulette').setDescription('Play roulette')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('allin17black').setDescription('Go ALL IN on 17 black in roulette'),
   new SlashCommandBuilder().setName('mines').setDescription('Navigate a minefield for multiplied rewards')
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true))
-    .addIntegerOption(o => o.setName('mines').setDescription('Number of mines (1-15)').setRequired(true).setMinValue(1).setMaxValue(15)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true))
+    .addIntegerOption(o => o.setName('mines').setDescription(`Number of mines (${CONFIG.commands.limits.minesCount.min}-${CONFIG.commands.limits.minesCount.max})`).setRequired(true).setMinValue(CONFIG.commands.limits.minesCount.min).setMaxValue(CONFIG.commands.limits.minesCount.max)),
   new SlashCommandBuilder().setName('leaderboard').setDescription('See the richest players'),
   new SlashCommandBuilder().setName('give').setDescription('Give coins to someone')
     .addUserOption(o => o.setName('user').setDescription('Who to give to').setRequired(true))
-    .addStringOption(o => o.setName('amount').setDescription('Amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('trade').setDescription('Start a trade with someone')
     .addUserOption(o => o.setName('user').setDescription('Who to trade with').setRequired(true)),
   new SlashCommandBuilder().setName('duel').setDescription('Challenge someone to a coin flip duel')
     .addUserOption(o => o.setName('opponent').setDescription('Who to challenge').setRequired(true))
-    .addStringOption(o => o.setName('amount').setDescription('Bet amount (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('letitride').setDescription('Win and keep doubling')
-    .addStringOption(o => o.setName('amount').setDescription('Starting bet (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Starting bet (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('deposit').setDescription('Deposit coins to your bank')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to deposit (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Amount to deposit (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('invest').setDescription('Deposit coins to your bank (alias)')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to invest (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Amount to invest (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
-    .addStringOption(o => o.setName('amount').setDescription('Amount to withdraw (e.g. 100, 4.7k, 1.2m, all)').setRequired(true)),
+    .addStringOption(o => o.setName('amount').setDescription(`Amount to withdraw (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
   new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades'),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
@@ -361,19 +352,11 @@ const commands = [
     .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false))
     .addStringOption(o => o.setName('username').setDescription('Username to check stats for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('pity').setDescription('View your active pity stacks and per-stack timers'),
-  new SlashCommandBuilder().setName('mysterybox').setDescription('Buy mystery boxes for 5,000 coins each')
-    .addIntegerOption(o => o.setName('quantity').setDescription('Number of boxes to buy (1-50)').setMinValue(1).setMaxValue(50)),
+  new SlashCommandBuilder().setName('mysterybox').setDescription(`Buy mystery boxes for ${CONFIG.collectibles.mysteryBox.cost.toLocaleString()} coins each`)
+    .addIntegerOption(o => o.setName('quantity').setDescription(`Number of boxes to buy (${CONFIG.commands.limits.mysteryBoxQuantity.min}-${CONFIG.commands.limits.mysteryBoxQuantity.max})`).setMinValue(CONFIG.commands.limits.mysteryBoxQuantity.min).setMaxValue(CONFIG.commands.limits.mysteryBoxQuantity.max)),
   new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
     .addStringOption(o => o.setName('topic').setDescription('Help topic')
-      .addChoices(
-        { name: 'General Economy', value: 'general' },
-        { name: 'Universal Income', value: 'universalincome' },
-        { name: 'Collectibles', value: 'collectibles' },
-        { name: 'Games and EV', value: 'games' },
-        { name: 'Luck, Pity, and Modifiers', value: 'modifiers' },
-        { name: 'Mystery Boxes', value: 'mysteryboxes' },
-        { name: 'Command Reference', value: 'commands' },
-      )),
+      .addChoices(...CONFIG.help.topics)),
   adminCmd.buildAdminCommand(),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
     .addStringOption(o => o.setName('message').setDescription('Optional giveaway message').setRequired(false).setMaxLength(200)),
@@ -909,7 +892,7 @@ function scheduleAll() {
   function msUntilNextDaily1115() {
     const now = new Date();
     const next = new Date(now);
-    next.setHours(11, 15, 0, 0);
+    next.setHours(CONFIG.bot.scheduler.dailySpinHourLocal, CONFIG.bot.scheduler.dailySpinMinuteLocal, 0, 0);
     if (now >= next) next.setDate(next.getDate() + 1);
     return next - now;
   }
@@ -941,14 +924,18 @@ function scheduleAll() {
   }
 
   const missedHourlyMs = Date.now() - (store.getPoolData().lastHourlyPayout || 0);
-  if (missedHourlyMs >= 3600000) {
+  if (missedHourlyMs >= CONFIG.economy.pools.hourlyPayoutMs) {
     distributeUniversalPool().catch((err) => console.error('Startup catch-up hourly error:', err));
   }
 
   scheduleNextHourly();
-  setInterval(checkExpiredGiveaways, 30000);
+  setInterval(checkExpiredGiveaways, CONFIG.economy.pools.giveawayExpiryCheckMs);
   restartLifeStatsInterval();
   scheduleNextDaily1115();
+
+  if (!stopDbBackupScheduler) {
+    stopDbBackupScheduler = dbBackup.startHourlyBackupScheduler({ logger: console, runOnStartup: true });
+  }
 
   const hourlyMs = msUntilNextUtcHour();
   const dailyMs = msUntilNextDaily1115();

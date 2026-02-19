@@ -1,13 +1,14 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { CONFIG } = require('../config');
 const store = require('../data/store');
 
 const TUNING_KEYS = {
-  lifeStatsIntervalMs: { min: 10000, max: 600000, description: 'Live stats refresh interval in milliseconds' },
-  globalEvScalar: { min: 0, max: 5, description: 'Global EV scalar multiplier for all EV-based boosts' },
-  binomialPityThreshold: { min: 50, max: 99.999, description: 'Probability threshold used by pity tuning' },
-  binomialPityBoostRate: { min: 0, max: 0.5, description: 'Temporary all-game EV boost rate when pity triggers' },
-  binomialPityDurationMinutes: { min: 1, max: 1440, description: 'Pity boost duration in minutes' },
-  binomialPityCooldownMinutes: { min: 0, max: 1440, description: 'Reserved pity cooldown minutes' },
+  lifeStatsIntervalMs: { ...CONFIG.runtime.bounds.lifeStatsIntervalMs, description: 'Live stats refresh interval in milliseconds' },
+  globalEvScalar: { ...CONFIG.runtime.bounds.globalEvScalar, description: 'Global EV scalar multiplier for all EV-based boosts' },
+  binomialPityThreshold: { ...CONFIG.runtime.bounds.binomialPityThreshold, description: 'Probability threshold used by pity tuning' },
+  binomialPityBoostRate: { ...CONFIG.runtime.bounds.binomialPityBoostRate, description: 'Temporary all-game EV boost rate when pity triggers' },
+  binomialPityDurationMinutes: { ...CONFIG.runtime.bounds.binomialPityDurationMinutes, description: 'Pity boost duration in minutes' },
+  binomialPityCooldownMinutes: { ...CONFIG.runtime.bounds.binomialPityCooldownMinutes, description: 'Reserved pity cooldown minutes' },
 };
 
 function formatAdminHelp() {
