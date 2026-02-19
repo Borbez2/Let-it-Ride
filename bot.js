@@ -35,13 +35,17 @@ let isBotActive = true;
 const LIVE_GRAPH_SLOT_SECONDS = 10;
 const LIVE_GRAPH_MAX_USERS = 20;
 const LIVE_GRAPH_SESSION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_GRAPH_TIMEFRAME_SEC = 7 * 24 * 60 * 60;
 const LIVE_GRAPH_TIMEFRAMES = [
-  { key: '10m', seconds: 600 },
-  { key: '30m', seconds: 1800 },
+  { key: '1min', label: '1min', seconds: 60 },
+  { key: '5min', label: '5min', seconds: 300 },
+  { key: '10min', label: '10min', seconds: 600 },
+  { key: '30min', label: '30min', seconds: 1800 },
   { key: '1h', seconds: 3600 },
   { key: '6h', seconds: 21600 },
   { key: '1d', seconds: 86400 },
-  { key: '1m', seconds: 2592000 },
+  { key: '1w', seconds: 604800 },
+  { key: '6m', seconds: 15552000 },
   { key: '1y', seconds: 31536000 },
   { key: 'all', seconds: null },
 ];
@@ -73,9 +77,12 @@ function getGraphPalette() {
 }
 
 function formatTimeframe(seconds) {
+  const predefined = LIVE_GRAPH_TIMEFRAMES.find((entry) => entry.seconds === seconds);
+  if (predefined) return predefined.label || predefined.key;
   if (seconds === null) return 'All';
+  if (seconds % 86400 === 0) return `${Math.floor(seconds / 86400)}d`;
   if (seconds % 3600 === 0) return `${Math.floor(seconds / 3600)}h`;
-  if (seconds % 60 === 0) return `${Math.floor(seconds / 60)}m`;
+  if (seconds % 60 === 0) return `${Math.floor(seconds / 60)}min`;
   return `${seconds}s`;
 }
 
@@ -178,7 +185,7 @@ async function createQuickChartUrl(chartConfig, width, height) {
   }
 }
 
-function resolveGraphWindow({ wallets, selectedIds, timeframeSec = 1800, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
+function resolveGraphWindow({ wallets, selectedIds, timeframeSec = DEFAULT_GRAPH_TIMEFRAME_SEC, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
   const safeEnd = Math.max(0, endTs || Date.now());
   if (Number.isFinite(startTs) && startTs !== null) {
     const durationMs = Math.max(0, safeEnd - startTs);
@@ -262,7 +269,7 @@ function getOrCreateLiveGraphSession(viewerId, candidateIds) {
 
   const next = {
     viewerId,
-    timeframeSec: 3600,
+    timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
     candidateIds,
     selectedIds: candidateIds.slice(0, LIVE_GRAPH_MAX_USERS),
     lastChartUrl: null,
@@ -281,7 +288,7 @@ function buildLiveGraphControlRows(session, usersById) {
       timeframeRow.addComponents(
         new ButtonBuilder()
           .setCustomId(`livestats_tf_${session.viewerId}_${tf.key}`)
-          .setLabel(tf.key.toUpperCase())
+          .setLabel(tf.label || tf.key)
           .setStyle(session.timeframeSec === tf.seconds ? ButtonStyle.Primary : ButtonStyle.Secondary)
       );
     }
@@ -472,9 +479,6 @@ async function postLifeStatistics() {
   const share = ids.length > 0 ? Math.floor((poolData.universalPool || 0) / ids.length) : 0;
 
   const candidateIds = getGraphCandidateIds(wallets);
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-
   let datasets = [];
   let labels = [];
   let chartUrl = publicGraphState.chartUrl;
@@ -484,9 +488,8 @@ async function postLifeStatistics() {
     const graph = await buildPlayerNetworthGraph({
       wallets,
       selectedIds: candidateIds,
-      timeframeSec: null,
+      timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
       includeAvatars: false,
-      startTs: startOfToday.getTime(),
       endTs: now,
       maxPoints: 220,
     });
@@ -532,6 +535,7 @@ async function postLifeStatistics() {
     `• Universal Pool: **${store.formatNumber(poolData.universalPool || 0)}**\n` +
     `• Daily Spin Pool: **${store.formatNumber(poolData.lossPool || 0)}**\n` +
     `• Current Hourly Payout Per Player: **${store.formatNumber(share)}**\n` +
+    `• Graph Timeframe: ${formatTimeframe(DEFAULT_GRAPH_TIMEFRAME_SEC)}\n` +
     `• Players in Graph: ${shouldRefreshGraph ? datasets.length : publicGraphState.datasetsCount}\n` +
     `• Last Updated: <t:${Math.floor(Date.now() / 1000)}:R>`;
 

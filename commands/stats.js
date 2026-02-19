@@ -2,6 +2,21 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const store = require('../data/store');
 const binomial = require('../utils/binomial');
 
+const STATS_DEFAULT_TIMEFRAME_KEY = '1w';
+const STATS_TIMEFRAMES = [
+  { key: '1min', label: '1min', seconds: 60 },
+  { key: '5min', label: '5min', seconds: 300 },
+  { key: '10min', label: '10min', seconds: 600 },
+  { key: '30min', label: '30min', seconds: 1800 },
+  { key: '1h', label: '1h', seconds: 3600 },
+  { key: '6h', label: '6h', seconds: 21600 },
+  { key: '1d', label: '1d', seconds: 86400 },
+  { key: '1w', label: '1w', seconds: 604800 },
+  { key: '6m', label: '6m', seconds: 15552000 },
+  { key: '1y', label: '1y', seconds: 31536000 },
+  { key: 'all', label: 'all', seconds: null },
+];
+
 const GAMES = ['flip', 'dice', 'roulette', 'blackjack', 'mines', 'letitride', 'duel'];
 const THEORETICAL_WIN_CHANCE = {
   flip: 0.5,
@@ -70,11 +85,16 @@ function parseStatsCustomId(customId) {
   const page = parts[1];
   const viewerId = parts[2];
   const targetId = parts[3];
+  const timeframeKey = parts[4] || STATS_DEFAULT_TIMEFRAME_KEY;
   if (!page || !viewerId || !targetId) return null;
-  return { page, viewerId, targetId };
+  return { page, viewerId, targetId, timeframeKey };
 }
 
-function getNavRow(viewerId, targetId, activePage) {
+function getStatsTimeframeByKey(timeframeKey) {
+  return STATS_TIMEFRAMES.find((entry) => entry.key === timeframeKey) || STATS_TIMEFRAMES.find((entry) => entry.key === STATS_DEFAULT_TIMEFRAME_KEY);
+}
+
+function getNavRow(viewerId, targetId, activePage, timeframeKey) {
   const pages = [
     { key: 'networth', label: 'Networth' },
     { key: 'winloss', label: 'Win Loss' },
@@ -86,12 +106,37 @@ function getNavRow(viewerId, targetId, activePage) {
   for (const page of pages) {
     row.addComponents(
       new ButtonBuilder()
-        .setCustomId(`stats_${page.key}_${viewerId}_${targetId}`)
+        .setCustomId(`stats_${page.key}_${viewerId}_${targetId}_${timeframeKey}`)
         .setLabel(page.label)
         .setStyle(page.key === activePage ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
   }
-  return [row];
+  return row;
+}
+
+function getTimeframeRows(viewerId, targetId, activeTimeframeKey) {
+  const rows = [];
+  for (let i = 0; i < STATS_TIMEFRAMES.length; i += 5) {
+    const row = new ActionRowBuilder();
+    for (const timeframe of STATS_TIMEFRAMES.slice(i, i + 5)) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`stats_networth_${viewerId}_${targetId}_${timeframe.key}`)
+          .setLabel(timeframe.label)
+          .setStyle(timeframe.key === activeTimeframeKey ? ButtonStyle.Success : ButtonStyle.Secondary)
+      );
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function getStatsComponents(viewerId, targetId, activePage, timeframeKey) {
+  const rows = [getNavRow(viewerId, targetId, activePage, timeframeKey)];
+  if (activePage === 'networth') {
+    rows.push(...getTimeframeRows(viewerId, targetId, timeframeKey));
+  }
+  return rows;
 }
 
 async function resolveTargetFromOptions(interaction) {
@@ -251,9 +296,10 @@ function renderBinomialPage(username, userId, wallet) {
   return text;
 }
 
-async function renderNetWorthPage(username, wallet) {
+async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   const history = Array.isArray(wallet.stats.netWorthHistory) ? wallet.stats.netWorthHistory : [];
   let text = `**Networth: ${username}**\n\n`;
+  const timeframe = getStatsTimeframeByKey(timeframeKey);
 
   if (history.length < 2) {
     text += `Not enough history yet. Keep playing and this chart will fill in automatically.`;
@@ -261,7 +307,16 @@ async function renderNetWorthPage(username, wallet) {
   }
 
   const now = Date.now();
-  const trimmed = downsampleSeries(history, 240);
+  const filteredHistory = timeframe.seconds === null
+    ? history
+    : history.filter((point) => (point?.t || 0) >= (now - timeframe.seconds * 1000));
+
+  if (filteredHistory.length < 2) {
+    text += `Not enough history in the last ${timeframe.label} yet. Keep playing and this chart will fill in automatically.`;
+    return { content: text, embeds: [] };
+  }
+
+  const trimmed = downsampleSeries(filteredHistory, 240);
   const values = trimmed.map((x) => x.v || 0);
   const first = values[0];
   const last = values[values.length - 1];
@@ -290,7 +345,7 @@ async function renderNetWorthPage(username, wallet) {
     options: {
       plugins: {
         legend: { display: false },
-        title: { display: true, text: 'Player Networth', color: '#ffffff' },
+        title: { display: true, text: `Player Networth (${timeframe.label})`, color: '#ffffff' },
       },
       scales: {
         x: { ticks: { color: '#d9d9d9', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.08)' } },
@@ -304,6 +359,7 @@ async function renderNetWorthPage(username, wallet) {
   text += `• Purse: ${store.formatNumber(wallet.balance || 0)}\n`;
   text += `• Bank: ${store.formatNumber(wallet.bank || 0)}\n`;
   text += `• Total Net Worth: ${store.formatNumber((wallet.balance || 0) + (wallet.bank || 0))}\n`;
+  text += `• Timeframe: ${timeframe.label}\n`;
   text += `• Samples: ${values.length}\n`;
   text += `• Start: ${store.formatNumber(first)}\n`;
   text += `• Current: ${store.formatNumber(last)}\n`;
@@ -312,7 +368,7 @@ async function renderNetWorthPage(username, wallet) {
 
   return {
     content: text,
-    embeds: chartUrl ? [{ title: 'Player Networth', image: { url: chartUrl } }] : [],
+    embeds: chartUrl ? [{ title: `Player Networth (${timeframe.label})`, image: { url: chartUrl } }] : [],
   };
 }
 
@@ -342,19 +398,19 @@ function renderBonusesPage(username, userId, wallet) {
   return text;
 }
 
-async function renderPage(page, username, userId, wallet) {
+async function renderPage(page, username, userId, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   switch (page) {
     case 'winloss':
       return { content: renderWinLossPage(username, wallet), embeds: [] };
     case 'binomial':
       return { content: renderBinomialPage(username, userId, wallet), embeds: [] };
     case 'networth':
-      return renderNetWorthPage(username, wallet);
+      return renderNetWorthPage(username, wallet, timeframeKey);
     case 'bonuses':
       return { content: renderBonusesPage(username, userId, wallet), embeds: [] };
     case 'overview':
     default:
-      return renderNetWorthPage(username, wallet);
+      return renderNetWorthPage(username, wallet, timeframeKey);
   }
 }
 
@@ -368,8 +424,8 @@ async function handleStats(interaction) {
   }
 
   const wallet = store.getWallet(target.userId);
-  const rendered = await renderPage('networth', target.username, target.userId, wallet);
-  const components = getNavRow(interaction.user.id, target.userId, 'networth');
+  const rendered = await renderPage('networth', target.username, target.userId, wallet, STATS_DEFAULT_TIMEFRAME_KEY);
+  const components = getStatsComponents(interaction.user.id, target.userId, 'networth', STATS_DEFAULT_TIMEFRAME_KEY);
   return interaction.reply({ content: rendered.content, embeds: rendered.embeds, components });
 }
 
@@ -389,8 +445,9 @@ async function handleStatsButton(interaction) {
   const username = user ? user.username : 'Unknown';
   const wallet = store.getWallet(parsed.targetId);
   const page = parsed.page;
-  const rendered = await renderPage(page, username, parsed.targetId, wallet);
-  const components = getNavRow(parsed.viewerId, parsed.targetId, page);
+  const timeframeKey = getStatsTimeframeByKey(parsed.timeframeKey).key;
+  const rendered = await renderPage(page, username, parsed.targetId, wallet, timeframeKey);
+  const components = getStatsComponents(parsed.viewerId, parsed.targetId, page, timeframeKey);
   return interaction.update({ content: rendered.content, embeds: rendered.embeds, components });
 }
 
