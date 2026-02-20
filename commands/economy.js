@@ -218,7 +218,9 @@ function renderUpgradesPage(userId, successMessage) {
       .setLabel(sCost ? `Spin Payout Mult (${store.formatNumberShort(sCost)})` : 'Spin Payout Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
-      .setLabel(uCost ? `Hourly Income Mult (${store.formatNumberShort(uCost)})` : 'Hourly Income Mult MAXED')
+      .setLabel(uCost ? `
+        
+        (${store.formatNumberShort(uCost)})` : 'Double Universal Income Chance MAXED')
       .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
