@@ -142,8 +142,8 @@ function restoreTradeSessions() {
 
 restoreTradeSessions();
 
-// Build the upgrades page text and buttons.
-function renderUpgradesPage(userId) {
+// Build the upgrades embed and buttons.
+function renderUpgradesPage(userId, successMessage) {
   const w = store.getWallet(userId);
   const maxLevel = CONFIG.economy.upgrades.maxLevel;
   const standardCosts = CONFIG.economy.upgrades.costs.standard;
@@ -158,25 +158,51 @@ function renderUpgradesPage(userId) {
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
   const uCost = uLvl < maxLevel ? standardCosts[uLvl] : null;
 
-  let text = `**Upgrades**\n\nPurse: ${store.formatNumber(w.balance)} coins\n\n--------------------\n\n`;
-  text += `**Bank Interest** Lv ${iLvl}/${maxLevel} — ${(iRate * 100).toFixed(2)}% daily (hourly)\n`;
-  text += iCost ? `Next upgrade base: ${((iBaseRate + 0.01) * 100).toFixed(2)}% for ${store.formatNumber(iCost)}\n\n` : `MAXED\n\n`;
-  text += `**Loss Cashback** Lv ${cLvl}/${maxLevel} — ${cRatePct.toFixed(2)}% back\n`;
-  text += cCost ? `Next upgrade base: ${(cBaseRatePct + 0.1).toFixed(2)}% for ${store.formatNumber(cCost)}\n\n` : `MAXED\n\n`;
-  text += `**Daily Spin Payout Mult** Lv ${sLvl}/${maxLevel} — ${sMult.toFixed(1)}x payout\n`;
-  text += sCost ? `Next: ${(sMult + 0.1).toFixed(1)}x for ${store.formatNumber(sCost)}\n\n` : `MAXED\n\n`;
-  text += `**Hourly Universal Income Mult** Lv ${uLvl}/${maxLevel} — ${uChance.toFixed(2)}% chance to double income\n`;
-  text += uCost ? `Next base: ${(uLvl + 1).toFixed(0)}% for ${store.formatNumber(uCost)}\n\n` : `MAXED\n\n`;
-  text += `**Item and Collection Effects**\n`;
+  const bar = (lvl, max) => '▰'.repeat(lvl) + '▱'.repeat(max - lvl);
+
+  const fields = [
+    {
+      name: '🏦 Bank Interest',
+      value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(2)}%**/day (hourly)\n> ${iCost ? `Next: **${((iBaseRate + 0.01) * 100).toFixed(2)}%** for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
+      inline: true,
+    },
+    {
+      name: 'Loss Cashback',
+      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cBaseRatePct + 0.1).toFixed(2)}%** for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
+      inline: true,
+    },
+    { name: '\u200b', value: '\u200b', inline: false },
+    {
+      name: 'Spin Payout Mult',
+      value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMult.toFixed(1)}x** payout\n> ${sCost ? `Next: **${(sMult + 0.1).toFixed(1)}x** for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
+      inline: true,
+    },
+    {
+      name: 'Double Universal Income Chance',
+      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(uLvl + 1)}%** for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
+      inline: true,
+    },
+    { name: '\u200b', value: '\u200b', inline: false },
+  ];
+
+  let inventoryText;
   if (bonuses.inventoryEffects.length === 0) {
-    text += `No active item boosts yet.\n\n`;
+    inventoryText = '> No active item boosts yet\n> Use **/mysterybox** to buy collectible boxes!';
   } else {
-    for (const line of bonuses.inventoryEffects.slice(0, 5)) {
-      text += `• ${line}\n`;
-    }
-    text += '\n';
+    inventoryText = bonuses.inventoryEffects.slice(0, 5).map((line) => `> ${line}`).join('\n');
   }
-  text += `Use **/mysterybox** to buy collectible boxes!\n`;
+  fields.push({ name: '🎒 Item & Collection Effects', value: inventoryText, inline: false });
+
+  const embed = {
+    title: '⬆️ Upgrades',
+    color: 0x2b2d31,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins`,
+    fields,
+  };
+
+  if (successMessage) {
+    embed.footer = { text: `✅ ${successMessage}` };
+  }
 
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
@@ -198,7 +224,7 @@ function renderUpgradesPage(userId) {
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_refresh_${userId}`).setLabel('Refresh').setStyle(ButtonStyle.Primary),
   ));
-  return { text, rows };
+  return { embed, rows };
 }
 
 // Render trade UI components and message content.
@@ -484,8 +510,8 @@ async function handleLeaderboard(interaction, client) {
 }
 
 async function handleUpgrades(interaction) {
-  const { text, rows } = renderUpgradesPage(interaction.user.id);
-  return interaction.reply({ content: text, components: rows });
+  const { embed, rows } = renderUpgradesPage(interaction.user.id);
+  return interaction.reply({ content: '', embeds: [embed], components: rows });
 }
 
 async function handleMysteryBox(interaction) {
@@ -644,8 +670,8 @@ async function handleUpgradeButton(interaction, parts) {
   const w = store.getWallet(uid);
 
   if (action === 'refresh') {
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text, components: rows });
+    const { embed, rows } = renderUpgradesPage(uid);
+    return interaction.update({ content: '', embeds: [embed], components: rows });
   }
   if (action === 'interest') {
     store.processBank(uid);
@@ -654,8 +680,8 @@ async function handleUpgradeButton(interaction, parts) {
     const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.interestLevel = lvl + 1; store.saveWallets();
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Interest → Lv ${w.interestLevel}`, components: rows });
+    const { embed, rows } = renderUpgradesPage(uid, `Interest → Lv ${w.interestLevel}`);
+    return interaction.update({ content: '', embeds: [embed], components: rows });
   }
   if (action === 'cashback') {
     const lvl = w.cashbackLevel || 0;
@@ -663,8 +689,8 @@ async function handleUpgradeButton(interaction, parts) {
     const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.cashbackLevel = lvl + 1; store.saveWallets();
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Cashback → Lv ${w.cashbackLevel}`, components: rows });
+    const { embed, rows } = renderUpgradesPage(uid, `Cashback → Lv ${w.cashbackLevel}`);
+    return interaction.update({ content: '', embeds: [embed], components: rows });
   }
   if (action === 'spinmult') {
     const lvl = w.spinMultLevel || 0;
@@ -672,8 +698,8 @@ async function handleUpgradeButton(interaction, parts) {
     const cost = CONFIG.economy.upgrades.costs.spinMult[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Daily Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * 0.1).toFixed(1)}x)`, components: rows });
+    const { embed, rows } = renderUpgradesPage(uid, `Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * 0.1).toFixed(1)}x)`);
+    return interaction.update({ content: '', embeds: [embed], components: rows });
   }
   if (action === 'universalmult') {
     const lvl = w.universalIncomeMultLevel || 0;
@@ -681,8 +707,8 @@ async function handleUpgradeButton(interaction, parts) {
     const cost = CONFIG.economy.upgrades.costs.standard[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
-    const { text, rows } = renderUpgradesPage(uid);
-    return interaction.update({ content: text + `\n✅ Hourly Universal Income Mult → Lv ${w.universalIncomeMultLevel} (${w.universalIncomeMultLevel}% chance)`, components: rows });
+    const { embed, rows } = renderUpgradesPage(uid, `Income Double → Lv ${w.universalIncomeMultLevel} (${w.universalIncomeMultLevel}% chance)`);
+    return interaction.update({ content: '', embeds: [embed], components: rows });
   }
 }
 

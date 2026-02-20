@@ -322,9 +322,7 @@ const commands = [
   new SlashCommandBuilder().setName('pity').setDescription('View your active pity stacks and per-stack timers'),
   new SlashCommandBuilder().setName('mysterybox').setDescription(`Buy mystery boxes for ${CONFIG.collectibles.mysteryBox.cost.toLocaleString()} coins each`)
     .addIntegerOption(o => o.setName('quantity').setDescription(`Number of boxes to buy (${CONFIG.commands.limits.mysteryBoxQuantity.min}-${CONFIG.commands.limits.mysteryBoxQuantity.max})`).setMinValue(CONFIG.commands.limits.mysteryBoxQuantity.min).setMaxValue(CONFIG.commands.limits.mysteryBoxQuantity.max)),
-  new SlashCommandBuilder().setName('help').setDescription('Get help on game systems')
-    .addStringOption(o => o.setName('topic').setDescription('Help topic')
-      .addChoices(...CONFIG.help.topics)),
+  new SlashCommandBuilder().setName('help').setDescription('View the help guide for all game systems'),
   adminCmd.buildAdminCommand(),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
     .addStringOption(o => o.setName('message').setDescription('Optional giveaway message').setRequired(false).setMaxLength(200)),
@@ -957,6 +955,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.customId.startsWith('livestats_')) return await handleLiveStatsButton(interaction);
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
+      if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
       if (interaction.customId.startsWith('upgrade_'))  return await economy.handleUpgradeButton(interaction, parts);
       if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);
       if (interaction.customId.startsWith('invpage_'))  return await economy.handleInventoryButton(interaction, parts);
