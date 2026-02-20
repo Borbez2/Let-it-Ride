@@ -3,10 +3,10 @@ const { CONFIG, MYSTERY_BOX_POOLS, RARITIES } = require('../config');
 const store = require('../data/store');
 
 const PAGE_TITLES = [
-  '📖 Economy Overview',
-  '📖 Games & Commands',
-  '📖 Luck, Pity & Modifiers',
-  '📖 Collectibles & Boxes',
+  '\u25c8 Economy Overview',
+  '\u25c8 Games & Commands',
+  '\u25c8 Effects & Modifiers',
+  '\u25c8 Collectibles & Boxes',
 ];
 
 const TOTAL_PAGES = PAGE_TITLES.length;
@@ -33,12 +33,12 @@ function buildEconomyPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u2B99 Upgrades',
-        value: '> Head to **/upgrades** to spend coins on permanent boosts.\n> \u2234 **Interest** raises your daily bank rate (+1%/level, caps at 10%)\n> \u21A9 **Cashback** refunds a small % of every loss\n> \u2307 **Spin Mult** multiplies your daily spin winnings if you get picked\n> \u2A2F **Income Mult** gives you a chance to double your hourly universal payout',
+        value: '> Head to **/upgrades** to spend coins on permanent boosts.\n> \u00A4 **Interest** raises your daily bank rate (+1%/level, caps at 10%)\n> \u21A9 **Cashback** refunds a small % of every loss\n> \u229B **Spin Mult** multiplies your daily spin winnings if you get picked\n> \u2295 **Income Mult** gives you a chance to double your hourly universal payout',
         inline: false,
       },
       {
         name: '\u29C9 Collectibles',
-        value: '> Buy **/mysterybox** to get randomized collectible items. Some of them come with passive bonuses like \u2234 interest, \u21A9 cashback, \u2740 luck, \u25A3 mines-save, or \u2607 EV boosts. Manage your stuff with **/inventory**, check the community with **/collection**, or swap items with **/trade**.',
+        value: '> Buy **/mysterybox** to get randomized collectible items. Some of them come with passive bonuses like \u00A4 interest, \u21A9 cashback, \u2618 luck, \u25C8 mines-save, or \u21AF EV boosts. Manage your stuff with **/inventory**, check the community with **/collection**, or swap items with **/trade**.',
         inline: false,
       },
     ],
@@ -90,29 +90,25 @@ function buildGamesCommandsPage() {
 }
 
 function buildModifiersPage() {
-  const cfg = store.getRuntimeTuning ? store.getRuntimeTuning() : null;
-  const pityBoostPct = cfg ? (cfg.binomialPityBoostRate * 100).toFixed(2) : '1.00';
-  const pityDuration = cfg ? cfg.binomialPityDurationMinutes : 30;
-
   return {
     title: PAGE_TITLES[2],
     color: 0x2b2d31,
-    description: '> The game does its base math first, then your modifiers get layered on top. Nothing here forces you to win, it just shifts the numbers in your favor.',
+    description: '> The game does its base math first, then your effects get layered on top. Nothing here forces you to win, it just shifts the numbers in your favor. See all your active effects under **/stats** \u2192 Effects.',
     fields: [
       {
-        name: '\u2699 Where Modifiers Come From',
-        value: '> **Upgrades** give you flat bonuses like \u2234 interest, \u21A9 cashback, \u2307 spin weight, and \u2A2F income doubling. **Items** from mystery boxes can add passive boosts per game type (\u2234 interest, \u21A9 cashback, \u2740 luck, \u25A3 mines-save, or \u2607 EV). **Pity** is a separate safety net that kicks in automatically when you\'re on a rough streak.',
+        name: '\u2726 Active Effects',
+        value: '> \u2618 **Luck** \u2027 Stacking cashback on losses during a losing streak\n> \u00A4 **Bank Interest** \u2027 Passive daily interest on your bank balance\n> \u21A9 **Cashback** \u2027 Refunds a % of every loss\n> \u229B **Spin Multiplier** \u2027 Multiplies daily spin winnings\n> \u2295 **Income Multiplier** \u2027 Chance to double hourly universal payout\n> \u25C8 **Mines Save** \u2027 Chance to auto-reveal a safe tile in Mines\n> \u21AF **EV Boost** \u2027 Per-game profit boost from items',
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: '\u2618 How Pity Works',
-        value: `> The system watches your overall win rate and compares it to what\'s expected. If you\'re statistically unlucky enough to cross certain thresholds, you get stacking EV boosts.\n> \n> Thresholds at **60% / 70% / 80% / 90%** each add **+${pityBoostPct}%** EV. Past 90%, every additional **+1%** step (91\u2025 99%) adds another **+${pityBoostPct}%** on top. The maximum boost caps at **+10.00%** total.`,
+        name: '\u2618 How Luck Works',
+        value: '> When you lose **5 games in a row**, you gain your first luck stack. Every **3 additional consecutive losses** adds another stack, up to a maximum of **10 stacks**.\n> \n> Each stack gives you **+0.5% cashback** on all losses. At max stacks (10), that\'s **+5.0% cashback** on top of your regular cashback. Stacks last **15 minutes** each.',
         inline: false,
       },
       {
-        name: '\u2055 Pity Details',
-        value: `> There\'s no minimum number of games needed. Once triggered, each pity stack lasts **${pityDuration} minutes** and stacks with any other active triggers. The boost only applies to your **win profit**, it doesn\'t change whether you actually win or lose.\n> \n> Check your live pity status with **/pity** or see your full breakdown under **/stats** \u2192 Bonuses.`,
+        name: '\u2618 Luck Details',
+        value: '> Winning a game resets your loss streak counter, but any active stacks keep running until they expire. This means you keep the cashback bonus even after you start winning again.\n> \n> Check your live luck status with **/pity** or see your full breakdown under **/stats** \u2192 Effects.',
         inline: false,
       },
     ],
@@ -168,7 +164,7 @@ function buildCollectiblesPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u25C8 Item Effects',
-        value: '> Items can roll with passive bonuses:\n> \u2234 Interest  \u2027  \u21A9 Cashback  \u2027  \u2740 Luck\n> \u25A3 Mines-save  \u2027  \u2607 EV boost (per game)\n> Most placeholders don\'t have effects assigned yet, but the ones that do are applied automatically.\n> \n> See what\'s active under **/stats** \u2192 Bonuses. Manage with **/inventory**, **/collection**, **/trade**.',
+        value: '> Items can roll with passive bonuses:\n> \u00A4 Interest  \u2027  \u21A9 Cashback  \u2027  \u2618 Luck\n> \u25C8 Mines-save  \u2027  \u21AF EV boost (per game)\n> Most placeholders don\'t have effects assigned yet, but the ones that do are applied automatically.\n> \n> See what\'s active under **/stats** \u2192 Effects. Manage with **/inventory**, **/collection**, **/trade**.',
         inline: false,
       },
     ],

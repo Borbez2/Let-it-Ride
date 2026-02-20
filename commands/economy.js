@@ -220,9 +220,7 @@ function renderUpgradesPage(userId, successMessage) {
       .setLabel(sCost ? `Spin Payout Mult (${store.formatNumberShort(sCost)})` : 'Spin Payout Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
-      .setLabel(uCost ? `
-        
-        (${store.formatNumberShort(uCost)})` : 'Double Universal Income Chance MAXED')
+      .setLabel(uCost ? `Double Universal Income Chance (${store.formatNumberShort(uCost)})` : 'Double Universal Income Chance MAXED')
       .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
@@ -359,10 +357,20 @@ async function handleBalance(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
   const payout = store.processBank(userId);
   const w = store.getWallet(userId);
-  const sk = w.streak > 0 ? ` | 🔥 ${w.streak}` : '';
-  const bk = w.bank > 0 ? `\nBank: **${store.formatNumber(w.bank)}**` : '';
-  const pp = payout > 0 ? `\n+**${store.formatNumber(payout)}** interest!` : '';
-  return interaction.reply(`**${username}**${sk}\n\nPurse: **${store.formatNumber(w.balance)}**${bk}\nTotal: **${store.formatNumber(w.balance + (w.bank || 0))}**${pp}`);
+  const total = w.balance + (w.bank || 0);
+  const streakText = w.streak > 0 ? `> 🔥 Streak: **${w.streak}** day${w.streak === 1 ? '' : 's'}` : '> 🔥 Streak: **0** days';
+
+  const embed = {
+    title: 'Balance',
+    color: 0x2b2d31,
+    description: `> **${username}**\n> \n> 💰 Purse: **${store.formatNumber(w.balance)}**\n> 🏦 Bank: **${store.formatNumber(w.bank || 0)}**\n> Net Worth: **${store.formatNumber(total)}**\n> \n${streakText}`,
+  };
+
+  if (payout > 0) {
+    embed.footer = { text: `+${store.formatNumber(payout)} interest collected` };
+  }
+
+  return interaction.reply({ embeds: [embed] });
 }
 
 async function handleDaily(interaction) {
@@ -433,7 +441,7 @@ async function handleBank(interaction) {
   const last = w.lastBankPayout || Date.now(), next = last + 3600000;
   const rem = Math.max(0, next - Date.now());
   const mins = Math.floor(rem / 60000);
-  return interaction.reply(`**Bank**\n\nDeposited: **${store.formatNumber(w.bank)}**\nRate: ${(rate * 100).toFixed(0)}% daily (Lv ${w.interestLevel || 0})\nHourly: ~**${store.formatNumber(hourly)}** | Daily: ~**${store.formatNumber(daily)}**\nNext payout: ${mins}m${pp}\n\nPurse: **${store.formatNumber(w.balance)}**`);
+  return interaction.reply(`**Bank**\n\nDeposited: **${store.formatNumber(w.bank)}**\nRate: ${(rate * 100).toFixed(2)}% daily (Lv ${w.interestLevel || 0})\nHourly: ~**${store.formatNumber(hourly)}** | Daily: ~**${store.formatNumber(daily)}**\nNext payout: ${mins}m${pp}\n\nPurse: **${store.formatNumber(w.balance)}**`);
 }
 
 async function handleGive(interaction) {

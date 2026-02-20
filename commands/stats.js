@@ -1,7 +1,6 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder } = require('discord.js');
 const { CONFIG } = require('../config');
 const store = require('../data/store');
-const binomial = require('../utils/binomial');
 const { renderChartToBuffer } = require('../utils/renderChart');
 
 const STATS_DEFAULT_TIMEFRAME_KEY = CONFIG.stats.defaultTimeframeKey;
@@ -51,8 +50,7 @@ function getNavRow(viewerId, targetId, activePage, timeframeKey) {
   const pages = [
     { key: 'networth', label: 'Networth' },
     { key: 'winloss', label: 'Win Loss' },
-    { key: 'binomial', label: 'Pity' },
-    { key: 'bonuses', label: 'Bonuses' },
+    { key: 'effects', label: 'Effects' },
   ];
 
   const row = new ActionRowBuilder();
@@ -67,27 +65,22 @@ function getNavRow(viewerId, targetId, activePage, timeframeKey) {
   return row;
 }
 
-function getTimeframeRows(viewerId, targetId, activeTimeframeKey) {
-  const rows = [];
-  for (let i = 0; i < STATS_TIMEFRAMES.length; i += 5) {
-    const row = new ActionRowBuilder();
-    for (const timeframe of STATS_TIMEFRAMES.slice(i, i + 5)) {
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`stats_tf_${viewerId}_${targetId}_${timeframe.key}`)
-          .setLabel(timeframe.label)
-          .setStyle(timeframe.key === activeTimeframeKey ? ButtonStyle.Success : ButtonStyle.Secondary)
-      );
-    }
-    rows.push(row);
-  }
-  return rows;
+function getTimeframeRow(viewerId, targetId, activeTimeframeKey) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`stats_tf_${viewerId}_${targetId}`)
+    .setPlaceholder('Select timeframe')
+    .addOptions(STATS_TIMEFRAMES.map(tf => ({
+      label: tf.label,
+      value: tf.key,
+      default: tf.key === activeTimeframeKey,
+    })));
+  return new ActionRowBuilder().addComponents(menu);
 }
 
 function getStatsComponents(viewerId, targetId, activePage, timeframeKey) {
   const rows = [getNavRow(viewerId, targetId, activePage, timeframeKey)];
   if (activePage === 'networth') {
-    rows.push(...getTimeframeRows(viewerId, targetId, timeframeKey));
+    rows.push(getTimeframeRow(viewerId, targetId, timeframeKey));
   }
   return rows;
 }
@@ -136,21 +129,21 @@ function renderOverview(username, wallet) {
   if (!topGamesText) topGamesText = '> No game history yet\n';
 
   return {
-    title: `📊 ${username}'s Stats`,
+    title: `◈ ${username}'s Stats`,
     color: 0x2b2d31,
     fields: [
       {
-        name: '💰 Economy Snapshot',
+        name: '◉ Economy Snapshot',
         value: `> Purse: **${store.formatNumber(wallet.balance || 0)}**\n> Bank: **${store.formatNumber(wallet.bank || 0)}**\n> Net Worth: **${store.formatNumber(currentTotalBalance)}**`,
         inline: true,
       },
       {
-        name: '📈 Lifetime Summary',
+        name: '▲ Lifetime Summary',
         value: `> Earnings: **${store.formatNumber(stats.lifetimeEarnings || 0)}**\n> Losses: **${store.formatNumber(stats.lifetimeLosses || 0)}**\n> Net: **${netProfit >= 0 ? '+' : ''}${store.formatNumber(netProfit)}**\n> Win Rate: **${overallWinRate}%** (${totalWins}/${totalGames})`,
         inline: true,
       },
       {
-        name: '🎮 Most Played',
+        name: '▸ Most Played',
         value: topGamesText,
         inline: false,
       },
@@ -173,91 +166,115 @@ function renderWinLossPage(username, wallet) {
     const actual = (gs.wins / plays) * 100;
     const expected = THEORETICAL_WIN_CHANCE[game] == null ? null : (THEORETICAL_WIN_CHANCE[game] * 100);
     const deltaVal = expected == null ? null : actual - expected;
-    const deltaIcon = deltaVal == null ? '' : (deltaVal >= 0 ? '🟢' : '🔴');
+    const deltaIcon = deltaVal == null ? '' : (deltaVal >= 0 ? '▲' : '▼');
     const deltaText = deltaVal == null ? 'n/a' : `${deltaVal >= 0 ? '+' : ''}${deltaVal.toFixed(1)}%`;
     const expectedText = expected == null ? 'n/a' : `${expected.toFixed(1)}%`;
 
     fields.push({
       name: `${deltaIcon} ${capitalize(game)}`,
-      value: `> **${gs.wins}**W / **${gs.losses}**L\n> Actual: **${actual.toFixed(1)}%**\n> Baseline: ${expectedText}\n> Delta: **${deltaText}**`,
+      value: `> **${gs.wins}**W / **${gs.losses}**L\n> Actual: **${actual.toFixed(1)}%**\n> Baseline: ${expectedText}\n> Δ **${deltaText}**`,
       inline: true,
     });
   }
 
   return {
-    title: `⚔️ ${username}'s Win/Loss`,
+    title: `⚔ ${username}'s Win/Loss`,
     color: 0x2b2d31,
     fields,
   };
 }
 
-function renderBinomialPage(username, userId, wallet) {
-  const stats = wallet.stats;
-  const totalGames = GAMES.reduce((sum, g) => sum + ((stats[g] || {}).wins || 0) + ((stats[g] || {}).losses || 0), 0);
-  const totalWins = GAMES.reduce((sum, g) => sum + ((stats[g] || {}).wins || 0), 0);
+function renderEffectsPage(username, userId, wallet) {
   const bonuses = store.getUserBonuses(userId);
   const mb = wallet.stats.mysteryBox || {};
   const bonusStats = wallet.stats.bonuses || {};
-  const binomialPity = bonuses.binomialPity || {};
+  const luck = bonuses.luck || {};
 
   const fields = [];
 
-  // Binomial luck analysis
-  if (totalGames === 0) {
-    fields.push({ name: '🎲 Binomial Luck Analysis', value: '> No game rounds recorded yet.', inline: false });
+  // Luck
+  let luckText;
+  if (luck.active) {
+    const minsLeft = Math.max(0, Math.ceil((luck.expiresInMs || 0) / 60000));
+    luckText = `\u25CF **${luck.activeStacks}/${luck.maxStacks}** stacks (+${(luck.cashbackRate * 100).toFixed(1)}% cashback, ${minsLeft}m left)`;
   } else {
-    const luck = binomial.getLuckAssessment(totalWins, totalGames, 0.5);
-    const resultText = luck.direction === 'neutral'
-      ? 'Neutral'
-      : `${capitalize(luck.direction)} (${luck.confidence.toFixed(2)}%)`;
-    fields.push({
-      name: '🎲 Binomial Luck Analysis',
-      value: `> *50/50 baseline assumed*\n> Wins: **${totalWins}** / ${totalGames}\n> Expected: **${(luck.expectedWins || 0).toFixed(1)}**\n> Delta: **${luck.winRateDelta >= 0 ? '+' : ''}${luck.winRateDelta.toFixed(2)}%**\n> Result: **${resultText}**`,
-      inline: false,
-    });
-  }
-
-  // Luck and pity
-  let pityBoostText;
-  if (binomialPity.active) {
-    const minsLeft = Math.max(0, Math.ceil((binomialPity.expiresInMs || 0) / 60000));
-    pityBoostText = `🟢 **ACTIVE** (+${(binomialPity.boostRate * 100).toFixed(2)}%, ${minsLeft}m left, ${binomialPity.activeStacks || 0} stacks)`;
-  } else {
-    pityBoostText = '⚫ Inactive';
+    luckText = '\u25CB Inactive';
   }
   fields.push({
-    name: '🍀 Luck & Pity',
-    value: `> Box Luck: **${(bonuses.mysteryBoxLuck * 100).toFixed(2)}%**\n> Pity Streak: **${bonuses.pityStreak || 0}** (Best: ${mb.bestPityStreak || 0})\n> Pity Luck Bonus: **${(bonuses.pityLuckBonus * 100).toFixed(2)}%**\n> Boxes Opened: **${mb.opened || 0}**\n> Legendary+ Hits: **${mb.luckyHighRarity || 0}**`,
+    name: '\u2618 Luck',
+    value: `> ${luckText}\n> Loss Streak: **${luck.lossStreak || 0}** (Best: ${luck.bestLossStreak || 0})\n> Triggers: **${luck.triggers || 0}**\n> Total Cashback: **${store.formatNumber(luck.totalCashback || 0)}**`,
     inline: true,
   });
 
+  // Bank Interest
   fields.push({
-    name: '📋 Pity Status',
-    value: `> Boost: ${pityBoostText}\n> Last State: **${capitalize(binomialPity.lastDirection || 'neutral')}** (${(binomialPity.lastConfidence || 0).toFixed(2)}%)\n> Games Checked: ${binomialPity.lastTotalGames || 0}\n> Triggers: **${binomialPity.triggers || 0}**`,
+    name: '\u00A4 Bank Interest',
+    value: `> Rate: **${(bonuses.interestRate * 100).toFixed(2)}%**/day`,
     inline: true,
   });
 
-  // Spacer
   fields.push({ name: '\u200b', value: '\u200b', inline: false });
 
-  // EV and special effects
+  // Cashback
+  fields.push({
+    name: '\u21A9 Cashback',
+    value: `> Rate: **${(bonuses.cashbackRate * 100).toFixed(2)}%**`,
+    inline: true,
+  });
+
+  // Spin Multiplier
+  fields.push({
+    name: '\u229B Spin Multiplier',
+    value: `> Payout: **${bonuses.spinWeight.toFixed(1)}x**`,
+    inline: true,
+  });
+
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
+
+  // Universal Income Multiplier
+  fields.push({
+    name: '\u2295 Income Multiplier',
+    value: `> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
+    inline: true,
+  });
+
+  // Mines Save
+  fields.push({
+    name: '\u25C8 Mines Save',
+    value: `> Reveal Chance: **${(bonuses.minesRevealChance * 100).toFixed(2)}%**`,
+    inline: true,
+  });
+
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
+
+  // EV Boost
   const evPairs = Object.entries(bonuses.evBoostByGame || {}).filter(([, value]) => value > 0);
   const evGameText = evPairs.length > 0
-    ? evPairs.map(([k, v]) => `${capitalize(k)} **+${(v * 100).toFixed(2)}%**`).join(', ')
-    : 'None active';
+    ? evPairs.map(([k, v]) => `> ${capitalize(k)} **+${(v * 100).toFixed(2)}%**`).join('\n')
+    : '> None active';
   fields.push({
-    name: '⚡ EV & Special Effects',
-    value: `> EV Boost Profit: **${store.formatNumber(bonusStats.evBoostProfit || 0)}**\n> Per Trigger Stack: **+${(Number((bonuses.runtimeTuning || {}).binomialPityBoostRate || 0) * 100).toFixed(2)}%**\n> EV Boost by Game: ${evGameText}`,
+    name: '\u21AF EV Boost',
+    value: `> Profit: **${store.formatNumber(bonusStats.evBoostProfit || 0)}**\n${evGameText}`,
     inline: false,
   });
 
-  const footer = totalGames === 0 ? { text: 'Play more rounds to improve confidence calculations.' } : undefined;
+  // Inventory effects
+  let inventoryText = '';
+  if (!bonuses.inventoryEffects.length) {
+    inventoryText = '> No item effects active';
+  } else {
+    inventoryText = bonuses.inventoryEffects.map((line) => `> ${line}`).join('\n');
+  }
+  fields.push({
+    name: '\u25A3 Item Effects',
+    value: inventoryText,
+    inline: false,
+  });
 
   return {
-    title: `🔮 ${username}'s Pity, Luck & EV`,
+    title: `\u2726 ${username}'s Effects`,
     color: 0x2b2d31,
     fields,
-    ...(footer ? { footer } : {}),
   };
 }
 
@@ -269,7 +286,7 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
     return {
       content: '',
       embeds: [{
-        title: `📈 ${username}'s Networth`,
+        title: `▲ ${username}'s Networth`,
         color: 0x2b2d31,
         description: 'Not enough history yet. Keep playing and this chart will fill in automatically.',
       }],
@@ -285,7 +302,7 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
     return {
       content: '',
       embeds: [{
-        title: `📈 ${username}'s Networth`,
+        title: `▲ ${username}'s Networth`,
         color: 0x2b2d31,
         description: `Not enough history in the last ${timeframe.label} yet. Keep playing and this chart will fill in automatically.`,
       }],
@@ -332,18 +349,18 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
   };
   const chartBuffer = await renderChartToBuffer(chartConfig, 980, 420).catch(() => null);
 
-  const changeIcon = delta >= 0 ? '📈' : '📉';
+  const changeIcon = delta >= 0 ? '▲' : '▼';
   const networthEmbed = {
     title: `${changeIcon} ${username}'s Networth`,
     color: 0x2b2d31,
     fields: [
       {
-        name: '💰 Current Balance',
+        name: '◉ Current Balance',
         value: `> Purse: **${store.formatNumber(wallet.balance || 0)}**\n> Bank: **${store.formatNumber(wallet.bank || 0)}**\n> Net Worth: **${store.formatNumber((wallet.balance || 0) + (wallet.bank || 0))}**`,
         inline: true,
       },
       {
-        name: `📊 ${timeframe.label} Overview`,
+        name: `◈ ${timeframe.label} Overview`,
         value: `> Start: **${store.formatNumber(first)}**\n> Current: **${store.formatNumber(last)}**\n> Change: **${delta >= 0 ? '+' : ''}${store.formatNumber(delta)}**\n> Range: ${store.formatNumber(low)} - ${store.formatNumber(high)}\n> Samples: ${values.length}`,
         inline: true,
       },
@@ -358,49 +375,16 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
   return result;
 }
 
-function renderBonusesPage(username, userId, wallet) {
-  const bonuses = store.getUserBonuses(userId);
 
-  let inventoryText = '';
-  if (!bonuses.inventoryEffects.length) {
-    inventoryText = '> No item effects active yet';
-  } else {
-    inventoryText = bonuses.inventoryEffects.map((line) => `> ${line}`).join('\n');
-  }
-
-  return {
-    title: `🎁 ${username}'s Bonuses`,
-    color: 0x2b2d31,
-    fields: [
-      {
-        name: '⬆️ Upgrade Totals',
-        value: `> Bank Interest: **${(bonuses.interestRate * 100).toFixed(2)}%**/day\n> Cashback: **${(bonuses.cashbackRate * 100).toFixed(2)}%**\n> Spin Payout Mult: **${bonuses.spinWeight.toFixed(1)}x**\n> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
-        inline: true,
-      },
-      {
-        name: '🛡️ Other Modifiers',
-        value: `> Mines Save: **${(bonuses.minesRevealChance * 100).toFixed(2)}%**\n> Box Luck (items): **${(bonuses.inventoryLuckBonus * 100).toFixed(2)}%**`,
-        inline: true,
-      },
-      {
-        name: '🎒 Inventory Effects',
-        value: inventoryText,
-        inline: false,
-      },
-    ],
-  };
-}
 
 async function renderPage(page, username, userId, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   switch (page) {
     case 'winloss':
       return { content: '', embeds: [renderWinLossPage(username, wallet)] };
-    case 'binomial':
-      return { content: '', embeds: [renderBinomialPage(username, userId, wallet)] };
+    case 'effects':
+      return { content: '', embeds: [renderEffectsPage(username, userId, wallet)] };
     case 'networth':
       return renderNetWorthPage(username, wallet, timeframeKey);
-    case 'bonuses':
-      return { content: '', embeds: [renderBonusesPage(username, userId, wallet)] };
     case 'overview':
     default:
       return renderNetWorthPage(username, wallet, timeframeKey);
@@ -444,4 +428,30 @@ async function handleStatsButton(interaction) {
   return interaction.update({ content: rendered.content, embeds: rendered.embeds, files: rendered.files || [], components });
 }
 
-module.exports = { handleStats, handleStatsButton };
+async function handleStatsSelectMenu(interaction) {
+  if (!interaction.customId.startsWith('stats_tf_')) return;
+
+  const parts = interaction.customId.split('_');
+  // Format: stats_tf_viewerId_targetId
+  const viewerId = parts[2];
+  const targetId = parts[3];
+
+  if (interaction.user.id !== viewerId) {
+    return interaction.reply({ content: 'Open your own /stats panel to interact.', ephemeral: true });
+  }
+
+  if (!store.hasWallet(targetId)) {
+    return interaction.update({ content: 'Stats no longer available for this user.', components: [] });
+  }
+
+  const timeframeKey = interaction.values[0];
+  const user = await interaction.client.users.fetch(targetId).catch(() => null);
+  const username = user ? user.username : 'Unknown';
+  const wallet = store.getWallet(targetId);
+  const validTimeframeKey = getStatsTimeframeByKey(timeframeKey).key;
+  const rendered = await renderPage('networth', username, targetId, wallet, validTimeframeKey);
+  const components = getStatsComponents(viewerId, targetId, 'networth', validTimeframeKey);
+  return interaction.update({ content: rendered.content, embeds: rendered.embeds, files: rendered.files || [], components });
+}
+
+module.exports = { handleStats, handleStatsButton, handleStatsSelectMenu };

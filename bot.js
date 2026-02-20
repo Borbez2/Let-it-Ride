@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, StringSelectMenuBuilder } = require('discord.js');
 require('dotenv').config();
 
 const { CONFIG } = require('./config');
@@ -135,6 +135,16 @@ async function resolveUsersByIds(ids) {
 
 function buildSeriesByRange(history, startTs, slotCount, slotSeconds = LIVE_GRAPH_SLOT_SECONDS) {
   const values = Array(slotCount).fill(null);
+
+  // Find the last value before the window to seed forward-fill
+  let seedValue = null;
+  for (let i = 0; i < history.length; i++) {
+    const ts = history[i]?.t || 0;
+    if (ts >= startTs) break;
+    seedValue = history[i]?.v || 0;
+  }
+
+  // Place history points into slots
   for (let i = history.length - 1; i >= 0; i--) {
     const point = history[i];
     const ts = point?.t || 0;
@@ -143,6 +153,17 @@ function buildSeriesByRange(history, startTs, slotCount, slotSeconds = LIVE_GRAP
     if (slotIndex < 0 || slotIndex >= slotCount) continue;
     values[slotIndex] = point?.v || 0;
   }
+
+  // Forward-fill: carry the last known value through null gaps
+  let carry = seedValue;
+  for (let i = 0; i < slotCount; i++) {
+    if (values[i] !== null) {
+      carry = values[i];
+    } else if (carry !== null) {
+      values[i] = carry;
+    }
+  }
+
   return values;
 }
 
@@ -243,37 +264,38 @@ function getOrCreateLiveGraphSession(viewerId, candidateIds) {
 
 function buildLiveGraphControlRows(session, usersById) {
   const rows = [];
-  const tfValues = LIVE_GRAPH_TIMEFRAMES;
-  for (let i = 0; i < tfValues.length; i += 5) {
-    const timeframeRow = new ActionRowBuilder();
-    for (const tf of tfValues.slice(i, i + 5)) {
-      timeframeRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`livestats_tf_${session.viewerId}_${tf.key}`)
-          .setLabel(tf.label || tf.key)
-          .setStyle(session.timeframeSec === tf.seconds ? ButtonStyle.Primary : ButtonStyle.Secondary)
-      );
-    }
-    rows.push(timeframeRow);
-  }
 
+  // Timeframe dropdown
+  const tfMenu = new StringSelectMenuBuilder()
+    .setCustomId(`livestats_tf_${session.viewerId}`)
+    .setPlaceholder('Select timeframe')
+    .addOptions(LIVE_GRAPH_TIMEFRAMES.map(tf => ({
+      label: tf.label || tf.key,
+      value: tf.key,
+      default: session.timeframeSec === tf.seconds,
+    })));
+  rows.push(new ActionRowBuilder().addComponents(tfMenu));
+
+  // Player multi-select dropdown
   const candidates = session.candidateIds.slice(0, LIVE_GRAPH_MAX_USERS);
-  for (let i = 0; i < candidates.length; i += 5) {
-    const row = new ActionRowBuilder();
-    const slice = candidates.slice(i, i + 5);
-    for (const id of slice) {
+  if (candidates.length > 0) {
+    const playerOptions = candidates.slice(0, 25).map(id => {
       const user = usersById.get(id) || client.users.cache.get(id);
-      const labelBase = (user?.username || id.slice(-4)).slice(0, 12);
-      const selected = session.selectedIds.includes(id);
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`livestats_tg_${session.viewerId}_${id}`)
-          .setLabel(`${selected ? '✓' : '✕'} ${labelBase}`)
-          .setStyle(selected ? ButtonStyle.Success : ButtonStyle.Secondary)
-      );
-    }
-    rows.push(row);
-    if (rows.length >= 5) break;
+      const label = (user?.username || `User ${id.slice(-4)}`).slice(0, 100);
+      return {
+        label,
+        value: id,
+        default: session.selectedIds.includes(id),
+      };
+    });
+
+    const playerMenu = new StringSelectMenuBuilder()
+      .setCustomId(`livestats_players_${session.viewerId}`)
+      .setPlaceholder('Select players to display')
+      .setMinValues(1)
+      .setMaxValues(playerOptions.length)
+      .addOptions(playerOptions);
+    rows.push(new ActionRowBuilder().addComponents(playerMenu));
   }
 
   return rows;
@@ -347,7 +369,7 @@ async function distributeUniversalPool() {
 
   const interestRows = [];
   for (const id of ids) {
-    const interest = store.processBank(id);
+    const interest = store.processBank(id, { forceFlush: true });
     interestRows.push({ id, interest });
   }
 
@@ -400,7 +422,11 @@ async function distributeUniversalPool() {
       console.error(`Hourly universal message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
     });
     if (doubledPayouts.length > 0) {
-      const lines = doubledPayouts.map(entry => `<@${entry.id}> earned **double universal income** from their perk (**${store.formatNumber(entry.payout)}** total).`);
+      const lines = await Promise.all(doubledPayouts.map(async (entry) => {
+        const u = await client.users.fetch(entry.id).catch(() => null);
+        const name = u ? u.username : 'Unknown';
+        return `**${name}** earned **double universal income** from their perk (**${store.formatNumber(entry.payout)}** total).`;
+      }));
       await channel.send(`✨ **Hourly Universal Income Mult Procs**\n${lines.join('\n')}`).catch((err) => {
         console.error(`Hourly perk message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
       });
@@ -588,15 +614,18 @@ async function handleLiveStatsButton(interaction) {
     const payload = await buildLiveBigGraphPayload(interaction.user.id);
     return interaction.reply(payload);
   }
+}
 
+async function handleLiveStatsSelectMenu(interaction) {
   if (interaction.customId.startsWith('livestats_tf_')) {
     const parts = interaction.customId.split('_');
     const viewerId = parts[2];
-    const timeframeKey = parts[3];
-    const timeframe = LIVE_GRAPH_TIMEFRAMES.find((entry) => entry.key === timeframeKey);
     if (interaction.user.id !== viewerId) {
       return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
     }
+
+    const timeframeKey = interaction.values[0];
+    const timeframe = LIVE_GRAPH_TIMEFRAMES.find((entry) => entry.key === timeframeKey);
     if (!timeframe) {
       return interaction.reply({ content: 'Invalid timeframe selection.', ephemeral: true });
     }
@@ -610,27 +639,20 @@ async function handleLiveStatsButton(interaction) {
     return interaction.update(payload);
   }
 
-  if (interaction.customId.startsWith('livestats_tg_')) {
+  if (interaction.customId.startsWith('livestats_players_')) {
     const parts = interaction.customId.split('_');
     const viewerId = parts[2];
-    const targetId = parts[3];
     if (interaction.user.id !== viewerId) {
       return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
     }
 
+    const selectedIds = interaction.values;
     const candidateIds = getGraphCandidateIds(store.getAllWallets());
     const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
-    if (!session.candidateIds.includes(targetId)) {
-      return interaction.reply({ content: 'Player is not available in current graph candidates.', ephemeral: true });
-    }
-
-    const selected = new Set(session.selectedIds);
-    if (selected.has(targetId)) selected.delete(targetId);
-    else selected.add(targetId);
-    session.selectedIds = Array.from(selected);
+    session.selectedIds = selectedIds.filter(id => session.candidateIds.includes(id));
+    if (session.selectedIds.length === 0) session.selectedIds = candidateIds.slice(0, 1);
     session.expiresAt = Date.now() + LIVE_GRAPH_SESSION_TTL_MS;
     liveGraphSessions.set(viewerId, session);
-
     const payload = await buildLiveBigGraphPayload(viewerId);
     return interaction.update(payload);
   }
@@ -945,6 +967,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.customId.startsWith('trade_selectitem_') || interaction.customId.startsWith('trade_unselectitem_'))
         return await economy.handleTradeSelectMenu(interaction);
+      if (interaction.customId.startsWith('livestats_'))
+        return await handleLiveStatsSelectMenu(interaction);
+      if (interaction.customId.startsWith('stats_'))
+        return await statsCmd.handleStatsSelectMenu(interaction);
     } catch (e) { console.error(e); }
     return;
   }
@@ -953,7 +979,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     try {
-      if (interaction.customId.startsWith('livestats_')) return await handleLiveStatsButton(interaction);
+      if (interaction.customId === 'livestats_open') return await handleLiveStatsButton(interaction);
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
       if (interaction.customId.startsWith('upgrade_'))  return await economy.handleUpgradeButton(interaction, parts);

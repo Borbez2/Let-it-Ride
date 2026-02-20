@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
-const binomial = require('../utils/binomial');
 const {
   CONFIG,
   STARTING_COINS, BASE_INVEST_RATE,
@@ -19,7 +18,11 @@ const RARITY_TIER = {
   divine: 7,
 };
 const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
-const PITY_MAX_BOOST_RATE = CONFIG.runtime.pity.maxBoostRate;
+const LUCK_MAX_STACKS = 10;
+const LUCK_CASHBACK_PER_STACK = 0.005;
+const LUCK_LOSSES_FIRST_STACK = 5;
+const LUCK_LOSSES_PER_EXTRA_STACK = 3;
+const LUCK_STACK_DURATION_MS = 15 * 60 * 1000;
 
 const COLLECTIBLE_EFFECTS = (() => {
   const map = {};
@@ -216,161 +219,116 @@ function ensureWalletStatsShape(w) {
     w.stats.bonuses = {
       minesSaves: 0,
       evBoostProfit: 0,
-      binomialPity: {
-        activeUntil: 0,
-        boostRate: 0,
+      luck: {
+        lossStreak: 0,
+        bestLossStreak: 0,
         stacks: [],
         triggers: 0,
-        lastTriggeredAt: 0,
-        lastDirection: 'neutral',
-        lastConfidence: 0,
-        lastTotalGames: 0,
+        totalCashback: 0,
       },
     };
   }
   if (w.stats.bonuses.minesSaves === undefined) w.stats.bonuses.minesSaves = 0;
   if (w.stats.bonuses.evBoostProfit === undefined) w.stats.bonuses.evBoostProfit = 0;
-  if (!w.stats.bonuses.binomialPity) {
-    w.stats.bonuses.binomialPity = {
-      activeUntil: 0,
-      boostRate: 0,
+  if (!w.stats.bonuses.luck) {
+    w.stats.bonuses.luck = {
+      lossStreak: 0,
+      bestLossStreak: 0,
       stacks: [],
       triggers: 0,
-      lastTriggeredAt: 0,
-      lastDirection: 'neutral',
-      lastConfidence: 0,
-      lastTotalGames: 0,
+      totalCashback: 0,
     };
   }
-  if (w.stats.bonuses.binomialPity.activeUntil === undefined) w.stats.bonuses.binomialPity.activeUntil = 0;
-  if (w.stats.bonuses.binomialPity.boostRate === undefined) w.stats.bonuses.binomialPity.boostRate = 0;
-  if (!Array.isArray(w.stats.bonuses.binomialPity.stacks)) w.stats.bonuses.binomialPity.stacks = [];
-  if (w.stats.bonuses.binomialPity.triggers === undefined) w.stats.bonuses.binomialPity.triggers = 0;
-  if (w.stats.bonuses.binomialPity.lastTriggeredAt === undefined) w.stats.bonuses.binomialPity.lastTriggeredAt = 0;
-  if (w.stats.bonuses.binomialPity.lastDirection === undefined) w.stats.bonuses.binomialPity.lastDirection = 'neutral';
-  if (w.stats.bonuses.binomialPity.lastConfidence === undefined) w.stats.bonuses.binomialPity.lastConfidence = 0;
-  if (w.stats.bonuses.binomialPity.lastTotalGames === undefined) w.stats.bonuses.binomialPity.lastTotalGames = 0;
+  if (w.stats.bonuses.luck.lossStreak === undefined) w.stats.bonuses.luck.lossStreak = 0;
+  if (w.stats.bonuses.luck.bestLossStreak === undefined) w.stats.bonuses.luck.bestLossStreak = 0;
+  if (!Array.isArray(w.stats.bonuses.luck.stacks)) w.stats.bonuses.luck.stacks = [];
+  if (w.stats.bonuses.luck.triggers === undefined) w.stats.bonuses.luck.triggers = 0;
+  if (w.stats.bonuses.luck.totalCashback === undefined) w.stats.bonuses.luck.totalCashback = 0;
   if (!Array.isArray(w.stats.netWorthHistory)) w.stats.netWorthHistory = [];
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
 }
 
-function getCombinedGameWinStats(stats) {
-  let wins = 0;
-  let total = 0;
-  for (const game of GAME_KEYS) {
-    const gs = stats[game] || { wins: 0, losses: 0 };
-    wins += gs.wins || 0;
-    total += (gs.wins || 0) + (gs.losses || 0);
-  }
-  return { wins, total };
+function refreshLuckStacks(luck, now = Date.now()) {
+  const stacks = Array.isArray(luck.stacks) ? luck.stacks : [];
+  luck.stacks = stacks.filter((s) => normalizeNumeric(s.expiresAt, 0) > now);
 }
 
-function refreshBinomialPityStacks(pity, now = Date.now()) {
-  const stacks = Array.isArray(pity.stacks) ? pity.stacks : [];
-  const activeStacks = stacks.filter((stack) => {
-    const rate = normalizeNumeric(stack.rate, 0);
-    const expiresAt = normalizeNumeric(stack.expiresAt, 0);
-    return rate > 0 && expiresAt > now;
-  }).map((stack) => ({
-    rate: normalizeNumeric(stack.rate, 0),
-    expiresAt: normalizeNumeric(stack.expiresAt, 0),
-    reason: typeof stack.reason === 'string' ? stack.reason : 'threshold',
-  }));
-
-  let runningRate = 0;
-  const cappedStacks = [];
-  for (const stack of activeStacks) {
-    if (runningRate >= PITY_MAX_BOOST_RATE) break;
-    const remainingCap = PITY_MAX_BOOST_RATE - runningRate;
-    if (stack.rate > remainingCap) continue;
-    cappedStacks.push(stack);
-    runningRate += stack.rate;
-  }
-
-  pity.stacks = cappedStacks;
-  pity.boostRate = cappedStacks.reduce((sum, stack) => sum + stack.rate, 0);
-  pity.activeUntil = cappedStacks.reduce((max, stack) => Math.max(max, stack.expiresAt), 0);
-}
-
-function getBinomialPityBoostState(w, now = Date.now()) {
+function getLuckState(w, now = Date.now()) {
   ensureWalletStatsShape(w);
-  const pity = w.stats.bonuses.binomialPity;
-  refreshBinomialPityStacks(pity, now);
-  const active = pity.activeUntil > now && pity.boostRate > 0;
+  const luck = w.stats.bonuses.luck;
+  refreshLuckStacks(luck, now);
+  const activeStacks = luck.stacks.length;
+  const cashbackRate = activeStacks * LUCK_CASHBACK_PER_STACK;
+  const maxExpiry = luck.stacks.reduce((max, s) => Math.max(max, s.expiresAt), 0);
   return {
-    active,
-    boostRate: active ? pity.boostRate : 0,
-    activeUntil: pity.activeUntil || 0,
-    expiresInMs: active ? (pity.activeUntil - now) : 0,
-    triggers: pity.triggers || 0,
-    lastTriggeredAt: pity.lastTriggeredAt || 0,
-    lastDirection: pity.lastDirection || 'neutral',
-    lastConfidence: pity.lastConfidence || 0,
-    lastTotalGames: pity.lastTotalGames || 0,
-    activeStacks: (pity.stacks || []).length,
+    active: activeStacks > 0,
+    activeStacks,
+    cashbackRate,
+    maxCashbackRate: LUCK_MAX_STACKS * LUCK_CASHBACK_PER_STACK,
+    lossStreak: luck.lossStreak || 0,
+    bestLossStreak: luck.bestLossStreak || 0,
+    triggers: luck.triggers || 0,
+    totalCashback: luck.totalCashback || 0,
+    expiresInMs: activeStacks > 0 ? Math.max(0, maxExpiry - now) : 0,
   };
 }
 
-function evaluateBinomialPity(w, now = Date.now()) {
+function evaluateLuckOnLoss(w, now = Date.now()) {
   ensureWalletStatsShape(w);
-  const tuning = getRuntimeTuning();
-  const pity = w.stats.bonuses.binomialPity;
-  const previousDirection = pity.lastDirection || 'neutral';
-  const previousConfidence = normalizeNumeric(pity.lastConfidence, 0);
-  const { wins, total } = getCombinedGameWinStats(w.stats);
-  const assessment = binomial.getLuckAssessment(wins, total, 0.5);
-  if (!assessment) {
-    getBinomialPityBoostState(w, now);
-    return { triggered: false };
+  const luck = w.stats.bonuses.luck;
+  luck.lossStreak = (luck.lossStreak || 0) + 1;
+  if (luck.lossStreak > (luck.bestLossStreak || 0)) luck.bestLossStreak = luck.lossStreak;
+  refreshLuckStacks(luck, now);
+
+  // Determine how many stacks this streak qualifies for
+  const streak = luck.lossStreak;
+  let qualifiedStacks = 0;
+  if (streak >= LUCK_LOSSES_FIRST_STACK) {
+    qualifiedStacks = 1 + Math.floor((streak - LUCK_LOSSES_FIRST_STACK) / LUCK_LOSSES_PER_EXTRA_STACK);
   }
+  qualifiedStacks = Math.min(qualifiedStacks, LUCK_MAX_STACKS);
 
-  pity.lastDirection = assessment.direction;
-  pity.lastConfidence = assessment.confidence;
-  pity.lastTotalGames = total;
-  refreshBinomialPityStacks(pity, now);
+  const currentStacks = luck.stacks.length;
+  const newStacks = Math.max(0, qualifiedStacks - currentStacks);
+  if (newStacks <= 0) return { triggered: false };
 
-  if (assessment.direction !== 'unlucky') {
-    return { triggered: false };
+  for (let i = 0; i < newStacks; i++) {
+    luck.stacks.push({ expiresAt: now + LUCK_STACK_DURATION_MS });
   }
+  luck.triggers = (luck.triggers || 0) + newStacks;
 
-  const thresholdFloor = Math.max(50, Math.min(99, normalizeNumeric(tuning.binomialPityThreshold, 97)));
-  const thresholds = CONFIG.runtime.pity.thresholds.filter((value) => value >= thresholdFloor);
-  const prior = previousDirection === 'unlucky' ? previousConfidence : 0;
-  const crossedThresholds = thresholds.filter((threshold) => prior < threshold && assessment.confidence >= threshold);
-
-  const perTriggerRate = Math.max(0, tuning.binomialPityBoostRate || 0.01);
-  const durationMs = Math.max(1, tuning.binomialPityDurationMinutes) * 60 * 1000;
-  const availableHeadroom = Math.max(0, PITY_MAX_BOOST_RATE - (pity.boostRate || 0));
-  const maxTriggersByCap = perTriggerRate > 0 ? Math.floor((availableHeadroom + 1e-12) / perTriggerRate) : 0;
-  const triggerCount = Math.min(crossedThresholds.length, maxTriggersByCap);
-  if (triggerCount <= 0 || perTriggerRate <= 0) {
-    return { triggered: false };
-  }
-
-  const appliedThresholds = crossedThresholds.slice(0, triggerCount);
-  for (const threshold of appliedThresholds) {
-    pity.stacks.push({
-      rate: perTriggerRate,
-      expiresAt: now + durationMs,
-      reason: `threshold:${threshold}`,
-    });
-  }
-  refreshBinomialPityStacks(pity, now);
-  pity.lastTriggeredAt = now;
-  pity.triggers = (pity.triggers || 0) + triggerCount;
-
+  const totalStacks = luck.stacks.length;
   return {
     triggered: true,
-    addedStacks: triggerCount,
-    addedBoostRate: perTriggerRate * triggerCount,
-    totalBoostRate: pity.boostRate,
-    activeUntil: pity.activeUntil,
-    confidence: assessment.confidence,
-    totalGames: total,
-    crossedThresholds: appliedThresholds,
-    highBonusTriggered: false,
+    addedStacks: newStacks,
+    totalStacks,
+    cashbackRate: totalStacks * LUCK_CASHBACK_PER_STACK,
+    lossStreak: streak,
   };
+}
+
+function evaluateLuckOnWin(w, now = Date.now()) {
+  ensureWalletStatsShape(w);
+  w.stats.bonuses.luck.lossStreak = 0;
+  refreshLuckStacks(w.stats.bonuses.luck, now);
+}
+
+function applyLuckCashback(userId, lossAmount, now = Date.now()) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const luck = w.stats.bonuses.luck;
+  refreshLuckStacks(luck, now);
+  const stacks = luck.stacks.length;
+  if (stacks <= 0) return 0;
+  const rate = stacks * LUCK_CASHBACK_PER_STACK;
+  const cashback = Math.floor(normalizeCoins(lossAmount, 0) * rate);
+  if (cashback > 0) {
+    w.balance += cashback;
+    luck.totalCashback = (luck.totalCashback || 0) + cashback;
+    saveWallets();
+  }
+  return cashback;
 }
 
 /**
@@ -792,10 +750,26 @@ function applyCashback(userId, lossAmount) {
   const loss = normalizeCoins(lossAmount, 0);
   if (loss <= 0) return 0;
   const rate = getCashbackRate(userId);
-  if (rate <= 0) return 0;
-  const cashback = Math.floor(loss * rate);
-  if (cashback > 0) { getWallet(userId).balance += cashback; saveWallets(); }
-  return cashback;
+  let totalCashback = 0;
+  if (rate > 0) {
+    totalCashback += Math.floor(loss * rate);
+  }
+  // Also apply luck-stack cashback
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const luck = w.stats.bonuses.luck;
+  refreshLuckStacks(luck);
+  const luckStacks = luck.stacks.length;
+  if (luckStacks > 0) {
+    const luckRate = luckStacks * LUCK_CASHBACK_PER_STACK;
+    const luckCb = Math.floor(loss * luckRate);
+    if (luckCb > 0) {
+      totalCashback += luckCb;
+      luck.totalCashback = (luck.totalCashback || 0) + luckCb;
+    }
+  }
+  if (totalCashback > 0) { w.balance += totalCashback; saveWallets(); }
+  return totalCashback;
 }
 
 function getSpinWeight(userId) {
@@ -833,39 +807,35 @@ function getUserBonuses(userId) {
   ensureWalletStatsShape(w);
   const tuning = getRuntimeTuning();
   const invBonuses = getInventoryBonuses(w.inventory);
-  const luck = getMysteryBoxLuckInfo(userId);
-  const pity = getBinomialPityBoostState(w);
+  const boxLuck = getMysteryBoxLuckInfo(userId);
+  const luckState = getLuckState(w);
   const evBoostByGame = { ...invBonuses.evBoostByGame };
-  if (pity.boostRate > 0) {
-    for (const game of GAME_KEYS) {
-      evBoostByGame[game] += pity.boostRate;
-    }
-  }
   return {
     interestRate: getInterestRate(userId),
     cashbackRate: getCashbackRate(userId),
     spinWeight: getSpinWeight(userId),
     universalIncomeDoubleChance: getUniversalIncomeDoubleChance(userId),
-    mysteryBoxLuck: luck.totalLuck,
-    pityStreak: luck.pityStreak,
-    pityLuckBonus: luck.pityLuckBonus,
-    inventoryLuckBonus: luck.inventoryLuckBonus,
+    mysteryBoxLuck: boxLuck.totalLuck,
+    pityStreak: boxLuck.pityStreak,
+    pityLuckBonus: boxLuck.pityLuckBonus,
+    inventoryLuckBonus: boxLuck.inventoryLuckBonus,
     minesRevealChance: invBonuses.minesRevealChance,
     evBoostByGame,
     inventoryEffects: invBonuses.effectLines,
-    binomialPity: {
-      active: pity.active,
-      boostRate: pity.boostRate,
-      activeUntil: pity.activeUntil,
-      expiresInMs: pity.expiresInMs,
-      triggers: pity.triggers,
-      thresholdConfidence: tuning.binomialPityThreshold,
-      thresholdStep: 1,
-      lastDirection: pity.lastDirection,
-      lastConfidence: pity.lastConfidence,
-      lastTotalGames: pity.lastTotalGames,
-      activeStacks: pity.activeStacks,
-      highBonusCooldownMinutes: tuning.binomialPityCooldownMinutes,
+    luck: {
+      active: luckState.active,
+      activeStacks: luckState.activeStacks,
+      maxStacks: LUCK_MAX_STACKS,
+      cashbackRate: luckState.cashbackRate,
+      maxCashbackRate: luckState.maxCashbackRate,
+      lossStreak: luckState.lossStreak,
+      bestLossStreak: luckState.bestLossStreak,
+      triggers: luckState.triggers,
+      totalCashback: luckState.totalCashback,
+      expiresInMs: luckState.expiresInMs,
+      lossesForFirstStack: LUCK_LOSSES_FIRST_STACK,
+      lossesPerExtraStack: LUCK_LOSSES_PER_EXTRA_STACK,
+      stackDurationMs: LUCK_STACK_DURATION_MS,
     },
     runtimeTuning: tuning,
   };
@@ -874,42 +844,29 @@ function getUserBonuses(userId) {
 function getUserPityStatus(userId, now = Date.now()) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
-  const pity = w.stats.bonuses.binomialPity;
-  refreshBinomialPityStacks(pity, now);
+  const luck = w.stats.bonuses.luck;
+  refreshLuckStacks(luck, now);
 
-  const stacks = (pity.stacks || [])
-    .map((stack, idx) => {
-      const rate = normalizeNumeric(stack.rate, 0);
-      const expiresAt = normalizeNumeric(stack.expiresAt, 0);
-      const reason = typeof stack.reason === 'string' ? stack.reason : 'threshold';
-      let threshold = null;
-      if (reason.startsWith('threshold:')) {
-        const parsed = Number(reason.slice('threshold:'.length));
-        if (Number.isFinite(parsed)) threshold = parsed;
-      }
-      return {
-        id: idx + 1,
-        rate,
-        threshold,
-        reason,
-        expiresAt,
-        remainingMs: Math.max(0, expiresAt - now),
-      };
-    })
-    .sort((a, b) => {
-      if ((a.threshold || 0) !== (b.threshold || 0)) return (a.threshold || 0) - (b.threshold || 0);
-      return a.expiresAt - b.expiresAt;
-    });
+  const stacks = (luck.stacks || []).map((stack, idx) => {
+    const expiresAt = normalizeNumeric(stack.expiresAt, 0);
+    return {
+      id: idx + 1,
+      cashback: LUCK_CASHBACK_PER_STACK,
+      expiresAt,
+      remainingMs: Math.max(0, expiresAt - now),
+    };
+  });
 
-  const totalBoostRate = stacks.reduce((sum, s) => sum + s.rate, 0);
   return {
-    active: totalBoostRate > 0,
-    totalBoostRate,
-    activeUntil: pity.activeUntil || 0,
-    triggers: pity.triggers || 0,
-    lastDirection: pity.lastDirection || 'neutral',
-    lastConfidence: pity.lastConfidence || 0,
-    lastTotalGames: pity.lastTotalGames || 0,
+    active: stacks.length > 0,
+    activeStacks: stacks.length,
+    maxStacks: LUCK_MAX_STACKS,
+    cashbackRate: stacks.length * LUCK_CASHBACK_PER_STACK,
+    maxCashbackRate: LUCK_MAX_STACKS * LUCK_CASHBACK_PER_STACK,
+    lossStreak: luck.lossStreak || 0,
+    bestLossStreak: luck.bestLossStreak || 0,
+    triggers: luck.triggers || 0,
+    totalCashback: luck.totalCashback || 0,
     stacks,
   };
 }
@@ -921,8 +878,7 @@ function applyProfitBoost(userId, gameName, baseProfit) {
   ensureWalletStatsShape(w);
   const tuning = getRuntimeTuning();
   const bonuses = getInventoryBonuses(w.inventory);
-  const pity = getBinomialPityBoostState(w);
-  const boost = ((bonuses.evBoostByGame[gameName] || 0) + (pity.boostRate || 0)) * (tuning.globalEvScalar || 1);
+  const boost = (bonuses.evBoostByGame[gameName] || 0) * (tuning.globalEvScalar || 1);
   if (boost <= 0) return profit;
   const boosted = Math.floor(profit * (1 + boost));
   const extra = boosted - profit;
@@ -946,7 +902,7 @@ function tryTriggerMinesReveal(userId) {
 }
 
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
-function processBank(userId) {
+function processBank(userId, { forceFlush = false } = {}) {
   const w = getWallet(userId);
   if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
   if (w.stats.interest.pendingFraction === undefined) w.stats.interest.pendingFraction = 0;
@@ -962,7 +918,7 @@ function processBank(userId) {
   const minuteMs = CONFIG.economy.bank.interestAccrualMinuteMs;
   const baseLast = w.stats.interest.lastAccrualAt || w.lastBankPayout || now;
   const elapsedMinutes = Math.floor((now - baseLast) / minuteMs);
-  if (elapsedMinutes < 1) return 0;
+  if (elapsedMinutes < 1 && !forceFlush) return 0;
 
   const perMinuteRate = getInterestRate(userId) / 24 / 60;
   let pendingFraction = w.stats.interest.pendingFraction || 0;
@@ -990,10 +946,19 @@ function processBank(userId) {
     }
   }
 
+  // When forceFlush is true (hourly distribution), pay out any remaining pending coins
+  if (forceFlush && pendingCoins > 0) {
+    w.bank += pendingCoins;
+    totalPayout += pendingCoins;
+    pendingCoins = 0;
+    pendingMinutes = 0;
+    w.lastBankPayout = processedAt || now;
+  }
+
   w.stats.interest.pendingFraction = pendingFraction;
   w.stats.interest.pendingCoins = pendingCoins;
   w.stats.interest.pendingMinutes = pendingMinutes;
-  w.stats.interest.lastAccrualAt = processedAt;
+  w.stats.interest.lastAccrualAt = processedAt || now;
 
   if (totalPayout > 0) {
     w.stats.interest.totalEarned += totalPayout;
@@ -1218,10 +1183,10 @@ function recordWin(userId, gameName, amount) {
     w.stats[gameName].wins += 1;
   }
   w.stats.lifetimeEarnings += amount;
-  const pityResult = evaluateBinomialPity(w);
+  evaluateLuckOnWin(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
   saveWallets();
-  return pityResult;
+  return { triggered: false };
 }
 
 function recordLoss(userId, gameName, amount) {
@@ -1231,10 +1196,10 @@ function recordLoss(userId, gameName, amount) {
     w.stats[gameName].losses += 1;
   }
   w.stats.lifetimeLosses += amount;
-  const pityResult = evaluateBinomialPity(w);
+  const luckResult = evaluateLuckOnLoss(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
   saveWallets();
-  return pityResult;
+  return luckResult;
 }
 
 // Extended stats tracking helpers.
@@ -1256,16 +1221,14 @@ function resetAllActivePity() {
   let stacksCleared = 0;
   for (const wallet of Object.values(wallets)) {
     ensureWalletStatsShape(wallet);
-    const pity = wallet.stats.bonuses.binomialPity;
-    const activeStacks = Array.isArray(pity.stacks) ? pity.stacks.length : 0;
-    const hadActive = activeStacks > 0 || (pity.boostRate || 0) > 0 || (pity.activeUntil || 0) > Date.now();
-    if (!hadActive) continue;
+    const luck = wallet.stats.bonuses.luck;
+    const activeStacks = Array.isArray(luck.stacks) ? luck.stacks.length : 0;
+    if (activeStacks === 0) continue;
 
     usersCleared += 1;
     stacksCleared += activeStacks;
-    pity.stacks = [];
-    pity.boostRate = 0;
-    pity.activeUntil = 0;
+    luck.stacks = [];
+    luck.lossStreak = 0;
   }
   if (usersCleared > 0) saveWallets();
   return { usersCleared, stacksCleared };
@@ -1319,7 +1282,7 @@ module.exports = {
   addToUniversalPool, addToLossPool,
   getAllWallets, getWallet, hasWallet, deleteWallet,
   getBalance, setBalance,
-  getInterestRate, getCashbackRate, applyCashback,
+  getInterestRate, getCashbackRate, applyCashback, applyLuckCashback,
   getSpinWeight, getUniversalIncomeDoubleChance, processBank,
   getUserBonuses, getMysteryBoxLuckInfo, getUserPityStatus,
   applyProfitBoost, tryTriggerMinesReveal,

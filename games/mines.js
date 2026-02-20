@@ -13,15 +13,11 @@ async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   const channel = interaction.channel;
   if (!channel || typeof channel.send !== 'function') return;
 
-  const addedPct = (pityResult.addedBoostRate * 100).toFixed(2);
-  const totalPct = (pityResult.totalBoostRate * 100).toFixed(2);
-  const thresholds = Array.isArray(pityResult.crossedThresholds) && pityResult.crossedThresholds.length
-    ? pityResult.crossedThresholds.map(v => `${v}%`).join(', ')
-    : 'none';
+  const cashbackPct = (pityResult.cashbackRate * 100).toFixed(1);
 
   await channel.send(
-    `⚡ <@${userId}> pity triggered: +${addedPct}% EV (${pityResult.addedStacks} stack${pityResult.addedStacks === 1 ? '' : 's'}) | ` +
-    `active total +${totalPct}% | probability of being this lucky/unlucky ${Number(pityResult.confidence || 0).toFixed(2)}% | crossed: ${thresholds}`
+    `\u2618 <@${userId}> luck triggered: +${pityResult.addedStacks} stack${pityResult.addedStacks === 1 ? '' : 's'} | ` +
+    `${pityResult.totalStacks}/${10} stacks (${cashbackPct}% cashback) | loss streak: ${pityResult.lossStreak}`
   ).catch(() => null);
 }
 

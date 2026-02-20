@@ -1,5 +1,4 @@
 const store = require('../data/store');
-const { CONFIG } = require('../config');
 
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -12,25 +11,27 @@ async function handlePity(interaction) {
   const userId = interaction.user.id;
   const status = store.getUserPityStatus(userId);
 
-  let text = `**Pity Status: ${interaction.user.username}**\n\n`;
-  text += `• Last luck state: ${(status.lastDirection || 'neutral').toUpperCase()} (${(status.lastConfidence || 0).toFixed(2)}% probability of being this lucky/unlucky, ${status.lastTotalGames || 0} games)\n`;
-  text += `• Total pity triggers: ${status.triggers || 0}\n`;
-  text += `• Pity cap: +${(CONFIG.runtime.pity.maxBoostRate * 100).toFixed(2)}%\n`;
+  let text = `**\u2618 Luck Status: ${interaction.user.username}**\n\n`;
+  text += `\u2027 Loss Streak: **${status.lossStreak}** (Best: ${status.bestLossStreak})\n`;
+  text += `\u2027 Total Triggers: **${status.triggers}**\n`;
+  text += `\u2027 Total Cashback Earned: **${store.formatNumber(status.totalCashback)}**\n`;
+  text += `\u2027 Max Cashback: **${(status.maxCashbackRate * 100).toFixed(1)}%** (${status.maxStacks} stacks)\n`;
 
   if (!status.active || !status.stacks.length) {
-    text += `• Active pity boost: none\n`;
-    text += `\nNo active pity stacks right now.`;
+    text += `\u2027 Active Stacks: **0/${status.maxStacks}**\n`;
+    const lossesNeeded = status.lossStreak < 5
+      ? 5 - status.lossStreak
+      : 3 - ((status.lossStreak - 5) % 3 || 3);
+    text += `\nNo active luck stacks. Lose **${Math.max(1, lossesNeeded)}** more in a row to trigger.`;
     return interaction.reply(text);
   }
 
-  text += `• Active pity boost: +${(status.totalBoostRate * 100).toFixed(2)}%\n`;
-  text += `• Active stacks: ${status.stacks.length}\n\n`;
-  text += `**Per-Stack Life Counter**\n`;
+  text += `\u2027 Active Stacks: **${status.activeStacks}/${status.maxStacks}** (+${(status.cashbackRate * 100).toFixed(1)}% cashback)\n\n`;
+  text += `**Stack Timers**\n`;
 
   for (const stack of status.stacks) {
-    const thresholdLabel = Number.isFinite(stack.threshold) ? `${stack.threshold}% threshold` : stack.reason;
-    const ratePct = (stack.rate * 100).toFixed(2);
-    text += `• ${thresholdLabel}: +${ratePct}% (${formatDuration(stack.remainingMs)} left)\n`;
+    const cbPct = (stack.cashback * 100).toFixed(1);
+    text += `\u2027 Stack ${stack.id}: +${cbPct}% cashback (${formatDuration(stack.remainingMs)} left)\n`;
   }
 
   return interaction.reply(text);
