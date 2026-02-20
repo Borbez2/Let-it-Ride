@@ -1,6 +1,8 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, UserSelectMenuBuilder } = require('discord.js');
-const { CONFIG } = require('../config');
+const { CONFIG, RARITIES } = require('../config');
 const store = require('../data/store');
+
+const RARITY_ORDER = CONFIG.ui.rarityOrder;
 
 // ── Page Navigation ──
 
@@ -14,6 +16,10 @@ function getPageNavRow(userId, activePage) {
       .setCustomId(`shop_potions_${userId}`)
       .setLabel('🧪 Potions')
       .setStyle(activePage === 'potions' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`shop_mysterybox_${userId}`)
+      .setLabel('🎁 Mystery Box')
+      .setStyle(activePage === 'mysterybox' ? ButtonStyle.Primary : ButtonStyle.Secondary),
   );
 }
 
@@ -133,14 +139,14 @@ function renderPotionsEmbed(userId, successMessage) {
   }
   fields.push({
     name: '🧪 Lucky Pot',
-    value: `${luckyStatus}\n> Boosts your win chance by **+10%** for **30 minutes**\n> Affects: Flip, Duel, Let It Ride`,
+    value: `${luckyStatus}\n> Boosts your win chance by **+10%** for **1 hour**\n> Affects: Flip, Duel, Let It Ride`,
     inline: false,
   });
 
   // Unlucky Pot
   fields.push({
     name: '💀 Unlucky Pot',
-    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-10%** for **30 minutes**\n> Select a target below to apply this curse`,
+    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-10%** for **1 hour**\n> Select a target below to apply this curse`,
     inline: false,
   });
 
@@ -186,10 +192,61 @@ function buildPotionButtons(userId) {
 
 // ── Page Rendering ──
 
+function renderMysteryBoxEmbed(userId, successMessage) {
+  const w = store.getWallet(userId);
+  const cost = CONFIG.collectibles.mysteryBox.cost;
+  const maxQty = CONFIG.commands.limits.mysteryBoxQuantity.max;
+
+  const fields = [
+    {
+      name: '🎁 Mystery Box',
+      value: `> Price: **${store.formatNumber(cost)}** coins each\n> Contains a random collectible item\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
+      inline: false,
+    },
+  ];
+
+  const embed = {
+    title: '🎁 Mystery Box Shop',
+    color: 0x2b2d31,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins`,
+    fields,
+  };
+
+  if (successMessage) {
+    embed.footer = { text: successMessage };
+  }
+
+  return embed;
+}
+
+function buildMysteryBoxButtons(userId) {
+  const w = store.getWallet(userId);
+  const cost = CONFIG.collectibles.mysteryBox.cost;
+  const rows = [];
+
+  const quantities = [1, 5, 10, 25, 50];
+  const buttons = quantities.map(qty => {
+    const totalCost = cost * qty;
+    return new ButtonBuilder()
+      .setCustomId(`shop_buybox_${userId}_${qty}`)
+      .setLabel(`x${qty} (${store.formatNumberShort(totalCost)})`)
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(w.balance < totalCost);
+  });
+
+  rows.push(new ActionRowBuilder().addComponents(buttons.slice(0, 5)));
+  return rows;
+}
+
 function renderShopPage(userId, page, successMessage) {
   if (page === 'potions') {
     const embed = renderPotionsEmbed(userId, successMessage);
     const components = [getPageNavRow(userId, 'potions'), ...buildPotionButtons(userId)];
+    return { embed, components };
+  }
+  if (page === 'mysterybox') {
+    const embed = renderMysteryBoxEmbed(userId, successMessage);
+    const components = [getPageNavRow(userId, 'mysterybox'), ...buildMysteryBoxButtons(userId)];
     return { embed, components };
   }
   // Default: upgrades
@@ -211,7 +268,7 @@ async function handleShopButton(interaction, parts) {
   const action = parts[1];
   const uid = parts[2];
 
-  if (action === 'upgrades' || action === 'potions') {
+  if (action === 'upgrades' || action === 'potions' || action === 'mysterybox') {
     if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
     const { embed, components } = renderShopPage(uid, action);
     return interaction.update({ content: '', embeds: [embed], components });
@@ -225,7 +282,78 @@ async function handleShopButton(interaction, parts) {
       if (result.reason === 'insufficient_funds') return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.luckyPotCost)}** coins!`, ephemeral: true });
       if (result.reason === 'already_active') return interaction.reply({ content: 'You already have an active Lucky Pot!', ephemeral: true });
     }
-    const { embed, components } = renderShopPage(uid, 'potions', 'Lucky Pot activated for 30 minutes!');
+    const { embed, components } = renderShopPage(uid, 'potions', 'Lucky Pot activated for 1 hour!');
+    return interaction.update({ content: '', embeds: [embed], components });
+  }
+
+  if (action === 'buybox') {
+    const quantity = parseInt(parts[3], 10) || 1;
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    const w = store.getWallet(uid);
+    const cost = CONFIG.collectibles.mysteryBox.cost;
+    const totalCost = quantity * cost;
+
+    if (w.balance < totalCost) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`, ephemeral: true });
+    }
+
+    w.balance -= totalCost;
+    const items = [];
+    let totalCompensation = 0;
+
+    for (let i = 0; i < quantity; i++) {
+      const item = store.rollMysteryBox(uid);
+
+      if (item.id && item.id.startsWith('placeholder_')) {
+        const isDuplicate = w.inventory.some(inv => inv.id === item.id);
+        if (isDuplicate) {
+          const compensation = store.getDuplicateCompensation(item.id, item._rarity);
+          w.balance += compensation;
+          store.trackMysteryBoxDuplicateComp(uid, compensation);
+          totalCompensation += compensation;
+          items.push({ ...item, isDuplicate: true, compensation });
+          continue;
+        }
+      }
+
+      w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
+      items.push(item);
+    }
+
+    store.saveWallets();
+
+    let resultMsg;
+    if (quantity === 1) {
+      const item = items[0];
+      if (item.isDuplicate) {
+        resultMsg = `${item.emoji} DUPLICATE — **${item.name}** → +${store.formatNumber(item.compensation)} coins`;
+      } else {
+        resultMsg = `${item.emoji} Got: **${item.name}** (${item.rarity})`;
+      }
+    } else {
+      const byRarity = {};
+      let duplicateCount = 0;
+      for (const item of items) {
+        if (item.isDuplicate) {
+          duplicateCount++;
+        } else {
+          if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
+          byRarity[item.rarity].push(item);
+        }
+      }
+      let lines = [`Opened x${quantity}:`];
+      for (const rarity of RARITY_ORDER) {
+        const rarityItems = byRarity[rarity];
+        if (!rarityItems || rarityItems.length === 0) continue;
+        lines.push(`${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}`);
+      }
+      if (duplicateCount > 0) {
+        lines.push(`⚠️ Dupes: x${duplicateCount} (+${store.formatNumber(totalCompensation)})`);
+      }
+      resultMsg = lines.join(' | ');
+    }
+
+    const { embed, components } = renderShopPage(uid, 'mysterybox', resultMsg);
     return interaction.update({ content: '', embeds: [embed], components });
   }
 }
@@ -300,7 +428,7 @@ async function handleShopSelectMenu(interaction) {
 
     const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
     const targetName = targetUser ? targetUser.username : 'Unknown';
-    const { embed, components } = renderShopPage(buyerId, 'potions', `Unlucky Pot applied to ${targetName} for 30 minutes!`);
+    const { embed, components } = renderShopPage(buyerId, 'potions', `Unlucky Pot applied to ${targetName} for 1 hour!`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
 }

@@ -336,8 +336,7 @@ const commands = [
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
     .addStringOption(o => o.setName('amount').setDescription(`Amount to withdraw (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
-  new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades (alias for /shop)'),
-  new SlashCommandBuilder().setName('shop').setDescription('Browse the shop — upgrades and potions'),
+  new SlashCommandBuilder().setName('shop').setDescription('Browse the shop — upgrades, potions, and mystery boxes'),
   new SlashCommandBuilder().setName('effects').setDescription('View your active effects, potions, and stat bonuses')
     .addUserOption(o => o.setName('user').setDescription('User to check effects for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
@@ -1050,10 +1049,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'invest':       return await economy.handleDeposit(interaction);
       case 'withdraw':     return await economy.handleWithdraw(interaction);
       case 'bank':         return await economy.handleBank(interaction);
-      case 'upgrades':     return await shopCmd.handleShop(interaction);
       case 'shop':          return await shopCmd.handleShop(interaction);
       case 'effects':       return await effectsCmd.handleEffects(interaction);
-      case 'mysterybox':   return await economy.handleMysteryBox(interaction);
+      case 'mysterybox':   return await shopCmd.handleShop(interaction);
       case 'inventory':    return await economy.handleInventory(interaction);
       case 'collection':   return await economy.handleCollection(interaction, client);
       case 'pool':         return await economy.handlePool(interaction);

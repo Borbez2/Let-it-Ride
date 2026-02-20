@@ -25,10 +25,10 @@ const LUCK_LOSSES_PER_EXTRA_STACK = 3;
 const LUCK_STACK_DURATION_MS = 15 * 60 * 1000;
 
 // Potion system constants
-const LUCKY_POT_DURATION_MS = 30 * 60 * 1000;
+const LUCKY_POT_DURATION_MS = 60 * 60 * 1000;
 const LUCKY_POT_COST = 75000;
 const LUCKY_POT_BOOST = 0.10;
-const UNLUCKY_POT_DURATION_MS = 30 * 60 * 1000;
+const UNLUCKY_POT_DURATION_MS = 60 * 60 * 1000;
 const UNLUCKY_POT_COST = 500000;
 const UNLUCKY_POT_PENALTY = 0.10;
 
@@ -145,6 +145,8 @@ const DEFAULT_STATS = () => ({
     },
   },
   netWorthHistory: [],
+  topWins: [],
+  topLosses: [],
   lifetimeEarnings: 0,
   lifetimeLosses: 0,
 });
@@ -258,6 +260,8 @@ function ensureWalletStatsShape(w) {
   if (w.stats.bonuses.luck.totalCashback === undefined) w.stats.bonuses.luck.totalCashback = 0;
   if (!w.stats.potions) w.stats.potions = { lucky: null, unlucky: null };
   if (!Array.isArray(w.stats.netWorthHistory)) w.stats.netWorthHistory = [];
+  if (!Array.isArray(w.stats.topWins)) w.stats.topWins = [];
+  if (!Array.isArray(w.stats.topLosses)) w.stats.topLosses = [];
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
 }
@@ -1258,6 +1262,12 @@ function removeGiveaway(id) {
 }
 
 // Basic stats tracking.
+function insertTopResult(arr, entry, limit = 5) {
+  arr.push(entry);
+  arr.sort((a, b) => b.amount - a.amount);
+  if (arr.length > limit) arr.length = limit;
+}
+
 function recordWin(userId, gameName, amount) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
@@ -1265,6 +1275,7 @@ function recordWin(userId, gameName, amount) {
     w.stats[gameName].wins += 1;
   }
   w.stats.lifetimeEarnings += amount;
+  insertTopResult(w.stats.topWins, { game: gameName, amount, t: Date.now() });
   evaluateLuckOnWin(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
   saveWallets();
@@ -1278,6 +1289,7 @@ function recordLoss(userId, gameName, amount) {
     w.stats[gameName].losses += 1;
   }
   w.stats.lifetimeLosses += amount;
+  insertTopResult(w.stats.topLosses, { game: gameName, amount, t: Date.now() });
   const luckResult = evaluateLuckOnLoss(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
   saveWallets();

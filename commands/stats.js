@@ -50,6 +50,7 @@ function getNavRow(viewerId, targetId, activePage, timeframeKey) {
   const pages = [
     { key: 'networth', label: 'Networth' },
     { key: 'winloss', label: 'Win Loss' },
+    { key: 'topbets', label: 'Top Bets' },
   ];
 
   const row = new ActionRowBuilder();
@@ -282,10 +283,44 @@ async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT
 
 
 
+function renderTopBetsPage(username, wallet) {
+  const stats = wallet.stats;
+  const topWins = Array.isArray(stats.topWins) ? stats.topWins : [];
+  const topLosses = Array.isArray(stats.topLosses) ? stats.topLosses : [];
+
+  let winsText = '';
+  for (let i = 0; i < topWins.length; i++) {
+    const entry = topWins[i];
+    const timeStr = entry.t ? `<t:${Math.floor(entry.t / 1000)}:R>` : '';
+    winsText += `> **${i + 1}.** ${capitalize(entry.game)} — **+${store.formatNumber(entry.amount)}** ${timeStr}\n`;
+  }
+  if (!winsText) winsText = '> No wins recorded yet\n';
+
+  let lossesText = '';
+  for (let i = 0; i < topLosses.length; i++) {
+    const entry = topLosses[i];
+    const timeStr = entry.t ? `<t:${Math.floor(entry.t / 1000)}:R>` : '';
+    lossesText += `> **${i + 1}.** ${capitalize(entry.game)} — **-${store.formatNumber(entry.amount)}** ${timeStr}\n`;
+  }
+  if (!lossesText) lossesText = '> No losses recorded yet\n';
+
+  return {
+    title: `🏆 ${username}'s Top Bets`,
+    color: 0x2b2d31,
+    fields: [
+      { name: '▲ Biggest Wins', value: winsText, inline: false },
+      { name: '▼ Biggest Losses', value: lossesText, inline: false },
+    ],
+  };
+}
+
+
 async function renderPage(page, username, userId, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   switch (page) {
     case 'winloss':
       return { content: '', embeds: [renderWinLossPage(username, wallet)] };
+    case 'topbets':
+      return { content: '', embeds: [renderTopBetsPage(username, wallet)] };
     case 'networth':
       return renderNetWorthPage(username, wallet, timeframeKey);
     case 'overview':

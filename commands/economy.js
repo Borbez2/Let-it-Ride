@@ -1220,7 +1220,7 @@ module.exports = {
   activeTrades,
   handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
   handleGive, handleTrade, handleLeaderboard,
-  handleMysteryBox, handleInventory, handleInventoryButton, handleCollection, handlePool,
+  handleInventory, handleInventoryButton, handleCollection, handlePool,
   handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
   handleGiveawayStart, handleGiveawayModal, handleGiveawayJoin,
