@@ -222,6 +222,27 @@ const CONFIG = {
         mythic: 0.8,
         divine: 0.2,
       },
+      // Placeholder stat boosts per item – keyed by rarity.
+      // Each item of that rarity grants these flat bonuses.
+      statBoostPerItem: {
+        common:    { interestRate: 0.0001, cashbackRate: 0.0001, minesRevealChance: 0.0001, universalDoubleChance: 0.0005, spinWeight: 0.005 },
+        uncommon:  { interestRate: 0.0003, cashbackRate: 0.0003, minesRevealChance: 0.0003, universalDoubleChance: 0.001,  spinWeight: 0.01  },
+        rare:      { interestRate: 0.0005, cashbackRate: 0.0005, minesRevealChance: 0.0005, universalDoubleChance: 0.002,  spinWeight: 0.02  },
+        legendary: { interestRate: 0.001,  cashbackRate: 0.001,  minesRevealChance: 0.001,  universalDoubleChance: 0.004,  spinWeight: 0.04  },
+        epic:      { interestRate: 0.002,  cashbackRate: 0.002,  minesRevealChance: 0.002,  universalDoubleChance: 0.006,  spinWeight: 0.06  },
+        mythic:    { interestRate: 0.004,  cashbackRate: 0.004,  minesRevealChance: 0.004,  universalDoubleChance: 0.01,   spinWeight: 0.1   },
+        divine:    { interestRate: 0.008,  cashbackRate: 0.008,  minesRevealChance: 0.008,  universalDoubleChance: 0.02,   spinWeight: 0.2   },
+      },
+      // Bonus granted when ALL items of a rarity are collected.
+      collectionCompleteBonus: {
+        common:    { interestRate: 0.005,  cashbackRate: 0.005,  minesRevealChance: 0.005,  universalDoubleChance: 0.01,  spinWeight: 0.1 },
+        uncommon:  { interestRate: 0.008,  cashbackRate: 0.008,  minesRevealChance: 0.008,  universalDoubleChance: 0.02,  spinWeight: 0.15 },
+        rare:      { interestRate: 0.012,  cashbackRate: 0.012,  minesRevealChance: 0.012,  universalDoubleChance: 0.03,  spinWeight: 0.2  },
+        legendary: { interestRate: 0.02,   cashbackRate: 0.02,   minesRevealChance: 0.02,   universalDoubleChance: 0.05,  spinWeight: 0.3  },
+        epic:      { interestRate: 0.03,   cashbackRate: 0.03,   minesRevealChance: 0.03,   universalDoubleChance: 0.08,  spinWeight: 0.4  },
+        mythic:    { interestRate: 0.05,   cashbackRate: 0.05,   minesRevealChance: 0.05,   universalDoubleChance: 0.12,  spinWeight: 0.6  },
+        divine:    { interestRate: 0.08,   cashbackRate: 0.08,   minesRevealChance: 0.08,   universalDoubleChance: 0.2,   spinWeight: 1.0  },
+      },
     },
   },
 

@@ -50,7 +50,6 @@ function getNavRow(viewerId, targetId, activePage, timeframeKey) {
   const pages = [
     { key: 'networth', label: 'Networth' },
     { key: 'winloss', label: 'Win Loss' },
-    { key: 'effects', label: 'Effects' },
   ];
 
   const row = new ActionRowBuilder();
@@ -184,100 +183,6 @@ function renderWinLossPage(username, wallet) {
   };
 }
 
-function renderEffectsPage(username, userId, wallet) {
-  const bonuses = store.getUserBonuses(userId);
-  const mb = wallet.stats.mysteryBox || {};
-  const bonusStats = wallet.stats.bonuses || {};
-  const luck = bonuses.luck || {};
-
-  const fields = [];
-
-  // Luck
-  let luckText;
-  if (luck.active) {
-    const minsLeft = Math.max(0, Math.ceil((luck.expiresInMs || 0) / 60000));
-    luckText = `\u25CF **${luck.activeStacks}/${luck.maxStacks}** stacks (+${(luck.cashbackRate * 100).toFixed(1)}% cashback, ${minsLeft}m left)`;
-  } else {
-    luckText = '\u25CB Inactive';
-  }
-  fields.push({
-    name: '\u2618 Luck',
-    value: `> ${luckText}\n> Loss Streak: **${luck.lossStreak || 0}** (Best: ${luck.bestLossStreak || 0})\n> Triggers: **${luck.triggers || 0}**\n> Total Cashback: **${store.formatNumber(luck.totalCashback || 0)}**`,
-    inline: true,
-  });
-
-  // Bank Interest
-  fields.push({
-    name: '\u00A4 Bank Interest',
-    value: `> Rate: **${(bonuses.interestRate * 100).toFixed(2)}%**/day`,
-    inline: true,
-  });
-
-  fields.push({ name: '\u200b', value: '\u200b', inline: false });
-
-  // Cashback
-  fields.push({
-    name: '\u21A9 Cashback',
-    value: `> Rate: **${(bonuses.cashbackRate * 100).toFixed(2)}%**`,
-    inline: true,
-  });
-
-  // Spin Multiplier
-  fields.push({
-    name: '\u229B Spin Multiplier',
-    value: `> Payout: **${bonuses.spinWeight.toFixed(1)}x**`,
-    inline: true,
-  });
-
-  fields.push({ name: '\u200b', value: '\u200b', inline: false });
-
-  // Universal Income Multiplier
-  fields.push({
-    name: '\u2295 Income Multiplier',
-    value: `> Double Chance: **${(bonuses.universalIncomeDoubleChance * 100).toFixed(2)}%**`,
-    inline: true,
-  });
-
-  // Mines Save
-  fields.push({
-    name: '\u25C8 Mines Save',
-    value: `> Reveal Chance: **${(bonuses.minesRevealChance * 100).toFixed(2)}%**`,
-    inline: true,
-  });
-
-  fields.push({ name: '\u200b', value: '\u200b', inline: false });
-
-  // EV Boost
-  const evPairs = Object.entries(bonuses.evBoostByGame || {}).filter(([, value]) => value > 0);
-  const evGameText = evPairs.length > 0
-    ? evPairs.map(([k, v]) => `> ${capitalize(k)} **+${(v * 100).toFixed(2)}%**`).join('\n')
-    : '> None active';
-  fields.push({
-    name: '\u21AF EV Boost',
-    value: `> Profit: **${store.formatNumber(bonusStats.evBoostProfit || 0)}**\n${evGameText}`,
-    inline: false,
-  });
-
-  // Inventory effects
-  let inventoryText = '';
-  if (!bonuses.inventoryEffects.length) {
-    inventoryText = '> No item effects active';
-  } else {
-    inventoryText = bonuses.inventoryEffects.map((line) => `> ${line}`).join('\n');
-  }
-  fields.push({
-    name: '\u25A3 Item Effects',
-    value: inventoryText,
-    inline: false,
-  });
-
-  return {
-    title: `\u2726 ${username}'s Effects`,
-    color: 0x2b2d31,
-    fields,
-  };
-}
-
 async function renderNetWorthPage(username, wallet, timeframeKey = STATS_DEFAULT_TIMEFRAME_KEY) {
   const history = Array.isArray(wallet.stats.netWorthHistory) ? wallet.stats.netWorthHistory : [];
   const timeframe = getStatsTimeframeByKey(timeframeKey);
@@ -381,8 +286,6 @@ async function renderPage(page, username, userId, wallet, timeframeKey = STATS_D
   switch (page) {
     case 'winloss':
       return { content: '', embeds: [renderWinLossPage(username, wallet)] };
-    case 'effects':
-      return { content: '', embeds: [renderEffectsPage(username, userId, wallet)] };
     case 'networth':
       return renderNetWorthPage(username, wallet, timeframeKey);
     case 'overview':

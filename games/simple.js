@@ -60,8 +60,9 @@ async function handleFlip(interaction) {
   if (bet * qty > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
   let wins = 0, results = [];
+  const flipModifier = store.getWinChanceModifier(userId);
   for (let i = 0; i < qty; i++) {
-    const r = Math.random() < CONFIG.games.flip.winChance;
+    const r = Math.random() < CONFIG.games.flip.winChance * flipModifier;
     results.push(r ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
     if (r) wins++;
   }
@@ -263,7 +264,8 @@ async function handleLetItRide(interaction) {
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
   store.setBalance(userId, bal - bet);
-  if (Math.random() >= CONFIG.games.letItRide.winChancePerRide) {
+  const rideModifier = store.getWinChanceModifier(userId);
+  if (Math.random() >= CONFIG.games.letItRide.winChancePerRide * rideModifier) {
     const pityResult = store.recordLoss(userId, 'letitride', bet);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet); store.addToLossPool(bet);
@@ -304,7 +306,8 @@ async function handleRideButton(interaction, parts) {
   }
 
   if (action === 'ride') {
-    if (Math.random() < CONFIG.games.letItRide.winChancePerRide) {
+    const rideModifier = store.getWinChanceModifier(uid);
+    if (Math.random() < CONFIG.games.letItRide.winChancePerRide * rideModifier) {
       ride.current *= 2; ride.wins++;
       persistSimpleSessions();
       const row = new ActionRowBuilder().addComponents(
@@ -383,7 +386,8 @@ async function handleDuelButton(interaction, parts) {
     // Hold opponent's money
     store.setBalance(oid, oppBal - duel.bet);
     
-    const w = Math.random() < CONFIG.games.duel.winChance ? cid : oid;
+    const duelModifier = store.getWinChanceModifier(cid);
+    const w = Math.random() < CONFIG.games.duel.winChance * duelModifier ? cid : oid;
     const wn = w === cid ? duel.challengerName : duel.opponentName;
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;

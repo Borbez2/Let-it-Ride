@@ -11,6 +11,8 @@ const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
 const pityCmd = require('./commands/pity');
+const effectsCmd = require('./commands/effects');
+const shopCmd = require('./commands/shop');
 const dbBackup = require('./utils/dbBackup');
 const { renderChartToBuffer } = require('./utils/renderChart');
 
@@ -334,7 +336,10 @@ const commands = [
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
     .addStringOption(o => o.setName('amount').setDescription(`Amount to withdraw (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
-  new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades'),
+  new SlashCommandBuilder().setName('upgrades').setDescription('View and purchase upgrades (alias for /shop)'),
+  new SlashCommandBuilder().setName('shop').setDescription('Browse the shop — upgrades and potions'),
+  new SlashCommandBuilder().setName('effects').setDescription('View your active effects, potions, and stat bonuses')
+    .addUserOption(o => o.setName('user').setDescription('User to check effects for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
     .addIntegerOption(o => o.setName('page').setDescription('Page number').setMinValue(1)),
   new SlashCommandBuilder().setName('collection').setDescription('Collectible leaderboard'),
@@ -971,6 +976,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return await handleLiveStatsSelectMenu(interaction);
       if (interaction.customId.startsWith('stats_'))
         return await statsCmd.handleStatsSelectMenu(interaction);
+      if (interaction.customId.startsWith('shop_'))
+        return await shopCmd.handleShopSelectMenu(interaction);
+    } catch (e) { console.error(e); }
+    return;
+  }
+
+  // Handle user select menu interactions (e.g., shop potions).
+  if (interaction.isUserSelectMenu()) {
+    try {
+      if (interaction.customId.startsWith('shop_'))
+        return await shopCmd.handleShopSelectMenu(interaction);
     } catch (e) { console.error(e); }
     return;
   }
@@ -982,9 +998,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId === 'livestats_open') return await handleLiveStatsButton(interaction);
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
-      if (interaction.customId.startsWith('upgrade_'))  return await economy.handleUpgradeButton(interaction, parts);
+      if (interaction.customId.startsWith('upgrade_'))  return await shopCmd.handleUpgradeButton(interaction, parts);
+      if (interaction.customId.startsWith('shop_'))      return await shopCmd.handleShopButton(interaction, parts);
       if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);
-      if (interaction.customId.startsWith('invpage_'))  return await economy.handleInventoryButton(interaction, parts);
+      if (interaction.customId.startsWith('inv_'))      return await economy.handleInventoryButton(interaction, parts);
       if (interaction.customId.startsWith('mines_'))    return await mines.handleButton(interaction, parts);
       if (interaction.customId.startsWith('duel_'))     return await simple.handleDuelButton(interaction, parts);
       if (interaction.customId.startsWith('ride_'))     return await simple.handleRideButton(interaction, parts);
@@ -1033,7 +1050,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'invest':       return await economy.handleDeposit(interaction);
       case 'withdraw':     return await economy.handleWithdraw(interaction);
       case 'bank':         return await economy.handleBank(interaction);
-      case 'upgrades':     return await economy.handleUpgrades(interaction);
+      case 'upgrades':     return await shopCmd.handleShop(interaction);
+      case 'shop':          return await shopCmd.handleShop(interaction);
+      case 'effects':       return await effectsCmd.handleEffects(interaction);
       case 'mysterybox':   return await economy.handleMysteryBox(interaction);
       case 'inventory':    return await economy.handleInventory(interaction);
       case 'collection':   return await economy.handleCollection(interaction, client);

@@ -24,24 +24,27 @@ const LUCK_LOSSES_FIRST_STACK = 5;
 const LUCK_LOSSES_PER_EXTRA_STACK = 3;
 const LUCK_STACK_DURATION_MS = 15 * 60 * 1000;
 
+// Potion system constants
+const LUCKY_POT_DURATION_MS = 30 * 60 * 1000;
+const LUCKY_POT_COST = 75000;
+const LUCKY_POT_BOOST = 0.10;
+const UNLUCKY_POT_DURATION_MS = 30 * 60 * 1000;
+const UNLUCKY_POT_COST = 500000;
+const UNLUCKY_POT_PENALTY = 0.10;
+
+const { COLLECTIBLES } = require('../config');
+
 const COLLECTIBLE_EFFECTS = (() => {
+  const statBoosts = CONFIG.collectibles.mysteryBox.statBoostPerItem;
   const map = {};
-  for (let i = 1; i <= 120; i++) {
-    map[`placeholder_${i}`] = {
-      interestRateBonus: 0,
-      cashbackRateBonus: 0,
-      mysteryBoxLuckBonus: 0,
-      minesRevealChance: 0,
-      universalDoubleChanceBonus: 0,
-      evBoostByGame: {
-        flip: 0,
-        dice: 0,
-        roulette: 0,
-        blackjack: 0,
-        mines: 0,
-        letitride: 0,
-        duel: 0,
-      },
+  for (const item of COLLECTIBLES) {
+    const boosts = statBoosts[item.rarity] || {};
+    map[item.id] = {
+      interestRateBonus: boosts.interestRate || 0,
+      cashbackRateBonus: boosts.cashbackRate || 0,
+      minesRevealChance: boosts.minesRevealChance || 0,
+      universalDoubleChanceBonus: boosts.universalDoubleChance || 0,
+      spinWeightBonus: boosts.spinWeight || 0,
       label: null,
     };
   }
@@ -153,19 +156,14 @@ function getInventoryBonuses(inventory) {
     mysteryBoxLuckBonus: 0,
     minesRevealChance: 0,
     universalDoubleChanceBonus: 0,
-    evBoostByGame: {
-      flip: 0,
-      dice: 0,
-      roulette: 0,
-      blackjack: 0,
-      mines: 0,
-      letitride: 0,
-      duel: 0,
-    },
+    spinWeightBonus: 0,
     effectLines: [],
   };
 
   if (!Array.isArray(inventory) || inventory.length === 0) return bonuses;
+
+  // Collect unique owned ids for completion checks
+  const ownedIds = new Set(inventory.map(item => item.id));
 
   for (const item of inventory) {
     const effect = COLLECTIBLE_EFFECTS[item.id];
@@ -176,13 +174,26 @@ function getInventoryBonuses(inventory) {
     bonuses.mysteryBoxLuckBonus += effect.mysteryBoxLuckBonus || 0;
     bonuses.minesRevealChance += effect.minesRevealChance || 0;
     bonuses.universalDoubleChanceBonus += effect.universalDoubleChanceBonus || 0;
-
-    for (const game of GAME_KEYS) {
-      bonuses.evBoostByGame[game] += (effect.evBoostByGame && effect.evBoostByGame[game]) || 0;
-    }
+    bonuses.spinWeightBonus += effect.spinWeightBonus || 0;
 
     if (effect.label) {
       bonuses.effectLines.push(effect.label);
+    }
+  }
+
+  // Collection completion bonuses
+  const completionBonuses = CONFIG.collectibles.mysteryBox.collectionCompleteBonus;
+  const rarityOrder = CONFIG.ui.rarityOrder;
+  for (const rarity of rarityOrder) {
+    const allOfRarity = COLLECTIBLES.filter(c => c.rarity === rarity);
+    const allCollected = allOfRarity.length > 0 && allOfRarity.every(c => ownedIds.has(c.id));
+    if (allCollected && completionBonuses[rarity]) {
+      const cb = completionBonuses[rarity];
+      bonuses.interestRateBonus += cb.interestRate || 0;
+      bonuses.cashbackRateBonus += cb.cashbackRate || 0;
+      bonuses.minesRevealChance += cb.minesRevealChance || 0;
+      bonuses.universalDoubleChanceBonus += cb.universalDoubleChance || 0;
+      bonuses.spinWeightBonus += cb.spinWeight || 0;
     }
   }
 
@@ -191,6 +202,7 @@ function getInventoryBonuses(inventory) {
     if (bonuses.cashbackRateBonus > 0) bonuses.effectLines.push(`Cashback +${(bonuses.cashbackRateBonus * 100).toFixed(2)}%`);
     if (bonuses.mysteryBoxLuckBonus > 0) bonuses.effectLines.push(`Mystery box luck +${(bonuses.mysteryBoxLuckBonus * 100).toFixed(2)}%`);
     if (bonuses.minesRevealChance > 0) bonuses.effectLines.push(`Mines auto-reveal save ${(bonuses.minesRevealChance * 100).toFixed(2)}%`);
+    if (bonuses.spinWeightBonus > 0) bonuses.effectLines.push(`Spin payout +${bonuses.spinWeightBonus.toFixed(2)}x`);
   }
 
   return bonuses;
@@ -244,6 +256,7 @@ function ensureWalletStatsShape(w) {
   if (!Array.isArray(w.stats.bonuses.luck.stacks)) w.stats.bonuses.luck.stacks = [];
   if (w.stats.bonuses.luck.triggers === undefined) w.stats.bonuses.luck.triggers = 0;
   if (w.stats.bonuses.luck.totalCashback === undefined) w.stats.bonuses.luck.totalCashback = 0;
+  if (!w.stats.potions) w.stats.potions = { lucky: null, unlucky: null };
   if (!Array.isArray(w.stats.netWorthHistory)) w.stats.netWorthHistory = [];
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
@@ -809,7 +822,14 @@ function getUserBonuses(userId) {
   const invBonuses = getInventoryBonuses(w.inventory);
   const boxLuck = getMysteryBoxLuckInfo(userId);
   const luckState = getLuckState(w);
-  const evBoostByGame = { ...invBonuses.evBoostByGame };
+
+  // Base values (upgrades only, no items)
+  const baseInterestRate = BASE_INVEST_RATE + (w.interestLevel * CONFIG.economy.upgrades.interestPerLevel);
+  const baseCashbackRate = w.cashbackLevel * CONFIG.economy.upgrades.cashbackPerLevel;
+  const baseSpinWeight = 1 + (w.spinMultLevel || 0) * 0.1;
+  const baseUniversalDoubleChance = Math.max(0, Math.min(CONFIG.economy.upgrades.maxLevel, w.universalIncomeMultLevel || 0)) * CONFIG.economy.upgrades.universalIncomePerLevelChance;
+  const baseMinesRevealChance = 0;
+
   return {
     interestRate: getInterestRate(userId),
     cashbackRate: getCashbackRate(userId),
@@ -820,8 +840,24 @@ function getUserBonuses(userId) {
     pityLuckBonus: boxLuck.pityLuckBonus,
     inventoryLuckBonus: boxLuck.inventoryLuckBonus,
     minesRevealChance: invBonuses.minesRevealChance,
-    evBoostByGame,
+    spinWeightBonus: invBonuses.spinWeightBonus,
     inventoryEffects: invBonuses.effectLines,
+    // Breakdown: base (upgrades only)
+    base: {
+      interestRate: baseInterestRate,
+      cashbackRate: baseCashbackRate,
+      spinWeight: baseSpinWeight,
+      universalDoubleChance: baseUniversalDoubleChance,
+      minesRevealChance: baseMinesRevealChance,
+    },
+    // Breakdown: item bonuses only
+    items: {
+      interestRate: invBonuses.interestRateBonus,
+      cashbackRate: invBonuses.cashbackRateBonus,
+      spinWeight: invBonuses.spinWeightBonus,
+      universalDoubleChance: invBonuses.universalDoubleChanceBonus,
+      minesRevealChance: invBonuses.minesRevealChance,
+    },
     luck: {
       active: luckState.active,
       activeStacks: luckState.activeStacks,
@@ -871,21 +907,67 @@ function getUserPityStatus(userId, now = Date.now()) {
   };
 }
 
-function applyProfitBoost(userId, gameName, baseProfit) {
-  const profit = normalizeCoins(baseProfit, 0);
-  if (profit <= 0) return profit;
+// ── Potion System ──
+
+function getPotionConfig() {
+  return {
+    luckyPotCost: LUCKY_POT_COST,
+    luckyPotDurationMs: LUCKY_POT_DURATION_MS,
+    luckyPotBoost: LUCKY_POT_BOOST,
+    unluckyPotCost: UNLUCKY_POT_COST,
+    unluckyPotDurationMs: UNLUCKY_POT_DURATION_MS,
+    unluckyPotPenalty: UNLUCKY_POT_PENALTY,
+  };
+}
+
+function getActivePotions(userId, now = Date.now()) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
-  const tuning = getRuntimeTuning();
-  const bonuses = getInventoryBonuses(w.inventory);
-  const boost = (bonuses.evBoostByGame[gameName] || 0) * (tuning.globalEvScalar || 1);
-  if (boost <= 0) return profit;
-  const boosted = Math.floor(profit * (1 + boost));
-  const extra = boosted - profit;
-  if (extra > 0) {
-    w.stats.bonuses.evBoostProfit += extra;
-  }
-  return boosted;
+  const potions = w.stats.potions || { lucky: null, unlucky: null };
+  const lucky = potions.lucky && potions.lucky.expiresAt > now ? potions.lucky : null;
+  const unlucky = potions.unlucky && potions.unlucky.expiresAt > now ? potions.unlucky : null;
+  return { lucky, unlucky };
+}
+
+function getWinChanceModifier(userId, now = Date.now()) {
+  const potions = getActivePotions(userId, now);
+  let modifier = 1.0;
+  if (potions.lucky) modifier += LUCKY_POT_BOOST;
+  if (potions.unlucky) modifier -= UNLUCKY_POT_PENALTY;
+  return modifier;
+}
+
+function buyLuckyPot(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  if (w.balance < LUCKY_POT_COST) return { success: false, reason: 'insufficient_funds' };
+  const active = getActivePotions(userId);
+  if (active.lucky) return { success: false, reason: 'already_active' };
+  w.balance -= LUCKY_POT_COST;
+  w.stats.potions.lucky = { expiresAt: Date.now() + LUCKY_POT_DURATION_MS };
+  saveWallets();
+  return { success: true };
+}
+
+function buyUnluckyPot(buyerId, targetId) {
+  const buyer = getWallet(buyerId);
+  ensureWalletStatsShape(buyer);
+  if (buyer.balance < UNLUCKY_POT_COST) return { success: false, reason: 'insufficient_funds' };
+  if (buyerId === targetId) return { success: false, reason: 'self_target' };
+  if (!hasWallet(targetId)) return { success: false, reason: 'no_wallet' };
+  const target = getWallet(targetId);
+  ensureWalletStatsShape(target);
+  const activePotions = getActivePotions(targetId);
+  if (activePotions.unlucky) return { success: false, reason: 'already_active' };
+  buyer.balance -= UNLUCKY_POT_COST;
+  target.stats.potions.unlucky = { expiresAt: Date.now() + UNLUCKY_POT_DURATION_MS, appliedBy: buyerId };
+  saveWallets();
+  return { success: true };
+}
+
+function applyProfitBoost(userId, gameName, baseProfit) {
+  const profit = normalizeCoins(baseProfit, 0);
+  return profit;
 }
 
 function tryTriggerMinesReveal(userId) {
@@ -1277,6 +1359,51 @@ function trackMysteryBoxDuplicateComp(userId, amount) {
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'mysteryComp');
 }
 
+function getCollectionStats(userId) {
+  const w = getWallet(userId);
+  const ownedIds = new Set((w.inventory || []).map(item => item.id));
+  const rarityOrder = CONFIG.ui.rarityOrder;
+  const statBoosts = CONFIG.collectibles.mysteryBox.statBoostPerItem;
+  const completionBonuses = CONFIG.collectibles.mysteryBox.collectionCompleteBonus;
+
+  const byRarity = {};
+  for (const rarity of rarityOrder) {
+    const allOfRarity = COLLECTIBLES.filter(c => c.rarity === rarity);
+    const owned = allOfRarity.filter(c => ownedIds.has(c.id));
+    byRarity[rarity] = {
+      total: allOfRarity.length,
+      owned: owned.length,
+      complete: allOfRarity.length > 0 && owned.length === allOfRarity.length,
+      items: allOfRarity,
+    };
+  }
+
+  // Calculate total stat boosts
+  const totals = { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 };
+  for (const rarity of rarityOrder) {
+    const info = byRarity[rarity];
+    const boosts = statBoosts[rarity] || {};
+    totals.interestRate += info.owned * (boosts.interestRate || 0);
+    totals.cashbackRate += info.owned * (boosts.cashbackRate || 0);
+    totals.minesRevealChance += info.owned * (boosts.minesRevealChance || 0);
+    totals.universalDoubleChance += info.owned * (boosts.universalDoubleChance || 0);
+    totals.spinWeight += info.owned * (boosts.spinWeight || 0);
+    if (info.complete && completionBonuses[rarity]) {
+      const cb = completionBonuses[rarity];
+      totals.interestRate += cb.interestRate || 0;
+      totals.cashbackRate += cb.cashbackRate || 0;
+      totals.minesRevealChance += cb.minesRevealChance || 0;
+      totals.universalDoubleChance += cb.universalDoubleChance || 0;
+      totals.spinWeight += cb.spinWeight || 0;
+    }
+  }
+
+  const totalOwned = Array.from(ownedIds).filter(id => COLLECTIBLES.some(c => c.id === id)).length;
+  const totalItems = COLLECTIBLES.length;
+
+  return { byRarity, totals, totalOwned, totalItems, ownedIds };
+}
+
 module.exports = {
   getPoolData, savePool,
   addToUniversalPool, addToLossPool,
@@ -1285,7 +1412,9 @@ module.exports = {
   getInterestRate, getCashbackRate, applyCashback, applyLuckCashback,
   getSpinWeight, getUniversalIncomeDoubleChance, processBank,
   getUserBonuses, getMysteryBoxLuckInfo, getUserPityStatus,
+  getCollectionStats,
   applyProfitBoost, tryTriggerMinesReveal,
+  getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot,
   checkDaily, claimDaily,
   rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
