@@ -18,11 +18,24 @@ const RARITY_TIER = {
   divine: 7,
 };
 const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
-const LUCK_MAX_STACKS = 10;
-const LUCK_CASHBACK_PER_STACK = 0.005;
-const LUCK_LOSSES_FIRST_STACK = 5;
-const LUCK_LOSSES_PER_EXTRA_STACK = 3;
-const LUCK_STACK_DURATION_MS = 15 * 60 * 1000;
+
+// Luck buff constants – tiered single-buff system
+const LUCK_ACTIVATION_THRESHOLD = 3;   // minimum streak to activate
+const LUCK_TIER1_CAP = 7;              // losses 3-7 give 1% each
+const LUCK_TIER1_RATE = 0.01;          // 1% per loss in tier 1
+const LUCK_TIER2_CAP = 12;             // losses 8-12 give 2% each
+const LUCK_TIER2_RATE = 0.02;          // 2% per loss in tier 2
+const LUCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+function calculateLuckBoost(streak) {
+  if (streak < LUCK_ACTIVATION_THRESHOLD) return 0;
+  if (streak <= LUCK_TIER1_CAP) return (streak - LUCK_ACTIVATION_THRESHOLD + 1) * LUCK_TIER1_RATE;
+  const tier1Part = (LUCK_TIER1_CAP - LUCK_ACTIVATION_THRESHOLD + 1) * LUCK_TIER1_RATE;
+  const tier2Losses = Math.min(streak, LUCK_TIER2_CAP) - LUCK_TIER1_CAP;
+  return tier1Part + tier2Losses * LUCK_TIER2_RATE;
+}
+
+const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 
 // Potion system constants
 const LUCKY_POT_DURATION_MS = 60 * 60 * 1000;
@@ -266,28 +279,39 @@ function ensureWalletStatsShape(w) {
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
 }
 
-function refreshLuckStacks(luck, now = Date.now()) {
-  const stacks = Array.isArray(luck.stacks) ? luck.stacks : [];
-  luck.stacks = stacks.filter((s) => normalizeNumeric(s.expiresAt, 0) > now);
+// Refresh luck: check if the single buff has expired.
+function refreshLuckBuff(luck, now = Date.now()) {
+  // Migrate from old stack-based system
+  if (Array.isArray(luck.stacks)) {
+    delete luck.stacks;
+  }
+  if (!luck.buff) luck.buff = { boost: 0, expiresAt: 0, streak: 0 };
+  if (luck.buff.streak === undefined) luck.buff.streak = 0;
+  if (luck.buff.expiresAt <= now) {
+    luck.buff.boost = 0;
+    luck.buff.expiresAt = 0;
+    luck.buff.streak = 0;
+  }
 }
 
 function getLuckState(w, now = Date.now()) {
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
-  refreshLuckStacks(luck, now);
-  const activeStacks = luck.stacks.length;
-  const cashbackRate = activeStacks * LUCK_CASHBACK_PER_STACK;
-  const maxExpiry = luck.stacks.reduce((max, s) => Math.max(max, s.expiresAt), 0);
+  refreshLuckBuff(luck, now);
+  const buff = luck.buff;
+  const active = buff.boost > 0 && buff.expiresAt > now;
   return {
-    active: activeStacks > 0,
-    activeStacks,
-    cashbackRate,
-    maxCashbackRate: LUCK_MAX_STACKS * LUCK_CASHBACK_PER_STACK,
+    active,
+    cashbackRate: active ? buff.boost : 0,
+    maxCashbackRate: LUCK_MAX_BOOST,
+    buffStreak: active ? (buff.streak || 0) : 0,
     lossStreak: luck.lossStreak || 0,
     bestLossStreak: luck.bestLossStreak || 0,
     triggers: luck.triggers || 0,
     totalCashback: luck.totalCashback || 0,
-    expiresInMs: activeStacks > 0 ? Math.max(0, maxExpiry - now) : 0,
+    expiresInMs: active ? Math.max(0, buff.expiresAt - now) : 0,
+    tier2Cap: LUCK_TIER2_CAP,
+    activationThreshold: LUCK_ACTIVATION_THRESHOLD,
   };
 }
 
@@ -296,31 +320,26 @@ function evaluateLuckOnLoss(w, now = Date.now()) {
   const luck = w.stats.bonuses.luck;
   luck.lossStreak = (luck.lossStreak || 0) + 1;
   if (luck.lossStreak > (luck.bestLossStreak || 0)) luck.bestLossStreak = luck.lossStreak;
-  refreshLuckStacks(luck, now);
+  refreshLuckBuff(luck, now);
 
-  // Determine how many stacks this streak qualifies for
   const streak = luck.lossStreak;
-  let qualifiedStacks = 0;
-  if (streak >= LUCK_LOSSES_FIRST_STACK) {
-    qualifiedStacks = 1 + Math.floor((streak - LUCK_LOSSES_FIRST_STACK) / LUCK_LOSSES_PER_EXTRA_STACK);
-  }
-  qualifiedStacks = Math.min(qualifiedStacks, LUCK_MAX_STACKS);
+  const newBoost = calculateLuckBoost(streak);
+  if (newBoost <= 0) return { triggered: false };
 
-  const currentStacks = luck.stacks.length;
-  const newStacks = Math.max(0, qualifiedStacks - currentStacks);
-  if (newStacks <= 0) return { triggered: false };
+  const currentBoost = luck.buff.boost || 0;
+  // Only upgrade if the new boost is higher than the active one
+  if (newBoost <= currentBoost) return { triggered: false };
 
-  for (let i = 0; i < newStacks; i++) {
-    luck.stacks.push({ expiresAt: now + LUCK_STACK_DURATION_MS });
-  }
-  luck.triggers = (luck.triggers || 0) + newStacks;
+  const previousBoost = currentBoost;
+  luck.buff.boost = newBoost;
+  luck.buff.expiresAt = now + LUCK_DURATION_MS;
+  luck.buff.streak = streak;
+  luck.triggers = (luck.triggers || 0) + 1;
 
-  const totalStacks = luck.stacks.length;
   return {
     triggered: true,
-    addedStacks: newStacks,
-    totalStacks,
-    cashbackRate: totalStacks * LUCK_CASHBACK_PER_STACK,
+    previousBoost,
+    cashbackRate: newBoost,
     lossStreak: streak,
   };
 }
@@ -328,18 +347,17 @@ function evaluateLuckOnLoss(w, now = Date.now()) {
 function evaluateLuckOnWin(w, now = Date.now()) {
   ensureWalletStatsShape(w);
   w.stats.bonuses.luck.lossStreak = 0;
-  refreshLuckStacks(w.stats.bonuses.luck, now);
+  refreshLuckBuff(w.stats.bonuses.luck, now);
 }
 
 function applyLuckCashback(userId, lossAmount, now = Date.now()) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
-  refreshLuckStacks(luck, now);
-  const stacks = luck.stacks.length;
-  if (stacks <= 0) return 0;
-  const rate = stacks * LUCK_CASHBACK_PER_STACK;
-  const cashback = Math.floor(normalizeCoins(lossAmount, 0) * rate);
+  refreshLuckBuff(luck, now);
+  const boost = luck.buff.boost || 0;
+  if (boost <= 0) return 0;
+  const cashback = Math.floor(normalizeCoins(lossAmount, 0) * boost);
   if (cashback > 0) {
     w.balance += cashback;
     luck.totalCashback = (luck.totalCashback || 0) + cashback;
@@ -771,15 +789,14 @@ function applyCashback(userId, lossAmount) {
   if (rate > 0) {
     totalCashback += Math.floor(loss * rate);
   }
-  // Also apply luck-stack cashback
+  // Also apply luck buff cashback
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
-  refreshLuckStacks(luck);
-  const luckStacks = luck.stacks.length;
-  if (luckStacks > 0) {
-    const luckRate = luckStacks * LUCK_CASHBACK_PER_STACK;
-    const luckCb = Math.floor(loss * luckRate);
+  refreshLuckBuff(luck);
+  const luckBoost = luck.buff.boost || 0;
+  if (luckBoost > 0) {
+    const luckCb = Math.floor(loss * luckBoost);
     if (luckCb > 0) {
       totalCashback += luckCb;
       luck.totalCashback = (luck.totalCashback || 0) + luckCb;
@@ -864,18 +881,18 @@ function getUserBonuses(userId) {
     },
     luck: {
       active: luckState.active,
-      activeStacks: luckState.activeStacks,
-      maxStacks: LUCK_MAX_STACKS,
       cashbackRate: luckState.cashbackRate,
       maxCashbackRate: luckState.maxCashbackRate,
+      buffStreak: luckState.buffStreak,
       lossStreak: luckState.lossStreak,
       bestLossStreak: luckState.bestLossStreak,
       triggers: luckState.triggers,
       totalCashback: luckState.totalCashback,
       expiresInMs: luckState.expiresInMs,
-      lossesForFirstStack: LUCK_LOSSES_FIRST_STACK,
-      lossesPerExtraStack: LUCK_LOSSES_PER_EXTRA_STACK,
-      stackDurationMs: LUCK_STACK_DURATION_MS,
+      activationThreshold: LUCK_ACTIVATION_THRESHOLD,
+      tier1Cap: LUCK_TIER1_CAP,
+      tier2Cap: LUCK_TIER2_CAP,
+      durationMs: LUCK_DURATION_MS,
     },
     runtimeTuning: tuning,
   };
@@ -885,29 +902,24 @@ function getUserPityStatus(userId, now = Date.now()) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
-  refreshLuckStacks(luck, now);
+  refreshLuckBuff(luck, now);
 
-  const stacks = (luck.stacks || []).map((stack, idx) => {
-    const expiresAt = normalizeNumeric(stack.expiresAt, 0);
-    return {
-      id: idx + 1,
-      cashback: LUCK_CASHBACK_PER_STACK,
-      expiresAt,
-      remainingMs: Math.max(0, expiresAt - now),
-    };
-  });
+  const buff = luck.buff || { boost: 0, expiresAt: 0, streak: 0 };
+  const active = buff.boost > 0 && buff.expiresAt > now;
 
   return {
-    active: stacks.length > 0,
-    activeStacks: stacks.length,
-    maxStacks: LUCK_MAX_STACKS,
-    cashbackRate: stacks.length * LUCK_CASHBACK_PER_STACK,
-    maxCashbackRate: LUCK_MAX_STACKS * LUCK_CASHBACK_PER_STACK,
+    active,
+    cashbackRate: active ? buff.boost : 0,
+    maxCashbackRate: LUCK_MAX_BOOST,
+    buffStreak: active ? (buff.streak || 0) : 0,
     lossStreak: luck.lossStreak || 0,
     bestLossStreak: luck.bestLossStreak || 0,
     triggers: luck.triggers || 0,
     totalCashback: luck.totalCashback || 0,
-    stacks,
+    expiresInMs: active ? Math.max(0, buff.expiresAt - now) : 0,
+    activationThreshold: LUCK_ACTIVATION_THRESHOLD,
+    tier1Cap: LUCK_TIER1_CAP,
+    tier2Cap: LUCK_TIER2_CAP,
   };
 }
 
@@ -1312,20 +1324,22 @@ function resetStats(userId) {
 
 function resetAllActivePity() {
   let usersCleared = 0;
-  let stacksCleared = 0;
+  let buffsCleared = 0;
   for (const wallet of Object.values(wallets)) {
     ensureWalletStatsShape(wallet);
     const luck = wallet.stats.bonuses.luck;
-    const activeStacks = Array.isArray(luck.stacks) ? luck.stacks.length : 0;
-    if (activeStacks === 0) continue;
-
-    usersCleared += 1;
-    stacksCleared += activeStacks;
-    luck.stacks = [];
+    // Migrate old stacks
+    if (Array.isArray(luck.stacks)) delete luck.stacks;
+    if (!luck.buff) luck.buff = { boost: 0, expiresAt: 0, streak: 0 };
+    if (luck.buff.boost > 0) {
+      usersCleared += 1;
+      buffsCleared += 1;
+      luck.buff = { boost: 0, expiresAt: 0, streak: 0 };
+    }
     luck.lossStreak = 0;
   }
   if (usersCleared > 0) saveWallets();
-  return { usersCleared, stacksCleared };
+  return { usersCleared, stacksCleared: buffsCleared };
 }
 
 function trackGiveawayWin(userId, amount) {

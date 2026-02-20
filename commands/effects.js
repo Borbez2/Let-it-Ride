@@ -54,17 +54,29 @@ function renderEffectsPage(username, userId, wallet) {
     inline: false,
   });
 
-  // Luck (temporary buff)
+  // Luck (temporary buff) — discrete parallelogram bar (1 per stack)
+  const pityStatus = store.getUserPityStatus(userId);
+  const maxStacks = pityStatus.tier2Cap - pityStatus.activationThreshold + 1;
+  const activeStacks = pityStatus.active ? (pityStatus.buffStreak - pityStatus.activationThreshold + 1) : 0;
+  const stackBar = '▰'.repeat(activeStacks) + '▱'.repeat(maxStacks - activeStacks);
+  const boostPct = (pityStatus.cashbackRate * 100).toFixed(1);
+  const maxPct = (pityStatus.maxCashbackRate * 100).toFixed(1);
+
   let luckText;
-  if (luck.active) {
-    const minsLeft = Math.max(0, Math.ceil((luck.expiresInMs || 0) / 60000));
-    luckText = `\u25CF **${luck.activeStacks}/${luck.maxStacks}** stacks (🔥 +${(luck.cashbackRate * 100).toFixed(1)}% cashback, ${minsLeft}m left)`;
+  if (pityStatus.active) {
+    const minsLeft = Math.max(0, Math.ceil(pityStatus.expiresInMs / 60000));
+    luckText = `> ● ${stackBar} **${boostPct}%/${maxPct}%** cashback (🔥 ${minsLeft}m left)\n`;
+    luckText += `> From Streak: **${pityStatus.buffStreak}** · Stacks: **${activeStacks}/${maxStacks}**\n`;
+    luckText += `> Keep losing to upgrade the buff. A higher streak replaces the current boost.`;
   } else {
-    luckText = '\u25CB Inactive';
+    const lossesNeeded = Math.max(1, pityStatus.activationThreshold - pityStatus.lossStreak);
+    luckText = `> ○ ${stackBar} **0%/${maxPct}%**\n`;
+    luckText += `> No active luck buff. Lose **${lossesNeeded}** more in a row to trigger.`;
   }
+
   fields.push({
-    name: '\u2618 Luck',
-    value: `> ${luckText}\n> Loss Streak: **${luck.lossStreak || 0}** (Best: ${luck.bestLossStreak || 0})\n> Triggers: **${luck.triggers || 0}**\n> Total Cashback: **${store.formatNumber(luck.totalCashback || 0)}**`,
+    name: '☘ Luck (Flip, Duel, Let It Ride)',
+    value: `${luckText}\n> Loss Streak: **${pityStatus.lossStreak}** (Best: ${pityStatus.bestLossStreak})\n> Triggers: **${pityStatus.triggers}** · Total Cashback: **${store.formatNumber(pityStatus.totalCashback)}**`,
     inline: false,
   });
 

@@ -292,7 +292,7 @@ function renderTopBetsPage(username, wallet) {
   for (let i = 0; i < topWins.length; i++) {
     const entry = topWins[i];
     const timeStr = entry.t ? `<t:${Math.floor(entry.t / 1000)}:R>` : '';
-    winsText += `> **${i + 1}.** ${capitalize(entry.game)} — **+${store.formatNumber(entry.amount)}** ${timeStr}\n`;
+    winsText += `> **${i + 1}.** ${capitalize(entry.game)}: **+${store.formatNumber(entry.amount)}** ${timeStr}\n`;
   }
   if (!winsText) winsText = '> No wins recorded yet\n';
 
@@ -300,7 +300,7 @@ function renderTopBetsPage(username, wallet) {
   for (let i = 0; i < topLosses.length; i++) {
     const entry = topLosses[i];
     const timeStr = entry.t ? `<t:${Math.floor(entry.t / 1000)}:R>` : '';
-    lossesText += `> **${i + 1}.** ${capitalize(entry.game)} — **-${store.formatNumber(entry.amount)}** ${timeStr}\n`;
+    lossesText += `> **${i + 1}.** ${capitalize(entry.game)}: **-${store.formatNumber(entry.amount)}** ${timeStr}\n`;
   }
   if (!lossesText) lossesText = '> No losses recorded yet\n';
 

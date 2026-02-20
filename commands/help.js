@@ -76,7 +76,7 @@ function buildGamesCommandsPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u25B8 Social & Economy',
-        value: '> `/give` `/trade` `/leaderboard`\n> `/stats` `/pity` `/giveaway`',
+        value: '> `/give` `/trade` `/leaderboard`\n> `/stats` `/effects` `/giveaway`',
         inline: true,
       },
       {
@@ -97,18 +97,18 @@ function buildModifiersPage() {
     fields: [
       {
         name: '\u2726 Active Effects',
-        value: '> \u2618 **Luck** \u2027 Stacking cashback on losses during a losing streak\n> \u00A4 **Bank Interest** \u2027 Passive daily interest on your bank balance\n> \u21A9 **Cashback** \u2027 Refunds a % of every loss\n> \u229B **Spin Multiplier** \u2027 Multiplies daily spin winnings\n> \u2295 **Income Multiplier** \u2027 Chance to double hourly universal payout\n> \u25C8 **Mines Save** \u2027 Chance to auto-reveal a safe tile in Mines\n> \u21AF **EV Boost** \u2027 Per-game profit boost from items',
+        value: '> \u2618 **Luck** \u2027 Scaling cashback buff on a losing streak (Flip, Duel, Let It Ride only)\n> \u00A4 **Bank Interest** \u2027 Passive daily interest on your bank balance\n> \u21A9 **Cashback** \u2027 Refunds a % of every loss\n> \u229B **Spin Multiplier** \u2027 Multiplies daily spin winnings\n> \u2295 **Income Multiplier** \u2027 Chance to double hourly universal payout\n> \u25C8 **Mines Save** \u2027 Chance to auto-reveal a safe tile in Mines\n> \u21AF **EV Boost** \u2027 Per-game profit boost from items',
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u2618 How Luck Works',
-        value: '> When you lose **5 games in a row**, you gain your first luck stack. Every **3 additional consecutive losses** adds another stack, up to a maximum of **10 stacks**.\n> \n> Each stack gives you **+0.5% cashback** on all losses. At max stacks (10), that\'s **+5.0% cashback** on top of your regular cashback. Stacks last **15 minutes** each.',
+        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +1% cashback per loss (3 losses = 1%, 7 losses = 5%)\n> **Streak 8\u201312:** +2% cashback per loss (8 losses = 7%, 12 losses = 15%)\n> \n> The buff lasts **15 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.',
         inline: false,
       },
       {
         name: '\u2618 Luck Details',
-        value: '> Winning a game resets your loss streak counter, but any active stacks keep running until they expire. This means you keep the cashback bonus even after you start winning again.\n> \n> Check your live luck status with **/pity** or see your full breakdown under **/stats** \u2192 Effects.',
+        value: '> Winning a game resets your loss streak counter, but any active buff keeps running until it expires. This means you keep the cashback bonus even after you start winning again.\n> \n> Check your live luck status and full breakdown under **/effects**.',
         inline: false,
       },
     ],

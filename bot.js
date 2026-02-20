@@ -10,7 +10,6 @@ const economy = require('./commands/economy');
 const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
-const pityCmd = require('./commands/pity');
 const effectsCmd = require('./commands/effects');
 const shopCmd = require('./commands/shop');
 const dbBackup = require('./utils/dbBackup');
@@ -345,7 +344,6 @@ const commands = [
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
   new SlashCommandBuilder().setName('stats').setDescription('Open the multi-page stats dashboard with graphs and bonus details')
     .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false)),
-  new SlashCommandBuilder().setName('pity').setDescription('View your active pity stacks and per-stack timers'),
   new SlashCommandBuilder().setName('mysterybox').setDescription(`Buy mystery boxes for ${CONFIG.collectibles.mysteryBox.cost.toLocaleString()} coins each`)
     .addIntegerOption(o => o.setName('quantity').setDescription(`Number of boxes to buy (${CONFIG.commands.limits.mysteryBoxQuantity.min}-${CONFIG.commands.limits.mysteryBoxQuantity.max})`).setMinValue(CONFIG.commands.limits.mysteryBoxQuantity.min).setMaxValue(CONFIG.commands.limits.mysteryBoxQuantity.max)),
   new SlashCommandBuilder().setName('help').setDescription('View the help guide for all game systems'),
@@ -1056,7 +1054,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'collection':   return await economy.handleCollection(interaction, client);
       case 'pool':         return await economy.handlePool(interaction);
       case 'stats':        return await statsCmd.handleStats(interaction);
-      case 'pity':         return await pityCmd.handlePity(interaction);
       case 'help':         return await helpCmd.handleHelp(interaction);
       case 'giveaway':     return await economy.handleGiveawayStart(interaction);
       case 'admin':        return await adminCmd.handleAdmin(
