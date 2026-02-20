@@ -117,7 +117,7 @@ async function handleCommand(interaction) {
   const g = {
     bet, mineCount: mc, grid: createMinesGrid(mc),
     revealed: Array(MINES_TOTAL).fill(false), revealedCount: 0,
-    multiplier: 1, oddsUserId: userId,
+    multiplier: 1, oddsUserId: userId, createdAt: Date.now(),
   };
   activeMines.set(userId, g);
   persistMinesSessions();
@@ -261,4 +261,18 @@ async function handleButton(interaction, parts) {
   });
 }
 
-module.exports = { handleCommand, handleButton, activeMines };
+function expireSessions(ttlMs) {
+  const now = Date.now();
+  let expired = 0;
+  for (const [uid, game] of activeMines) {
+    if (game.createdAt && now - game.createdAt > ttlMs) {
+      store.setBalance(uid, store.getBalance(uid) + game.bet);
+      activeMines.delete(uid);
+      expired++;
+    }
+  }
+  if (expired > 0) persistMinesSessions();
+  return expired;
+}
+
+module.exports = { handleCommand, handleButton, activeMines, expireSessions };

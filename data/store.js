@@ -40,7 +40,7 @@ const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 // Potion system constants
 const LUCKY_POT_DURATION_MS = 60 * 60 * 1000;
 const LUCKY_POT_COST = 75000;
-const LUCKY_POT_BOOST = 0.10;
+const LUCKY_POT_BOOST = 0.05;
 const UNLUCKY_POT_DURATION_MS = 60 * 60 * 1000;
 const UNLUCKY_POT_COST = 500000;
 const UNLUCKY_POT_PENALTY = 0.10;
@@ -940,15 +940,32 @@ function getActivePotions(userId, now = Date.now()) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
   const potions = w.stats.potions || { lucky: null, unlucky: null };
-  const lucky = potions.lucky && potions.lucky.expiresAt > now ? potions.lucky : null;
-  const unlucky = potions.unlucky && potions.unlucky.expiresAt > now ? potions.unlucky : null;
+  let lucky = null;
+  let unlucky = null;
+  if (potions.lucky && Array.isArray(potions.lucky.stacks)) {
+    // Filter out expired stacks
+    lucky = {
+      stacks: potions.lucky.stacks.filter(s => s.expiresAt > now),
+      expiresAt: Math.max(...potions.lucky.stacks.map(s => s.expiresAt)),
+    };
+    if (lucky.stacks.length === 0) lucky = null;
+  } else if (potions.lucky && potions.lucky.expiresAt > now) {
+    lucky = { stacks: [{ expiresAt: potions.lucky.expiresAt }], expiresAt: potions.lucky.expiresAt };
+  }
+  if (potions.unlucky && potions.unlucky.expiresAt > now) {
+    unlucky = potions.unlucky;
+  }
   return { lucky, unlucky };
 }
 
 function getWinChanceModifier(userId, now = Date.now()) {
   const potions = getActivePotions(userId, now);
   let modifier = 1.0;
-  if (potions.lucky) modifier += LUCKY_POT_BOOST;
+  if (potions.lucky) {
+    // Each stack gives 1%, up to 5 stacks
+    const stacks = potions.lucky.stacks ? potions.lucky.stacks.length : 1;
+    modifier += Math.min(stacks, 5) * 0.01;
+  }
   if (potions.unlucky) modifier -= UNLUCKY_POT_PENALTY;
   return modifier;
 }
@@ -957,12 +974,17 @@ function buyLuckyPot(userId) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
   if (w.balance < LUCKY_POT_COST) return { success: false, reason: 'insufficient_funds' };
-  const active = getActivePotions(userId);
-  if (active.lucky) return { success: false, reason: 'already_active' };
+  const now = Date.now();
+  if (!w.stats.potions) w.stats.potions = {};
+  if (!w.stats.potions.lucky) w.stats.potions.lucky = { stacks: [] };
+  if (!Array.isArray(w.stats.potions.lucky.stacks)) w.stats.potions.lucky.stacks = [];
+  // Remove expired stacks
+  w.stats.potions.lucky.stacks = w.stats.potions.lucky.stacks.filter(s => s.expiresAt > now);
+  if (w.stats.potions.lucky.stacks.length >= 5) return { success: false, reason: 'max_stacks' };
   w.balance -= LUCKY_POT_COST;
-  w.stats.potions.lucky = { expiresAt: Date.now() + LUCKY_POT_DURATION_MS };
+  w.stats.potions.lucky.stacks.push({ expiresAt: now + LUCKY_POT_DURATION_MS });
   saveWallets();
-  return { success: true };
+  return { success: true, stacks: w.stats.potions.lucky.stacks.length };
 }
 
 function buyUnluckyPot(buyerId, targetId) {

@@ -190,7 +190,7 @@ async function handleCommand(interaction) {
   const ph = [deck.pop(), deck.pop()], dh = [deck.pop(), deck.pop()];
   const pv = getHandValue(ph);
 
-  activeGames.set(userId, { bet, game: 'blackjack', deck, playerHand: ph, dealerHand: dh });
+  activeGames.set(userId, { bet, game: 'blackjack', deck, playerHand: ph, dealerHand: dh, createdAt: Date.now() });
   persistBlackjackSessions();
 
   // Handle a natural blackjack.
@@ -279,7 +279,7 @@ async function handleButton(interaction, parts) {
     store.setBalance(uid, bal - game.bet);
     const h1 = { cards: [game.playerHand[0], game.deck.pop()], bet: game.bet, done: false, busted: false };
     const h2 = { cards: [game.playerHand[1], game.deck.pop()], bet: game.bet, done: false, busted: false };
-    const sg = { hands: [h1, h2], dealerHand: game.dealerHand, deck: game.deck, betPerHand: game.bet, activeHand: 0 };
+    const sg = { hands: [h1, h2], dealerHand: game.dealerHand, deck: game.deck, betPerHand: game.bet, activeHand: 0, createdAt: Date.now() };
     activeSplitGames.set(uid, sg);
     activeGames.delete(uid);
     persistBlackjackSessions();
@@ -346,4 +346,26 @@ async function handleButton(interaction, parts) {
   }
 }
 
-module.exports = { handleCommand, handleButton, activeGames, activeSplitGames };
+function expireSessions(ttlMs) {
+  const now = Date.now();
+  let expired = 0;
+  for (const [uid, game] of activeGames) {
+    if (game.createdAt && now - game.createdAt > ttlMs) {
+      store.setBalance(uid, store.getBalance(uid) + game.bet);
+      activeGames.delete(uid);
+      expired++;
+    }
+  }
+  for (const [uid, game] of activeSplitGames) {
+    if (game.createdAt && now - game.createdAt > ttlMs) {
+      const refund = game.hands.reduce((sum, h) => sum + h.bet, 0);
+      store.setBalance(uid, store.getBalance(uid) + refund);
+      activeSplitGames.delete(uid);
+      expired++;
+    }
+  }
+  if (expired > 0) persistBlackjackSessions();
+  return expired;
+}
+
+module.exports = { handleCommand, handleButton, activeGames, activeSplitGames, expireSessions };

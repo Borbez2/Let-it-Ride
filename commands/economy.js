@@ -626,7 +626,7 @@ async function handleTrade(interaction) {
   const trade = {
     initiatorId: userId, targetId: target.id,
     initiatorOffer: { coins: 0, items: [] }, targetOffer: { coins: 0, items: [] },
-    initiatorConfirmed: false, targetConfirmed: false,
+    initiatorConfirmed: false, targetConfirmed: false, createdAt: Date.now(),
   };
   activeTrades.set(userId, trade);
   const msg = await interaction.reply({
@@ -1216,6 +1216,19 @@ async function handleGiveawayJoin(interaction, giveawayId) {
   });
 }
 
+function expireTradeSessions(ttlMs) {
+  const now = Date.now();
+  let expired = 0;
+  for (const [key, trade] of activeTrades) {
+    if (trade.createdAt && now - trade.createdAt > ttlMs) {
+      activeTrades.delete(key);
+      expired++;
+    }
+  }
+  if (expired > 0) persistTradeSessions();
+  return expired;
+}
+
 module.exports = {
   activeTrades,
   handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
@@ -1224,4 +1237,5 @@ module.exports = {
   handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
   handleGiveawayStart, handleGiveawayModal, handleGiveawayJoin,
+  expireTradeSessions,
 };

@@ -125,7 +125,7 @@ async function handleRoulette(interaction) {
   const bal = store.getBalance(userId);
   if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
-  activeGames.set(userId, { bet, game: 'roulette' });
+  activeGames.set(userId, { bet, game: 'roulette', createdAt: Date.now() });
   persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`roulette_red_${userId}`).setLabel(CONFIG.games.roulette.labels.red).setStyle(ButtonStyle.Danger),
@@ -272,7 +272,7 @@ async function handleLetItRide(interaction) {
     return interaction.reply(`**Let It Ride**\nBust on first flip! -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
   const pot = bet * 2;
-  activeRides.set(userId, { current: pot, original: bet, wins: 1 });
+  activeRides.set(userId, { current: pot, original: bet, wins: 1, createdAt: Date.now() });
   persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`ride_ride_${userId}`).setLabel(`Ride (${store.formatNumberShort(pot * 2)})`).setStyle(ButtonStyle.Success),
@@ -347,7 +347,7 @@ async function handleDuel(interaction) {
   // Hold the money to prevent the user from spending it elsewhere
   store.setBalance(userId, bal - bet);
   
-  activeDuels.set(`${userId}_${opp.id}`, { bet, challengerName: username, opponentName: opp.username, challengerBalance: bal - bet });
+  activeDuels.set(`${userId}_${opp.id}`, { bet, challengerName: username, opponentName: opp.username, challengerBalance: bal - bet, createdAt: Date.now() });
   persistSimpleSessions();
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`duel_accept_${userId}_${opp.id}`).setLabel('Accept').setStyle(ButtonStyle.Success),
@@ -409,10 +409,42 @@ async function handleDuelButton(interaction, parts) {
   }
 }
 
+function expireSessions(ttlMs) {
+  const now = Date.now();
+  let expired = 0;
+  // Roulette: bet is NOT deducted until button click, so no refund needed
+  for (const [uid, game] of activeGames) {
+    if (game.createdAt && now - game.createdAt > ttlMs) {
+      activeGames.delete(uid);
+      expired++;
+    }
+  }
+  // Let It Ride: original bet was deducted, refund it
+  for (const [uid, ride] of activeRides) {
+    if (ride.createdAt && now - ride.createdAt > ttlMs) {
+      store.setBalance(uid, store.getBalance(uid) + ride.original);
+      activeRides.delete(uid);
+      expired++;
+    }
+  }
+  // Duels: challenger bet was pre-deducted, refund it
+  for (const [dk, duel] of activeDuels) {
+    if (duel.createdAt && now - duel.createdAt > ttlMs) {
+      const challengerId = dk.split('_')[0];
+      store.setBalance(challengerId, store.getBalance(challengerId) + duel.bet);
+      activeDuels.delete(dk);
+      expired++;
+    }
+  }
+  if (expired > 0) persistSimpleSessions();
+  return expired;
+}
+
 module.exports = {
   activeGames, activeRides, activeDuels,
   handleFlip,
   handleRoulette, handleRouletteButton,
   handleAllIn17, handleAllIn17Button, handleLetItRide, handleRideButton,
   handleDuel, handleDuelButton,
+  expireSessions,
 };

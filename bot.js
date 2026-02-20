@@ -54,6 +54,8 @@ const lifeStatsLoopState = {
   stopped: false,
 };
 let stopDbBackupScheduler = null;
+const SESSION_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000; // check every 60s
 
 function withTimeout(promise, timeoutMs = 2000) {
   return Promise.race([
@@ -872,6 +874,23 @@ async function postDailyLeaderboard() {
 }
 
 // Schedule recurring jobs and daily timers.
+function sweepExpiredSessions() {
+  let total = 0;
+  total += blackjack.expireSessions(SESSION_EXPIRY_MS);
+  total += mines.expireSessions(SESSION_EXPIRY_MS);
+  total += simple.expireSessions(SESSION_EXPIRY_MS);
+  total += economy.expireTradeSessions(SESSION_EXPIRY_MS);
+  // Sweep live graph sessions that passed their TTL
+  const now = Date.now();
+  for (const [viewerId, session] of liveGraphSessions) {
+    if (session.expiresAt && now > session.expiresAt) {
+      liveGraphSessions.delete(viewerId);
+      total++;
+    }
+  }
+  if (total > 0) console.log(`Session sweep: expired ${total} stale session(s)`);
+}
+
 function scheduleAll() {
   function msUntilNextUtcHour() {
     const now = new Date();
@@ -922,6 +941,7 @@ function scheduleAll() {
 
   scheduleNextHourly();
   setInterval(checkExpiredGiveaways, CONFIG.economy.pools.giveawayExpiryCheckMs);
+  setInterval(sweepExpiredSessions, SESSION_SWEEP_INTERVAL_MS);
   restartLifeStatsInterval();
   scheduleNextDaily1115();
 
