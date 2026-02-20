@@ -146,17 +146,19 @@ restoreTradeSessions();
 function renderUpgradesPage(userId, successMessage) {
   const w = store.getWallet(userId);
   const maxLevel = CONFIG.economy.upgrades.maxLevel;
-  const standardCosts = CONFIG.economy.upgrades.costs.standard;
+  const interestCosts = CONFIG.economy.upgrades.costs.interest;
+  const cashbackCosts = CONFIG.economy.upgrades.costs.cashback;
   const spinCosts = CONFIG.economy.upgrades.costs.spinMult;
+  const universalIncomeCosts = CONFIG.economy.upgrades.costs.universalIncome;
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
   const bonuses = store.getUserBonuses(userId);
   const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sMult = (1 + sLvl * 0.1), uChance = bonuses.universalIncomeDoubleChance * 100;
   const iBaseRate = CONFIG.economy.bank.baseInvestRate + (iLvl * CONFIG.economy.upgrades.interestPerLevel);
   const cBaseRatePct = cLvl * 0.1;
-  const iCost = iLvl < maxLevel ? standardCosts[iLvl] : null;
-  const cCost = cLvl < maxLevel ? standardCosts[cLvl] : null;
+  const iCost = iLvl < maxLevel ? interestCosts[iLvl] : null;
+  const cCost = cLvl < maxLevel ? cashbackCosts[cLvl] : null;
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
-  const uCost = uLvl < maxLevel ? standardCosts[uLvl] : null;
+  const uCost = uLvl < maxLevel ? universalIncomeCosts[uLvl] : null;
 
   const bar = (lvl, max) => '▰'.repeat(lvl) + '▱'.repeat(max - lvl);
 
@@ -179,7 +181,7 @@ function renderUpgradesPage(userId, successMessage) {
     },
     {
       name: 'Double Universal Income Chance',
-      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(uLvl + 1)}%** for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(((uLvl + 1) * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0)}%** for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
@@ -679,7 +681,7 @@ async function handleUpgradeButton(interaction, parts) {
     store.processBank(uid);
     const lvl = w.interestLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
+    const cost = CONFIG.economy.upgrades.costs.interest[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.interestLevel = lvl + 1; store.saveWallets();
     const { embed, rows } = renderUpgradesPage(uid, `Interest → Lv ${w.interestLevel}`);
@@ -688,7 +690,7 @@ async function handleUpgradeButton(interaction, parts) {
   if (action === 'cashback') {
     const lvl = w.cashbackLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
+    const cost = CONFIG.economy.upgrades.costs.cashback[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.cashbackLevel = lvl + 1; store.saveWallets();
     const { embed, rows } = renderUpgradesPage(uid, `Cashback → Lv ${w.cashbackLevel}`);
@@ -706,10 +708,11 @@ async function handleUpgradeButton(interaction, parts) {
   if (action === 'universalmult') {
     const lvl = w.universalIncomeMultLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
-    const cost = CONFIG.economy.upgrades.costs.standard[lvl];
+    const cost = CONFIG.economy.upgrades.costs.universalIncome[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
-    const { embed, rows } = renderUpgradesPage(uid, `Income Double → Lv ${w.universalIncomeMultLevel} (${w.universalIncomeMultLevel}% chance)`);
+    const newChancePct = ((w.universalIncomeMultLevel * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0);
+    const { embed, rows } = renderUpgradesPage(uid, `Income Double → Lv ${w.universalIncomeMultLevel} (${newChancePct}% chance)`);
     return interaction.update({ content: '', embeds: [embed], components: rows });
   }
 }

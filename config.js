@@ -35,16 +35,24 @@ const CONFIG = {
       maxLevel: 10,
       interestPerLevel: 0.01,
       cashbackPerLevel: 0.001,
-      universalIncomePerLevelChance: 0.01,
-      universalIncomeChanceCap: 0.75,
+      universalIncomePerLevelChance: 0.1,
+      universalIncomeChanceCap: 1,
       costs: {
-        standard: [
-          1000, 5000, 25000, 100000, 500000,
-          2000000, 10000000, 50000000, 200000000, 750000000,
+        interest: [
+          1000, 5000, 10000, 25000, 500000,
+          100000, 250000, 500000, 750000, 1000000,
+        ],
+        cashback: [
+          1000, 5000, 10000, 25000, 500000,
+          100000, 250000, 500000, 750000, 1000000,
         ],
         spinMult: [
-          2000, 10000, 50000, 200000, 1000000,
-          5000000, 20000000, 100000000, 500000000, 2000000000,
+          1000, 5000, 10000, 25000, 500000,
+          100000, 250000, 500000, 750000, 1000000,
+        ],
+        universalIncome: [
+          1000, 5000, 10000, 25000, 500000,
+          100000, 250000, 500000, 750000, 1000000,
         ],
       },
     },
@@ -339,7 +347,7 @@ const BASE_INVEST_RATE = CONFIG.economy.bank.baseInvestRate;
 const POOL_TAX_RATE = CONFIG.economy.pools.universalTaxRate;
 const LOSS_POOL_RATE = CONFIG.economy.pools.lossTaxRate;
 const MYSTERY_BOX_COST = CONFIG.collectibles.mysteryBox.cost;
-const UPGRADE_COSTS = CONFIG.economy.upgrades.costs.standard;
+const UPGRADE_COSTS = CONFIG.economy.upgrades.costs.interest;
 const SPIN_MULT_COSTS = CONFIG.economy.upgrades.costs.spinMult;
 const MINES_ROWS = CONFIG.games.mines.rows;
 const MINES_COLS = CONFIG.games.mines.cols;
