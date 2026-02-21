@@ -200,13 +200,13 @@ const CONFIG = {
     mysteryBox: {
       cost: 5000,
       duplicateCompensationByRarity: {
-        common: 2000,
-        uncommon: 3500,
-        rare: 6000,
-        epic: 12000,
-        legendary: 20000,
-        mythic: 60000,
-        divine: 150000,
+        common: 2800,
+        uncommon: 7000,
+        rare: 25000,
+        epic: 60000,
+        legendary: 200000,
+        mythic: 600000,
+        divine: 2500000,
       },
       pity: {
         luckPerStreakStep: 0.02,

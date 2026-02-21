@@ -33,7 +33,7 @@ function buildEconomyPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '◈ Shop — /shop',
-        value: '> **/shop** has three sections:\n> \n> **⧉ Upgrades** — Permanently improve your passive stats:\n> ∑ **Bank Interest** · ↩ **Cashback** · ⟳× **Daily Spin Mult** · ∀× **Universal Income Mult**\n> \n> **Potions** — Temporary effects for 1 hour:\n> ☘⚱ **Lucky Pot** (100k) — boosts your win chance by +5% for 1 hour (1 active at a time)\n> ⚱✕ **Unlucky Pot** (200k) — reduces a target player\'s win chance by -25%\n> \n> **🎁 Mystery Boxes** — Buy boxes to get collectible items. Collectibles passively boost your stats: ∑ interest, ↩ cashback, ☘ luck, ⟳× spin weight, ∀× income chance, and ⛁⌖ mines save. Use **/mysterybox** to buy, **/inventory** to manage.',
+        value: '> **/shop** has three sections:\n> \n> **⧉ Upgrades** — Permanently improve your passive stats:\n> ∑ **Bank Interest** · ↩ **Cashback** · ⟳× **Daily Spin Mult** · ∀× **Universal Income Mult**\n> \n> **Potions** — Temporary effects for 1 hour:\n> ☘⚱ **Lucky Pot** (100k) — boosts your win chance by +5% for 1 hour (1 active at a time)\n> ⚱✕ **Unlucky Pot** (200k) — reduces a target player\'s win chance by -25%\n> \n> **🎁 Mystery Boxes** — Buy boxes to get collectible items. Collectibles passively boost your stats: ∑ interest, ↩ cashback, ☘ luck, ⟳× spin weight, ∀× income chance, and ⛁⌖ mines save. Use **/shop** to buy (Mystery Boxes section), **/inventory** to manage.',
         inline: false,
       },
       {
@@ -81,7 +81,7 @@ function buildGamesCommandsPage() {
       },
       {
         name: '\u25B8 Collectibles',
-        value: '> `/mysterybox` `/inventory`\n> `/collection`',
+        value: '> `/inventory` `/collection`',
         inline: true,
       },
     ],
@@ -151,7 +151,7 @@ function buildCollectiblesPage() {
     fields: [
       {
         name: '\u25C8 Mystery Boxes',
-        value: `> Use **/mysterybox** (optionally with \`quantity:1-50\`) to buy boxes from your **purse**. Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are 120 collectibles spread across 7 rarities. Your drop luck is based on your item luck bonus plus any pity luck you\'ve built up.`,
+        value: `> Buy mystery boxes through **/shop** (Mystery Boxes section). Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are 120 collectibles spread across 7 rarities. Your drop luck is based on your item luck bonus plus any pity luck you\'ve built up.`,
         inline: false,
       },
       {
@@ -160,14 +160,14 @@ function buildCollectiblesPage() {
         inline: true,
       },
       {
-        name: '\u21BB Duplicate Compensation',
+        name: '\u21BB Cashback per Dupe',
         value: compText,
         inline: true,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u29C9 Collectible Buffs',
-        value: '> Every collectible item you own passively applies bonuses to your account. The higher the rarity, the larger the effect per item:\n> \n> \u2211 **Bank Interest** \u00b7 \u21a9 **Cashback** \u00b7 \u2618 **Luck** \u00b7 \u27f3\u00d7 **Spin Weight** \u00b7 \u2200\u00d7 **Universal Income Chance** \u00b7 \u26c1\u2316 **Mines Save**\n> \n> Collecting **every item of a rarity tier** also awards a **set completion bonus** on top. Duplicates convert to coins automatically.\n> \n> Manage with **/inventory**, browse with **/collection**, swap with **/trade**.',
+        value: '> Every collectible item you own passively applies bonuses to your account. The higher the rarity, the larger the effect per item:\n> \n> \u2211 **Bank Interest** \u00b7 \u21a9 **Cashback** \u00b7 \u2618 **Luck** \u00b7 \u27f3\u00d7 **Spin Weight** \u00b7 \u2200\u00d7 **Universal Income Chance** \u00b7 \u26c1\u2316 **Mines Save**\n> \n> Collecting **every item of a rarity tier** also awards a **set completion bonus** on top. Duplicate items are automatically converted to coins — the amount depends on the item\'s rarity (see **Cashback per Dupe** above).\n> \n> Manage with **/inventory**, browse with **/collection**, swap with **/trade**.',
         inline: false,
       },
     ],

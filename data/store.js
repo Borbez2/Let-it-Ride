@@ -25,7 +25,7 @@ const LUCK_TIER1_CAP = 7;              // losses 3-7 give 1% each
 const LUCK_TIER1_RATE = 0.01;          // 1% per loss in tier 1
 const LUCK_TIER2_CAP = 12;             // losses 8-12 give 2% each
 const LUCK_TIER2_RATE = 0.02;          // 2% per loss in tier 2
-const LUCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const LUCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 function calculateLuckBoost(streak) {
   if (streak < LUCK_ACTIVATION_THRESHOLD) return 0;
@@ -38,7 +38,7 @@ function calculateLuckBoost(streak) {
 const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 
 // Potion system constants
-const LUCKY_POT_DURATION_MS = 60 * 60 * 1000;
+const LUCKY_POT_DURATION_MS = 30 * 60 * 1000;
 const LUCKY_POT_COST = 100000;
 const LUCKY_POT_BOOST = 0.05;
 const UNLUCKY_POT_DURATION_MS = 60 * 60 * 1000;

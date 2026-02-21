@@ -346,8 +346,6 @@ const commands = [
   new SlashCommandBuilder().setName('pool').setDescription('View the universal pool and daily spin pool'),
   new SlashCommandBuilder().setName('stats').setDescription('Open the multi-page stats dashboard with graphs and bonus details')
     .addUserOption(o => o.setName('user').setDescription('User to check stats for (optional)').setRequired(false)),
-  new SlashCommandBuilder().setName('mysterybox').setDescription(`Buy mystery boxes for ${CONFIG.collectibles.mysteryBox.cost.toLocaleString()} coins each`)
-    .addIntegerOption(o => o.setName('quantity').setDescription(`Number of boxes to buy (${CONFIG.commands.limits.mysteryBoxQuantity.min}-${CONFIG.commands.limits.mysteryBoxQuantity.max})`).setMinValue(CONFIG.commands.limits.mysteryBoxQuantity.min).setMaxValue(CONFIG.commands.limits.mysteryBoxQuantity.max)),
   new SlashCommandBuilder().setName('help').setDescription('View the help guide for all game systems'),
   adminCmd.buildAdminCommand(),
   new SlashCommandBuilder().setName('giveaway').setDescription('Start a giveaway via popup form with an optional message')
@@ -511,6 +509,23 @@ async function postLifeStatistics() {
     datasets = Array.from({ length: publicGraphState.datasetsCount });
   }
 
+  const lbWallets = store.getAllWallets();
+  const lbEntries = Object.entries(lbWallets)
+    .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
+    .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
+  const lbMedals = ['🥇', '🥈', '🥉'];
+  const lbLines = [];
+  for (let i = 0; i < lbEntries.length; i++) {
+    const u = await client.users.fetch(lbEntries[i].id).catch(() => null);
+    const username = u ? u.username : 'Unknown';
+    const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
+    lbLines.push(`${rank} **${username}**`);
+    lbLines.push(`Wallet: ${store.formatNumber(lbEntries[i].balance)} | Bank: ${store.formatNumber(lbEntries[i].bank)} | Total: ${store.formatNumber(lbEntries[i].balance + lbEntries[i].bank)}`);
+  }
+  const leaderboardEmbed = lbLines.length > 0
+    ? { title: 'Leaderboard', color: 0x2b2d31, description: lbLines.join('\n') }
+    : null;
+
   const text =
     `**Live Economy Snapshot**\n` +
     `• Universal Pool: **${store.formatNumber(poolData.universalPool || 0)}**\n` +
@@ -529,14 +544,18 @@ async function postLifeStatistics() {
     ),
   ];
 
+  const embeds = [];
+  if (chartBuffer) embeds.push({ title: 'Player Networth', image: { url: 'attachment://networth.png' } });
+  if (leaderboardEmbed) embeds.push(leaderboardEmbed);
+
   const payload = chartBuffer
     ? {
         content: text,
-        embeds: [{ title: 'Player Networth', image: { url: 'attachment://networth.png' } }],
+        embeds,
         files: [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })],
         components: controls,
       }
-    : { content: text, embeds: [], files: [], components: controls };
+    : { content: text, embeds, files: [], components: controls };
 
   const state = store.getRuntimeState('lifeStatsMessageRef', null);
   if (state && state.messageId) {
@@ -1073,7 +1092,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'bank':         return await economy.handleBank(interaction);
       case 'shop':          return await shopCmd.handleShop(interaction);
       case 'effects':       return await effectsCmd.handleEffects(interaction);
-      case 'mysterybox':   return await shopCmd.handleShop(interaction);
       case 'inventory':    return await economy.handleInventory(interaction);
       case 'collection':   return await economy.handleCollection(interaction, client);
       case 'pool':         return await economy.handlePool(interaction);
