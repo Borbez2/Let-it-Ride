@@ -310,7 +310,6 @@ async function handleShopButton(interaction, parts) {
 
     w.balance -= totalCost;
     store.ensureWalletStatsShape(w);
-    w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
     const items = [];
     let totalCompensation = 0;
 
@@ -333,6 +332,7 @@ async function handleShopButton(interaction, parts) {
       items.push(item);
     }
 
+    w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
     store.saveWallets();
 
     let resultMsg;

@@ -74,7 +74,7 @@ function renderMinesGrid(game) {
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`mines_cashout_${game.oddsUserId}`)
-      .setLabel(`Cash Out (${store.formatNumber(Math.floor(game.bet * game.multiplier))})`)
+      .setLabel(`Cash Out (+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)})`)
       .setStyle(ButtonStyle.Primary)
       .setDisabled(game.revealedCount === 0)
   ));
@@ -148,7 +148,7 @@ async function handleButton(interaction, parts) {
     persistMinesSessions();
     const gr = gridToString(game);
     return interaction.update({
-      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }
@@ -189,13 +189,13 @@ async function handleButton(interaction, parts) {
           gr += '\n';
         }
         return interaction.update({
-          content: `✨ **Mines Charm Proc** saved you from a mine\n\`\`\`\n${gr}\`\`\`\nPerfect clear payout: **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+          content: `✨ **Mines Charm Proc** saved you from a mine\n\`\`\`\n${gr}\`\`\`\nPerfect clear payout: **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
           components: [],
         });
       }
 
       return interaction.update({
-        content: `✨ **Mines Charm Proc** saved you from a mine\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **${store.formatNumber(Math.floor(game.bet * game.multiplier))}**`,
+        content: `✨ **Mines Charm Proc** saved you from a mine\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
         components: renderMinesGrid(game),
       });
     }
@@ -211,7 +211,7 @@ async function handleButton(interaction, parts) {
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
     let lossText = `Lost **${store.formatNumber(game.bet)}** (initial bet)`;
     if (game.revealedCount > 0) {
-      lossText += `\nMissed cashout: **${store.formatNumber(potentialCashout)}** (${game.multiplier.toFixed(2)}x)`;
+      lossText += `\nMissed cashout: **+${store.formatNumber(potentialCashout - game.bet)}** (${game.multiplier.toFixed(2)}x)`;
     }
     return interaction.update({
       content: `**Mines - BOOM**\n\`\`\`\n${gr}\`\`\`\n${lossText}${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
@@ -249,13 +249,13 @@ async function handleButton(interaction, parts) {
       gr += '\n';
     }
     return interaction.update({
-      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **${store.formatNumber(finalWin)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }
 
   return interaction.update({
-    content: `**Mines** (${game.mineCount} mines)\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **${store.formatNumber(Math.floor(game.bet * game.multiplier))}**`,
+    content: `**Mines** (${game.mineCount} mines)\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
     components: renderMinesGrid(game),
   });
 }

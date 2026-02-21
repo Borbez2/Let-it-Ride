@@ -1228,32 +1228,32 @@ function rollMysteryBox(userId = null) {
     if (roll <= 0) {
       const it = pool.items;
       const item = it[Math.floor(Math.random() * it.length)];
-      if (w) {
-        w.stats.mysteryBox.opened += 1;
-        const highRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER[CONFIG.collectibles.mysteryBox.highRarityThreshold];
-        if (highRarity) {
-          w.stats.mysteryBox.luckyHighRarity += 1;
-          w.stats.mysteryBox.pityStreak = 0;
-        } else {
-          w.stats.mysteryBox.pityStreak += 1;
-          if (w.stats.mysteryBox.pityStreak > w.stats.mysteryBox.bestPityStreak) {
-            w.stats.mysteryBox.bestPityStreak = w.stats.mysteryBox.pityStreak;
-          }
-        }
-      }
-      return { ...item, _rarity: rarity };
+      const isHighRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER[CONFIG.collectibles.mysteryBox.highRarityThreshold];
+      return { ...item, _rarity: rarity, _isHighRarity: isHighRarity };
     }
   }
   const c = MYSTERY_BOX_POOLS.common.items;
   const item = c[Math.floor(Math.random() * c.length)];
-  if (w) {
+  return { ...item, _rarity: 'common', _isHighRarity: false };
+}
+
+// Apply mystery box stats after a successful interaction reply.
+function applyMysteryBoxStats(userId, items) {
+  const w = getWallet(userId);
+  if (!w) return;
+  ensureWalletStatsShape(w);
+  for (const item of items) {
     w.stats.mysteryBox.opened += 1;
-    w.stats.mysteryBox.pityStreak += 1;
-    if (w.stats.mysteryBox.pityStreak > w.stats.mysteryBox.bestPityStreak) {
-      w.stats.mysteryBox.bestPityStreak = w.stats.mysteryBox.pityStreak;
+    if (item._isHighRarity) {
+      w.stats.mysteryBox.luckyHighRarity += 1;
+      w.stats.mysteryBox.pityStreak = 0;
+    } else {
+      w.stats.mysteryBox.pityStreak += 1;
+      if (w.stats.mysteryBox.pityStreak > w.stats.mysteryBox.bestPityStreak) {
+        w.stats.mysteryBox.bestPityStreak = w.stats.mysteryBox.pityStreak;
+      }
     }
   }
-  return { ...item, _rarity: 'common' };
 }
 
 // Calculate duplicate compensation by rarity.
@@ -1540,7 +1540,7 @@ module.exports = {
   applyProfitBoost, tryTriggerMinesReveal,
   getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot,
   checkDaily, claimDaily,
-  rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
+  rollMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
   recordWin, recordLoss, resetStats, resetAllActivePity,
   saveWallets, saveWallet,

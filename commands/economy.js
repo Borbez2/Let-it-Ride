@@ -550,8 +550,43 @@ function renderInventoryPage(userId, username, tab, page) {
   };
 }
 
+// Build a rarity picker for trade item selection
+function buildTradeRarityPicker(userId, trade, isInit) {
+  const inv = store.getWallet(userId).inventory;
+  const offer = isInit ? trade.initiatorOffer : trade.targetOffer;
+  const usedIndices = new Set(offer.items.map(i => i._idx));
+
+  // Count available items per rarity
+  const rarityCounts = {};
+  for (let i = 0; i < inv.length; i++) {
+    if (usedIndices.has(i)) continue;
+    const r = inv[i].rarity;
+    rarityCounts[r] = (rarityCounts[r] || 0) + 1;
+  }
+
+  const options = RARITY_ORDER
+    .filter(r => rarityCounts[r] > 0)
+    .map(r => ({
+      label: `${r.charAt(0).toUpperCase() + r.slice(1)} (${rarityCounts[r]})`,
+      value: r,
+      emoji: RARITIES[r] ? RARITIES[r].emoji : undefined,
+    }));
+
+  if (options.length === 0) return null;
+
+  // If only one rarity available, skip the picker and go straight to items
+  if (options.length === 1) return null;
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`trade_pickrarity_${trade.initiatorId}_${userId}`)
+    .setPlaceholder('Select a rarity to browse')
+    .addOptions(options);
+
+  return new ActionRowBuilder().addComponents(menu);
+}
+
 // Build a select menu from a player's inventory for adding items
-function buildItemSelectMenu(userId, trade, isInit) {
+function buildItemSelectMenu(userId, trade, isInit, rarityFilter) {
   const inv = store.getWallet(userId).inventory;
   const offer = isInit ? trade.initiatorOffer : trade.targetOffer;
   const usedIndices = new Set(offer.items.map(i => i._idx));
@@ -567,6 +602,7 @@ function buildItemSelectMenu(userId, trade, isInit) {
   const available = inv
     .map((item, idx) => ({ item, idx }))
     .filter(e => !usedIndices.has(e.idx))
+    .filter(e => !rarityFilter || e.item.rarity === rarityFilter)
     .sort((a, b) => {
       const an = getItemNumber(a);
       const bn = getItemNumber(b);
@@ -950,63 +986,88 @@ async function handleMysteryBox(interaction) {
   }
   
   w.balance -= totalCost;
+  store.ensureWalletStatsShape(w);
   const items = [];
+  const newInventoryItems = [];
   let totalCompensation = 0;
   
   for (let i = 0; i < quantity; i++) {
     const item = store.rollMysteryBox(userId);
     
-    // Check if this is a duplicate placeholder
+    // Check if this is a duplicate (already in inventory or added this batch)
     if (item.id && item.id.startsWith('placeholder_')) {
-      const isDuplicate = w.inventory.some(inv => inv.id === item.id);
+      const isDuplicate = w.inventory.some(inv => inv.id === item.id)
+        || newInventoryItems.some(inv => inv.id === item.id);
       if (isDuplicate) {
         // Give compensation instead of duplicate
         const compensation = store.getDuplicateCompensation(item.id, item._rarity);
-        w.balance += compensation;
-        store.trackMysteryBoxDuplicateComp(userId, compensation);
         totalCompensation += compensation;
         items.push({ ...item, isDuplicate: true, compensation });
         continue;
       }
     }
     
-    w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
+    const invItem = { id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() };
+    newInventoryItems.push(invItem);
     items.push(item);
   }
-  
-  store.saveWallets();
-  
+
+  // Build reply message before committing any state
+  let replyPayload;
   if (quantity === 1) {
     const item = items[0];
     if (item.isDuplicate) {
-      return interaction.reply(`${item.emoji} **Mystery Box - DUPLICATE**\n\nYou already have: **${item.name}**\nCompensation: **${store.formatNumber(item.compensation)}** coins\nNew Balance: **${store.formatNumber(w.balance)}**`);
-    }
-    return interaction.reply(`${item.emoji} **Mystery Box**\n\nYou got: **${item.name}** (${item.rarity})\nBalance: **${store.formatNumber(w.balance)}**`);
-  }
-  
-  // Group by rarity for bulk display
-  const byRarity = {};
-  let duplicateCount = 0;
-  for (const item of items) {
-    if (item.isDuplicate) {
-      duplicateCount++;
+      replyPayload = `${item.emoji} **Mystery Box - DUPLICATE**\n\nYou already have: **${item.name}**\nCompensation: **${store.formatNumber(item.compensation)}** coins\nNew Balance: **${store.formatNumber(w.balance + totalCompensation)}**`;
     } else {
-      if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
-      byRarity[item.rarity].push(item);
+      replyPayload = `${item.emoji} **Mystery Box**\n\nYou got: **${item.name}** (${item.rarity})\nBalance: **${store.formatNumber(w.balance + totalCompensation)}**`;
     }
+  } else {
+    // Group by rarity for bulk display
+    const byRarity = {};
+    let duplicateCount = 0;
+    for (const item of items) {
+      if (item.isDuplicate) {
+        duplicateCount++;
+      } else {
+        if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
+        byRarity[item.rarity].push(item);
+      }
+    }
+    
+    let summary = `**Mystery Boxes x${quantity}**\n\n`;
+    for (const rarity of RARITY_ORDER) {
+      const rarityItems = byRarity[rarity];
+      if (!rarityItems || rarityItems.length === 0) continue;
+      summary += `${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}\n`;
+    }
+    if (duplicateCount > 0) {
+      summary += `\n⚠️ Duplicates: x${duplicateCount}\n💰 Compensation: **${store.formatNumber(totalCompensation)}**\n`;
+    }
+    summary += `\nBalance: **${store.formatNumber(w.balance + totalCompensation)}**`;
+    replyPayload = summary;
   }
   
-  let summary = `**Mystery Boxes x${quantity}**\n\n`;
-  for (const rarity of RARITY_ORDER) {
-    const rarityItems = byRarity[rarity];
-    if (!rarityItems || rarityItems.length === 0) continue;
-    summary += `${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}\n`;
+  // Try to reply first — only commit state if the interaction succeeds
+  try {
+    await interaction.reply(replyPayload);
+  } catch (err) {
+    // Interaction failed (expired, already replied, etc.) — rollback balance
+    w.balance += totalCost;
+    store.saveWallets();
+    return;
   }
-  if (duplicateCount > 0) {
-    summary += `\n⚠️ Duplicates: x${duplicateCount}\n💰 Compensation: **${store.formatNumber(totalCompensation)}**\n`;
+  
+  // Interaction succeeded — commit inventory, stats, and compensation
+  for (const invItem of newInventoryItems) {
+    w.inventory.push(invItem);
   }
-  summary += `\nBalance: **${store.formatNumber(w.balance)}**`;
-  return interaction.reply(summary);
+  w.balance += totalCompensation;
+  if (totalCompensation > 0) {
+    store.trackMysteryBoxDuplicateComp(userId, totalCompensation);
+  }
+  w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
+  store.applyMysteryBoxStats(userId, items);
+  store.saveWallets();
 }
 
 async function handleInventory(interaction) {
@@ -1149,7 +1210,13 @@ async function handleTradeButton(interaction, parts) {
   }
 
   if (action === 'additem') {
-    const menu = buildItemSelectMenu(interaction.user.id, trade, isInit);
+    // Show rarity picker first if multiple rarities are available
+    const rarityPicker = buildTradeRarityPicker(interaction.user.id, trade, isInit);
+    if (rarityPicker) {
+      return interaction.reply({ content: "Pick a rarity to browse:", components: [rarityPicker], ephemeral: true });
+    }
+    // Only one (or zero) rarity — show items directly
+    const menu = buildItemSelectMenu(interaction.user.id, trade, isInit, null);
     if (!menu) return interaction.reply({ content: "No items available to add!", ephemeral: true });
     return interaction.reply({ content: "Select an item to add to your offer:", components: [menu], ephemeral: true });
   }
@@ -1278,6 +1345,13 @@ async function handleTradeSelectMenu(interaction) {
     await interaction.deferUpdate();
     await updateTradeMessage(interaction, trade);
     return interaction.editReply({ content: `Added **${item.name}** to your offer!`, components: [] });
+  }
+
+  if (action === 'pickrarity') {
+    const rarity = interaction.values[0];
+    const menu = buildItemSelectMenu(interaction.user.id, trade, isInit, rarity);
+    if (!menu) return interaction.update({ content: "No items of that rarity available!", components: [] });
+    return interaction.update({ content: `Select a **${rarity}** item to add:`, components: [menu] });
   }
 
   if (action === 'unselectitem') {

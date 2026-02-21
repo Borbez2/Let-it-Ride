@@ -1020,7 +1020,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle select menu interactions.
   if (interaction.isStringSelectMenu()) {
     try {
-      if (interaction.customId.startsWith('trade_selectitem_') || interaction.customId.startsWith('trade_unselectitem_'))
+      if (interaction.customId.startsWith('trade_selectitem_') || interaction.customId.startsWith('trade_unselectitem_') || interaction.customId.startsWith('trade_pickrarity_'))
         return await economy.handleTradeSelectMenu(interaction);
       if (interaction.customId.startsWith('livestats_'))
         return await handleLiveStatsSelectMenu(interaction);
