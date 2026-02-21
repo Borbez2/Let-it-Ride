@@ -237,12 +237,33 @@ function renderTradeButtons(trade) {
 }
 
 function renderTradeView(trade) {
-  let t = `**Trade**\n\n<@${trade.initiatorId}> offers:\n Coins: ${store.formatNumber(trade.initiatorOffer.coins)}`;
-  if (trade.initiatorOffer.items.length) t += `\n Items: ${trade.initiatorOffer.items.map(i => `${i.emoji} ${i.name}`).join(', ')}`;
-  t += `\n\n<@${trade.targetId}> offers:\n Coins: ${store.formatNumber(trade.targetOffer.coins)}`;
-  if (trade.targetOffer.items.length) t += `\n Items: ${trade.targetOffer.items.map(i => `${i.emoji} ${i.name}`).join(', ')}`;
-  t += `\n\n${trade.initiatorConfirmed ? '✅' : '⬜'} <@${trade.initiatorId}> | ${trade.targetConfirmed ? '✅' : '⬜'} <@${trade.targetId}>`;
-  return t;
+  const initItems = trade.initiatorOffer.items.length
+    ? trade.initiatorOffer.items.map(i => `${i.emoji} ${i.name}`).join('\n')
+    : '*Nothing*';
+  const tgtItems = trade.targetOffer.items.length
+    ? trade.targetOffer.items.map(i => `${i.emoji} ${i.name}`).join('\n')
+    : '*Nothing*';
+  const initName = trade.initiatorUsername || trade.initiatorId;
+  const tgtName = trade.targetUsername || trade.targetId;
+  return {
+    title: '🔄 Trade',
+    color: 0x2b2d31,
+    fields: [
+      {
+        name: `Offer from ${initName}`,
+        value: `💰 **Coins:** ${store.formatNumber(trade.initiatorOffer.coins)}\n📦 **Items:**\n${initItems}`,
+        inline: true,
+      },
+      {
+        name: `Offer from ${tgtName}`,
+        value: `💰 **Coins:** ${store.formatNumber(trade.targetOffer.coins)}\n📦 **Items:**\n${tgtItems}`,
+        inline: true,
+      },
+    ],
+    footer: {
+      text: `${trade.initiatorConfirmed ? '✅' : '⬜'} ${initName}  |  ${trade.targetConfirmed ? '✅' : '⬜'} ${tgtName}`,
+    },
+  };
 }
 
 async function updateTradeMessage(interaction, trade) {
@@ -252,7 +273,7 @@ async function updateTradeMessage(interaction, trade) {
   if (!channel) return false;
   const message = await channel.messages.fetch(trade.messageId).catch(() => null);
   if (!message) return false;
-  await message.edit({ content: renderTradeView(trade), components: renderTradeButtons(trade) }).catch(() => null);
+  await message.edit({ embeds: [renderTradeView(trade)], content: '', components: renderTradeButtons(trade) }).catch(() => null);
   return true;
 }
 
@@ -273,10 +294,10 @@ function buildInventoryNavRow(userId, activeTab, page) {
   // Overview tab + rarity tabs (top row)
   const tabsToShow = [
     { key: 'overview', label: '◈ Overview' },
-    { key: 'common', label: `${RARITIES.common.emoji}` },
-    { key: 'uncommon', label: `${RARITIES.uncommon.emoji}` },
-    { key: 'rare', label: `${RARITIES.rare.emoji}` },
-    { key: 'legendary', label: `${RARITIES.legendary.emoji}` },
+    { key: 'common', label: `${RARITIES.common.emoji} Common` },
+    { key: 'uncommon', label: `${RARITIES.uncommon.emoji} Uncommon` },
+    { key: 'rare', label: `${RARITIES.rare.emoji} Rare` },
+    { key: 'legendary', label: `${RARITIES.legendary.emoji} Legendary` },
   ];
   for (const tab of tabsToShow) {
     row.addComponents(
@@ -292,9 +313,9 @@ function buildInventoryNavRow(userId, activeTab, page) {
 function buildInventoryNavRow2(userId, activeTab, page) {
   const row = new ActionRowBuilder();
   const tabsToShow = [
-    { key: 'epic', label: `${RARITIES.epic.emoji}` },
-    { key: 'mythic', label: `${RARITIES.mythic.emoji}` },
-    { key: 'divine', label: `${RARITIES.divine.emoji}` },
+    { key: 'epic', label: `${RARITIES.epic.emoji} Epic` },
+    { key: 'mythic', label: `${RARITIES.mythic.emoji} Mythic` },
+    { key: 'divine', label: `${RARITIES.divine.emoji} Divine` },
   ];
   for (const tab of tabsToShow) {
     row.addComponents(
@@ -325,6 +346,43 @@ function buildInventoryPageRow(userId, tab, page, totalPages) {
   return row;
 }
 
+// Helper: get the displayed buff for a specific collectible item.
+// Each item cycles through 5 buff types based on its position within its rarity group.
+const ITEM_BUFF_TYPES = ['interestRate', 'cashbackRate', 'minesRevealChance', 'universalDoubleChance', 'spinWeight'];
+const ITEM_BUFF_LABELS = ['∑', '↩', '⛁⌖', '∀×', '⟳×'];
+
+function getItemDisplayBuff(item, allItemsOfRarity) {
+  const idx = allItemsOfRarity.findIndex(c => c.id === item.id);
+  const typeIdx = (idx >= 0 ? idx : 0) % 5;
+  const type = ITEM_BUFF_TYPES[typeIdx];
+  const label = ITEM_BUFF_LABELS[typeIdx];
+  const cfg = CONFIG.collectibles.mysteryBox.perItemDisplayBuff[item.rarity] || {};
+  const value = cfg[type] || 0;
+  return { type, label, value };
+}
+
+function formatItemBuffDisplay({ type, label, value }) {
+  if (type === 'spinWeight') {
+    const dec = value >= 0.1 ? 2 : value >= 0.01 ? 3 : value >= 0.001 ? 4 : 5;
+    return `${label} +${value.toFixed(dec)}x`;
+  }
+  const pct = value * 100;
+  const dec = pct >= 1 ? 2 : pct >= 0.1 ? 3 : pct >= 0.01 ? 4 : 5;
+  const suffix = type === 'interestRate' ? '/day' : '';
+  return `${label} +${pct.toFixed(dec)}%${suffix}`;
+}
+
+function fmtPct(val, suffix = '') {
+  const pct = val * 100;
+  const dec = pct >= 1 ? 2 : pct >= 0.1 ? 3 : pct >= 0.01 ? 4 : 5;
+  return `${pct.toFixed(dec)}%${suffix}`;
+}
+
+function fmtWeight(val) {
+  const dec = val >= 0.1 ? 3 : val >= 0.01 ? 4 : 5;
+  return `${val.toFixed(dec)}x`;
+}
+
 function renderCollectionBar(owned, total, filledChar = '▰', emptyChar = '▱', barLength = null) {
   const len = barLength !== null ? barLength : total;
   const filled = total > 0 ? Math.round((owned / total) * len) : 0;
@@ -349,11 +407,11 @@ function renderInventoryOverview(userId, username) {
   // Total stat boosts
   const t = cs.totals;
   description += `\n**◈ Total Stat Boosts**\n`;
-  description += `> ∑ Interest: **+${(t.interestRate * 100).toFixed(2)}%**/day\n`;
-  description += `> ↩ Cashback: **+${(t.cashbackRate * 100).toFixed(2)}%**\n`;
-  description += `> ⛁⌖ Mines Save: **+${(t.minesRevealChance * 100).toFixed(2)}%**\n`;
-  description += `> ∀× Income Double: **+${(t.universalDoubleChance * 100).toFixed(2)}%**\n`;
-  description += `> ⟳× Spin Payout: **+${t.spinWeight.toFixed(2)}x**\n`;
+  description += `> ∑ Interest: **+${fmtPct(t.interestRate, '/day')}**\n`;
+  description += `> ↩ Cashback: **+${fmtPct(t.cashbackRate)}**\n`;
+  description += `> ⛁⌖ Mines Save: **+${fmtPct(t.minesRevealChance)}**\n`;
+  description += `> ∀× Income Double: **+${fmtPct(t.universalDoubleChance)}**\n`;
+  description += `> ⟳× Spin Payout: **+${fmtWeight(t.spinWeight)}**\n`;
 
   // Completed collections
   const completed = RARITY_ORDER.filter(r => cs.byRarity[r].complete);
@@ -379,9 +437,6 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
   if (!info) return { embeds: [{ title: '🎒 Inventory', color: 0x2b2d31, description: 'Unknown rarity.' }] };
 
   const allItems = info.items;
-  const totalPages = Math.max(1, Math.ceil(allItems.length / INVENTORY_ITEMS_PER_PAGE));
-  const safePage = Math.max(0, Math.min(page, totalPages - 1));
-  const pageItems = allItems.slice(safePage * INVENTORY_ITEMS_PER_PAGE, (safePage + 1) * INVENTORY_ITEMS_PER_PAGE);
 
   const rarityLabel = rarity.charAt(0).toUpperCase() + rarity.slice(1);
   // Fixed-length bar so all rarities appear uniform
@@ -390,29 +445,27 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
 
   let description = `> ${RARITIES[rarity].emoji} **${rarityLabel} Collection** ${bar} **${info.owned}/${info.total}**${completeTag}\n\n`;
 
-  // Per-item stat boost info
-  const boosts = CONFIG.collectibles.mysteryBox.statBoostPerItem[rarity] || {};
-  description += `> **Per item: ∑** +${((boosts.interestRate || 0) * 100).toFixed(3)}% · **↩** +${((boosts.cashbackRate || 0) * 100).toFixed(3)}% · **⛁⌖** +${((boosts.minesRevealChance || 0) * 100).toFixed(3)}% · **∀×** +${((boosts.universalDoubleChance || 0) * 100).toFixed(4)}% · **⟳×** +${(boosts.spinWeight || 0).toFixed(4)}x\n`;
-
-  // Collection completion bonus
+  // Set bonus as a bullet-point list
   const cb = CONFIG.collectibles.mysteryBox.collectionCompleteBonus[rarity];
   if (cb) {
-    const tag = info.complete ? '✨ Active' : `${info.total - info.owned} left`;
-    description += `\n> **Set bonus** (${tag}): ∑ +${((cb.interestRate || 0) * 100).toFixed(3)}% · ↩ +${((cb.cashbackRate || 0) * 100).toFixed(3)}% · ⛁⌖ +${((cb.minesRevealChance || 0) * 100).toFixed(3)}% · ∀× +${((cb.universalDoubleChance || 0) * 100).toFixed(3)}% · ⟳× +${(cb.spinWeight || 0).toFixed(3)}x\n`;
+    const tag = info.complete ? '✨ Active' : `${info.total - info.owned} left to unlock`;
+    description += `**◈ Set Bonus** (${tag}):\n`;
+    if (cb.interestRate)         description += `> • ∑ Interest: **+${fmtPct(cb.interestRate, '/day')}**\n`;
+    if (cb.cashbackRate)         description += `> • ↩ Cashback: **+${fmtPct(cb.cashbackRate)}**\n`;
+    if (cb.minesRevealChance)    description += `> • ⛁⌖ Mines Save: **+${fmtPct(cb.minesRevealChance)}**\n`;
+    if (cb.universalDoubleChance)description += `> • ∀× Income Double: **+${fmtPct(cb.universalDoubleChance)}**\n`;
+    if (cb.spinWeight)           description += `> • ⟳× Spin Payout: **+${fmtWeight(cb.spinWeight)}**\n`;
   }
   description += '\n';
 
-  for (const item of pageItems) {
+  for (const item of allItems) {
     const owned = cs.ownedIds.has(item.id);
+    const buffStr = formatItemBuffDisplay(getItemDisplayBuff(item, allItems));
     if (owned) {
-      description += `${item.emoji} **${item.name}**\n`;
+      description += `${item.emoji} **${item.name}** — *${buffStr}*\n`;
     } else {
-      description += `⬛ ~~${item.name}~~\n`;
+      description += `⬛ ~~${item.name}~~ — *${buffStr}*\n`;
     }
-  }
-
-  if (totalPages > 1) {
-    description += `\n> Page ${safePage + 1}/${totalPages}`;
   }
 
   return {
@@ -421,8 +474,8 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
       color: 0x2b2d31,
       description,
     }],
-    page: safePage,
-    totalPages,
+    page: 0,
+    totalPages: 1,
   };
 }
 
@@ -778,12 +831,15 @@ async function handleTrade(interaction) {
   if (target.bot) return interaction.reply("Can't trade with a bot");
   const trade = {
     initiatorId: userId, targetId: target.id,
+    initiatorUsername: interaction.user.username,
+    targetUsername: target.username,
     initiatorOffer: { coins: 0, items: [] }, targetOffer: { coins: 0, items: [] },
     initiatorConfirmed: false, targetConfirmed: false, createdAt: Date.now(),
   };
   activeTrades.set(userId, trade);
   const msg = await interaction.reply({
-    content: renderTradeView(trade) + `\n\nBoth players can set coins, add/remove items, then both confirm.`,
+    content: `**${interaction.user.username}** wants to trade with **${target.username}**`,
+    embeds: [renderTradeView(trade)],
     components: renderTradeButtons(trade),
     fetchReply: true,
   });
@@ -1106,14 +1162,43 @@ async function handleTradeButton(interaction, parts) {
       for (const item of initItemsToGive) tw.inventory.push(item);
 
       store.saveWallets(); activeTrades.delete(tradeKey); persistTradeSessions();
-      return interaction.update({ content: `**Trade Complete!** <@${trade.initiatorId}> ↔ <@${trade.targetId}>`, components: [] });
+      const initGave = [
+        trade.initiatorOffer.coins ? `💰 ${store.formatNumber(trade.initiatorOffer.coins)} coins` : null,
+        ...initItemsToGive.map(i => `${i.emoji} ${i.name}`),
+      ].filter(Boolean);
+      const tgtGave = [
+        trade.targetOffer.coins ? `💰 ${store.formatNumber(trade.targetOffer.coins)} coins` : null,
+        ...tgtItemsToGive.map(i => `${i.emoji} ${i.name}`),
+      ].filter(Boolean);
+      const completedEmbed = {
+        title: '✅ Trade Complete',
+        color: 0x57f287,
+        fields: [
+          {
+            name: `${trade.initiatorUsername} gave`,
+            value: initGave.length ? initGave.join('\n') : '*Nothing*',
+            inline: true,
+          },
+          {
+            name: `${trade.targetUsername} gave`,
+            value: tgtGave.length ? tgtGave.join('\n') : '*Nothing*',
+            inline: true,
+          },
+        ],
+      };
+      return interaction.update({ content: '', embeds: [completedEmbed], components: [] });
     }
-    return interaction.update({ content: renderTradeView(trade), components: renderTradeButtons(trade) });
+    return interaction.update({ embeds: [renderTradeView(trade)], content: '', components: renderTradeButtons(trade) });
   }
   if (action === 'cancel') {
+    const cancellerName = interaction.user.username;
     activeTrades.delete(tradeKey);
     persistTradeSessions();
-    return interaction.update({ content: "Trade cancelled.", components: [] });
+    return interaction.update({
+      content: '',
+      embeds: [{ title: '❌ Trade Cancelled', color: 0xed4245, description: `Cancelled by **${cancellerName}**.` }],
+      components: [],
+    });
   }
 }
 
@@ -1141,8 +1226,9 @@ async function handleTradeSelectMenu(interaction) {
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
     persistTradeSessions();
 
+    await interaction.deferUpdate();
     await updateTradeMessage(interaction, trade);
-    return interaction.update({ content: `Added **${item.name}** to your offer!`, components: [] });
+    return interaction.editReply({ content: `Added **${item.name}** to your offer!`, components: [] });
   }
 
   if (action === 'unselectitem') {
@@ -1151,8 +1237,9 @@ async function handleTradeSelectMenu(interaction) {
     const removed = offer.items.splice(offerIdx, 1)[0];
     trade.initiatorConfirmed = false; trade.targetConfirmed = false;
     persistTradeSessions();
+    await interaction.deferUpdate();
     await updateTradeMessage(interaction, trade);
-    return interaction.update({ content: `Removed **${removed.name}** from your offer!`, components: [] });
+    return interaction.editReply({ content: `Removed **${removed.name}** from your offer!`, components: [] });
   }
 }
 
@@ -1180,7 +1267,9 @@ async function handleTradeModal(interaction) {
   trade.initiatorConfirmed = false; trade.targetConfirmed = false;
   persistTradeSessions();
 
-  return interaction.update({ content: renderTradeView(trade), components: renderTradeButtons(trade) });
+  await interaction.deferUpdate();
+  await updateTradeMessage(interaction, trade);
+  return interaction.followUp({ content: `✅ Set your coin offer to **${store.formatNumber(amount)}**.`, ephemeral: true });
 }
 
 // Giveaway handlers.

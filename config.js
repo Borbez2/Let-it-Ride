@@ -28,10 +28,10 @@ const CONFIG = {
       // baseRate (= getInterestRate) applies fully to the first slab1Threshold coins,
       // then scales down by slab2Scale and slab3Scale for higher balances.
       tieredInterest: {
-        slab1Threshold: 1000000,   // 1M — full rate up to here
-        slab2Threshold: 10000000,  // 10M — reduced rate from 1M to 10M
-        slab2Scale: 0.1,           // r * 0.1 on balance between t1 and t2
-        slab3Scale: 0.01,          // r * 0.01 on balance above t2
+        slab1Threshold: 1000000,   // 1M - full rate up to here
+        slab2Threshold: 10000000,  // 10M - reduced rate from 1M to 10M
+        slab2Scale: 0.5,           // r * 0.5 on balance between t1 and t2
+        slab3Scale: 0.1,           // r * 0.1 on balance above t2
       },
     },
     pools: {
@@ -45,7 +45,7 @@ const CONFIG = {
       interestPerLevel: 0.01,
       cashbackPerLevel: 0.001,
       universalIncomePerLevelChance: 0.1,
-      universalIncomeChanceCap: 1,
+      universalIncomeChanceCap: 20,
       costs: {
         interest: [
           1000, 5000, 10000, 25000, 500000,
@@ -180,7 +180,7 @@ const CONFIG = {
   // Shared emojis and rarity model
   // -------------------------------
   ui: {
-    rarityOrder: ['common', 'uncommon', 'rare', 'legendary', 'epic', 'mythic', 'divine'],
+    rarityOrder: ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine'],
     rarities: {
       common: { emoji: '⬜', color: null },
       uncommon: { emoji: '🟩', color: null },
@@ -216,41 +216,52 @@ const CONFIG = {
         common: { slope: -0.6, floor: 0.25 },
         uncommon: { slope: -0.35, floor: 0.35 },
         rare: { slope: 0.8, floor: null },
-        legendary: { slope: 1.4, floor: null },
-        epic: { slope: 1.8, floor: null },
+        epic: { slope: 1.4, floor: null },
+        legendary: { slope: 1.8, floor: null },
         mythic: { slope: 2.6, floor: null },
         divine: { slope: 3.2, floor: null },
       },
-      highRarityThreshold: 'legendary',
+      highRarityThreshold: 'epic',
       weightsByRarity: {
-        common: 50,
-        uncommon: 30,
-        rare: 12,
-        legendary: 2,
-        epic: 5,
-        mythic: 0.8,
-        divine: 0.2,
+        common: 80,
+        uncommon: 18.29,
+        rare: 1,
+        epic: 0.5,
+        legendary: 0.15,
+        mythic: 0.05,
+        divine: 0.01,
       },
-      // Placeholder stat boosts per item – keyed by rarity.
-      // Each item of that rarity grants these flat bonuses.
+      // Per-item stat boosts: zeroed out — bonuses only come from completing a full set.
+      // perItemDisplayBuff below defines the DISPLAYED value per item (informational only).
       statBoostPerItem: {
-        common:    { interestRate: 0.00001, cashbackRate: 0.00001, minesRevealChance: 0.00001, universalDoubleChance: 0.00005, spinWeight: 0.0005 },
-        uncommon:  { interestRate: 0.00003, cashbackRate: 0.00003, minesRevealChance: 0.00003, universalDoubleChance: 0.0001,  spinWeight: 0.001  },
-        rare:      { interestRate: 0.00005, cashbackRate: 0.00005, minesRevealChance: 0.00005, universalDoubleChance: 0.0002,  spinWeight: 0.002  },
-        legendary: { interestRate: 0.0001,  cashbackRate: 0.0001,  minesRevealChance: 0.0001,  universalDoubleChance: 0.0004,  spinWeight: 0.004  },
-        epic:      { interestRate: 0.0002,  cashbackRate: 0.0002,  minesRevealChance: 0.0002,  universalDoubleChance: 0.0006,  spinWeight: 0.006  },
-        mythic:    { interestRate: 0.0004,  cashbackRate: 0.0004,  minesRevealChance: 0.0004,  universalDoubleChance: 0.001,   spinWeight: 0.01   },
-        divine:    { interestRate: 0.0008,  cashbackRate: 0.0008,  minesRevealChance: 0.0008,  universalDoubleChance: 0.002,   spinWeight: 0.02   },
+        common:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        uncommon:  { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        rare:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        legendary: { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        epic:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        mythic:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        divine:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
       },
-      // Bonus granted when ALL items of a rarity are collected.
+      // Displayed buff per individual item (purely informational — unlocked only when full set is complete).
+      // Each item shows ONE buff type cycling: interest → cashback → mines → income → spin.
+      perItemDisplayBuff: {
+        common:    { interestRate: 0.00001, cashbackRate: 0.00001, minesRevealChance: 0.00001, universalDoubleChance: 0.00002, spinWeight: 0.0001  },
+        uncommon:  { interestRate: 0.00003, cashbackRate: 0.00003, minesRevealChance: 0.00003, universalDoubleChance: 0.00005, spinWeight: 0.0003  },
+        rare:      { interestRate: 0.0001,  cashbackRate: 0.0001,  minesRevealChance: 0.0001,  universalDoubleChance: 0.0002,  spinWeight: 0.001   },
+        epic:      { interestRate: 0.0003,  cashbackRate: 0.0003,  minesRevealChance: 0.0003,  universalDoubleChance: 0.0006,  spinWeight: 0.003   },
+        legendary: { interestRate: 0.001,   cashbackRate: 0.001,   minesRevealChance: 0.001,   universalDoubleChance: 0.002,   spinWeight: 0.01    },
+        mythic:    { interestRate: 0.005,   cashbackRate: 0.005,   minesRevealChance: 0.005,   universalDoubleChance: 0.01,    spinWeight: 0.05    },
+        divine:    { interestRate: 0.02,    cashbackRate: 0.02,    minesRevealChance: 0.02,    universalDoubleChance: 0.04,    spinWeight: 0.2     },
+      },
+      // Bonus granted when ALL items of a rarity are collected (the only real economy effect).
       collectionCompleteBonus: {
-        common:    { interestRate: 0.0005,  cashbackRate: 0.0005,  minesRevealChance: 0.0005,  universalDoubleChance: 0.001,  spinWeight: 0.01 },
-        uncommon:  { interestRate: 0.0008,  cashbackRate: 0.0008,  minesRevealChance: 0.0008,  universalDoubleChance: 0.002,  spinWeight: 0.015 },
-        rare:      { interestRate: 0.0012,  cashbackRate: 0.0012,  minesRevealChance: 0.0012,  universalDoubleChance: 0.003,  spinWeight: 0.02  },
-        legendary: { interestRate: 0.002,   cashbackRate: 0.002,   minesRevealChance: 0.002,   universalDoubleChance: 0.005,  spinWeight: 0.03  },
-        epic:      { interestRate: 0.003,   cashbackRate: 0.003,   minesRevealChance: 0.003,   universalDoubleChance: 0.008,  spinWeight: 0.04  },
-        mythic:    { interestRate: 0.005,   cashbackRate: 0.005,   minesRevealChance: 0.005,   universalDoubleChance: 0.012,  spinWeight: 0.06  },
-        divine:    { interestRate: 0.008,   cashbackRate: 0.008,   minesRevealChance: 0.008,   universalDoubleChance: 0.02,   spinWeight: 0.1   },
+        common:    { interestRate: 0.0005,  cashbackRate: 0.0005,  minesRevealChance: 0.0005,  universalDoubleChance: 0.001,  spinWeight: 0.005  },
+        uncommon:  { interestRate: 0.001,   cashbackRate: 0.001,   minesRevealChance: 0.001,   universalDoubleChance: 0.002,  spinWeight: 0.01   },
+        rare:      { interestRate: 0.002,   cashbackRate: 0.002,   minesRevealChance: 0.002,   universalDoubleChance: 0.005,  spinWeight: 0.02   },
+        epic:      { interestRate: 0.005,   cashbackRate: 0.005,   minesRevealChance: 0.005,   universalDoubleChance: 0.01,   spinWeight: 0.05   },
+        legendary: { interestRate: 0.01,    cashbackRate: 0.01,    minesRevealChance: 0.01,    universalDoubleChance: 0.02,   spinWeight: 0.1    },
+        mythic:    { interestRate: 0.02,    cashbackRate: 0.02,    minesRevealChance: 0.02,    universalDoubleChance: 0.05,   spinWeight: 0.25   },
+        divine:    { interestRate: 0.05,    cashbackRate: 0.05,    minesRevealChance: 0.05,    universalDoubleChance: 0.1,    spinWeight: 0.5    },
       },
     },
   },
@@ -259,7 +270,7 @@ const CONFIG = {
   // Stats / analytics pages
   // -------------------------------
   stats: {
-    defaultTimeframeKey: '1w',
+    defaultTimeframeKey: '1d',
     timeframes: [
       { key: '1min', label: '1min', seconds: 60 },
       { key: '5min', label: '5min', seconds: 300 },
@@ -355,8 +366,8 @@ for (let i = 1; i <= CONFIG.collectibles.totalPlaceholders; i++) {
   if (i <= 40) rarity = 'common';
   else if (i <= 65) rarity = 'uncommon';
   else if (i <= 85) rarity = 'rare';
-  else if (i <= 100) rarity = 'legendary';
-  else if (i <= 110) rarity = 'epic';
+  else if (i <= 100) rarity = 'epic';
+  else if (i <= 110) rarity = 'legendary';
   else if (i <= 115) rarity = 'mythic';
   else rarity = 'divine';
 

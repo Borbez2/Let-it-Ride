@@ -125,7 +125,10 @@ function buildCollectiblesPage() {
 
   let dropText = '';
   for (const [rarity, pool] of poolEntries) {
-    const pct = ((pool.weight / totalWeight) * 100).toFixed(1);
+    const rawPct = (pool.weight / totalWeight) * 100;
+    // Use enough decimal places so tiny rarities never round to 0.0%
+    const dec = rawPct >= 1 ? 1 : rawPct >= 0.1 ? 2 : rawPct >= 0.01 ? 3 : 4;
+    const pct = rawPct.toFixed(dec);
     const icon = RARITIES[rarity]?.emoji || '\u25B8';
     const label = rarity.charAt(0).toUpperCase() + rarity.slice(1);
     dropText += `> ${icon} ${label} \u2236 **${pct}%** (${pool.items.length} items)\n`;

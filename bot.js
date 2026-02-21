@@ -386,12 +386,15 @@ async function distributeUniversalPool() {
   if (share > 0) {
     for (const id of ids) {
       const doubleChance = store.getUniversalIncomeDoubleChance(id);
-      const gotDouble = Math.random() < doubleChance;
-      const payout = gotDouble ? share * 2 : share;
+      // Support overflow: 120% = guaranteed 2x + 20% chance of 3x (avg 2.2x)
+      const guaranteed = Math.floor(doubleChance);
+      const frac = doubleChance - guaranteed;
+      const totalMult = 1 + guaranteed + (Math.random() < frac ? 1 : 0);
+      const payout = share * totalMult;
       store.getWallet(id).bank += payout;
       store.trackUniversalIncome(id, payout);
-      if (gotDouble) {
-        doubledPayouts.push({ id, payout });
+      if (totalMult > 1) {
+        doubledPayouts.push({ id, payout, mult: totalMult });
       }
     }
     poolData.universalPool -= share * ids.length;
@@ -429,7 +432,7 @@ async function distributeUniversalPool() {
       const lines = await Promise.all(doubledPayouts.map(async (entry) => {
         const u = await client.users.fetch(entry.id).catch(() => null);
         const name = u ? u.username : 'Unknown';
-        return `**${name}** earned **double universal income** from their perk (**${store.formatNumber(entry.payout)}** total).`;
+        return `**${name}** got **${entry.mult}x** universal income (**${store.formatNumber(entry.payout)}** total).`;
       }));
       await channel.send(`✨ **Hourly Universal Income Mult Procs**\n${lines.join('\n')}`).catch((err) => {
         console.error(`Hourly perk message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
