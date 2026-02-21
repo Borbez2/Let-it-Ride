@@ -800,88 +800,102 @@ async function runDailySpin() {
   } catch (err) { console.error("Daily spin error:", err); }
 }
 
-// End giveaways once their timers expire.
-async function checkExpiredGiveaways() {
+// Active giveaway timers keyed by giveaway ID.
+const giveawayTimers = new Map();
+
+// Resolve a single giveaway by ID once its timer fires.
+async function resolveGiveaway(giveawayId) {
   try {
-    // Loop through giveaways and process anything that expired.
-    const giveaways = store.getAllGiveaways();
-    for (const giveaway of giveaways) {
-      if (Date.now() > giveaway.expiresAt) {
-        const announceChannelId = giveaway.channelId || ANNOUNCE_CHANNEL_ID;
-        const channel = announceChannelId
-          ? await client.channels.fetch(announceChannelId).catch(() => null)
-          : null;
-        const disabledRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`giveaway_ended_${giveaway.id}`)
-            .setLabel('Giveaway Ended')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(true),
-        );
+    const giveaway = store.getGiveaway(giveawayId);
+    if (!giveaway) return; // already resolved or never existed
 
-        if (giveaway.participants.length > 0) {
-          // Pick a random winner from participants.
-          const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
-          store.getWallet(winner).balance += giveaway.amount;
-          store.trackGiveawayWin(winner, giveaway.amount);
-          store.trackGiveawayCreated(giveaway.initiatorId, giveaway.amount);
-          store.saveWallets();
-          
-          const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
-          const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
+    const announceChannelId = giveaway.channelId || ANNOUNCE_CHANNEL_ID;
+    const channel = announceChannelId
+      ? await client.channels.fetch(announceChannelId).catch(() => null)
+      : null;
+    const disabledRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`giveaway_ended_${giveaway.id}`)
+        .setLabel('Giveaway Ended')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+    );
 
-          const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
+    if (giveaway.participants.length > 0) {
+      // Pick a random winner from participants.
+      const winner = giveaway.participants[Math.floor(Math.random() * giveaway.participants.length)];
+      store.getWallet(winner).balance += giveaway.amount;
+      store.trackGiveawayWin(winner, giveaway.amount);
+      store.trackGiveawayCreated(giveaway.initiatorId, giveaway.amount);
+      store.saveWallets();
 
-          if (channel && giveaway.messageId) {
-            const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
-            if (originalMessage) {
-              await originalMessage.edit({
-                content:
-                  `🎉 **GIVEAWAY ENDED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
-                  `Participants: ${giveaway.participants.length}${giveawayMessageLine}\nEnds: **ENDED**\nWinner: <@${winner}>`,
-                components: [disabledRow],
-              }).catch(() => {});
-            }
-          }
+      const initiatorUser = await client.users.fetch(giveaway.initiatorId).catch(() => null);
+      const initiatorName = initiatorUser ? initiatorUser.username : 'Unknown';
 
-          if (channel) {
-            await channel.send(
-              `🎉 **GIVEAWAY ENDED!**\n\n` +
-              `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
-              `Participants: ${giveaway.participants.length}${giveawayMessageLine}`
-            ).catch(() => {});
-          }
-        } else {
-          // Refund the host if nobody joined.
-          store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
-          store.saveWallets();
+      const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
 
-          const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
-
-          if (channel && giveaway.messageId) {
-            const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
-            if (originalMessage) {
-              await originalMessage.edit({
-                content:
-                  `🎉 **GIVEAWAY ENDED**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
-                  `Participants: 0${giveawayMessageLine}\nEnds: **ENDED**\nNo participants joined. Host refunded.`,
-                components: [disabledRow],
-              }).catch(() => {});
-            }
-          }
-
-          if (channel) {
-            await channel.send(
-              `🎉 **GIVEAWAY ENDED**\n\nNo participants joined, so <@${giveaway.initiatorId}> was refunded **${store.formatNumber(giveaway.amount)}** coins.`
-            ).catch(() => {});
-          }
+      if (channel && giveaway.messageId) {
+        const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+        if (originalMessage) {
+          await originalMessage.edit({
+            content:
+              `🎉 **GIVEAWAY ENDED!**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
+              `Participants: ${giveaway.participants.length}${giveawayMessageLine}\nEnds: **ENDED**\nWinner: <@${winner}>`,
+            components: [disabledRow],
+          }).catch(() => {});
         }
-        
-        store.removeGiveaway(giveaway.id);
+      }
+
+      if (channel) {
+        await channel.send(
+          `🎉 **GIVEAWAY ENDED!**\n\n` +
+          `<@${winner}> won **${store.formatNumber(giveaway.amount)}** coins from **${initiatorName}**'s giveaway!\n` +
+          `Participants: ${giveaway.participants.length}${giveawayMessageLine}`
+        ).catch(() => {});
+      }
+    } else {
+      // Refund the host if nobody joined.
+      store.getWallet(giveaway.initiatorId).balance += giveaway.amount;
+      store.saveWallets();
+
+      const giveawayMessageLine = giveaway.message ? `\nMessage: ${giveaway.message}` : '';
+
+      if (channel && giveaway.messageId) {
+        const originalMessage = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+        if (originalMessage) {
+          await originalMessage.edit({
+            content:
+              `🎉 **GIVEAWAY ENDED**\n\nHost: <@${giveaway.initiatorId}>\nPrize Pool: **${store.formatNumber(giveaway.amount)}** coins\n` +
+              `Participants: 0${giveawayMessageLine}\nEnds: **ENDED**\nNo participants joined. Host refunded.`,
+            components: [disabledRow],
+          }).catch(() => {});
+        }
+      }
+
+      if (channel) {
+        await channel.send(
+          `🎉 **GIVEAWAY ENDED**\n\nNo participants joined, so <@${giveaway.initiatorId}> was refunded **${store.formatNumber(giveaway.amount)}** coins.`
+        ).catch(() => {});
       }
     }
-    
-  } catch (err) { console.error("Giveaway check error:", err); }
+
+    store.removeGiveaway(giveaway.id);
+  } catch (err) { console.error('Giveaway resolve error:', err); }
+}
+
+// Schedule a setTimeout that fires exactly when a giveaway expires.
+function scheduleGiveawayTimer(giveawayId) {
+  const giveaway = store.getGiveaway(giveawayId);
+  if (!giveaway) return;
+  // If a timer already exists for this ID, clear it first.
+  const existing = giveawayTimers.get(giveawayId);
+  if (existing) clearTimeout(existing);
+  const delay = Math.max(0, giveaway.expiresAt - Date.now());
+  const t = setTimeout(() => {
+    giveawayTimers.delete(giveawayId);
+    resolveGiveaway(giveawayId);
+  }, delay);
+  giveawayTimers.set(giveawayId, t);
 }
 
 // Post a daily leaderboard snapshot.
@@ -962,7 +976,10 @@ function scheduleAll() {
   }
 
   scheduleNextHourly();
-  setInterval(checkExpiredGiveaways, CONFIG.economy.pools.giveawayExpiryCheckMs);
+  // Wire up the scheduler so economy.js can trigger it after creating a giveaway.
+  economy.setGiveawayTimerScheduler(scheduleGiveawayTimer);
+  // Reschedule timers for any giveaways that survived a bot restart.
+  for (const g of store.getAllGiveaways()) scheduleGiveawayTimer(g.id);
   setInterval(sweepExpiredSessions, SESSION_SWEEP_INTERVAL_MS);
   restartLifeStatsInterval();
   scheduleNextDaily1115();

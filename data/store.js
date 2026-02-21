@@ -41,7 +41,7 @@ const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 const LUCKY_POT_DURATION_MS = 30 * 60 * 1000;
 const LUCKY_POT_COST = 100000;
 const LUCKY_POT_BOOST = 0.05;
-const UNLUCKY_POT_DURATION_MS = 60 * 60 * 1000;
+const UNLUCKY_POT_DURATION_MS = 30 * 60 * 1000;
 const UNLUCKY_POT_COST = 200000;
 const UNLUCKY_POT_PENALTY = 0.25;
 
@@ -1053,6 +1053,18 @@ function buyUnluckyPot(buyerId, targetId) {
   return { success: true };
 }
 
+function removeUnluckyPot(targetId) {
+  if (!hasWallet(targetId)) return { success: false, reason: 'no_wallet' };
+  const target = getWallet(targetId);
+  ensureWalletStatsShape(target);
+  if (!target.stats.potions.unlucky || target.stats.potions.unlucky.expiresAt <= Date.now()) {
+    return { success: false, reason: 'not_active' };
+  }
+  target.stats.potions.unlucky = null;
+  saveWallet(targetId);
+  return { success: true };
+}
+
 function applyProfitBoost(userId, gameName, baseProfit) {
   const profit = normalizeCoins(baseProfit, 0);
   return profit;
@@ -1538,7 +1550,7 @@ module.exports = {
   getUserBonuses, getMysteryBoxLuckInfo, getUserPityStatus,
   getCollectionStats,
   applyProfitBoost, tryTriggerMinesReveal,
-  getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot,
+  getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot, removeUnluckyPot,
   checkDaily, claimDaily,
   rollMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,

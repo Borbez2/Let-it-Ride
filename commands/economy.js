@@ -6,6 +6,10 @@ const GIVEAWAY_CHANNEL_ID = CONFIG.bot.channels.giveaway;
 
 const activeTrades = new Map();
 const pendingGiveawayMessages = new Map();
+
+// Callback set by bot.js to schedule a precise expiry timer for a giveaway.
+let _scheduleGiveawayTimer = null;
+function setGiveawayTimerScheduler(fn) { _scheduleGiveawayTimer = fn; }
 const RARITY_ORDER = CONFIG.ui.rarityOrder;
 
 
@@ -1541,6 +1545,7 @@ async function handleGiveawayModal(interaction) {
   });
 
   store.setGiveawayMessageRef(giveaway.id, giveawayPostMessage.id, GIVEAWAY_CHANNEL_ID);
+  if (_scheduleGiveawayTimer) _scheduleGiveawayTimer(giveaway.id);
 
   return interaction.reply({ content: `Giveaway posted in <#${GIVEAWAY_CHANNEL_ID}>.`, ephemeral: true });
 }
@@ -1602,5 +1607,6 @@ module.exports = {
   handleTradeButton,
   handleTradeSelectMenu, handleTradeModal,
   handleGiveawayStart, handleGiveawayModal, handleGiveawayJoin,
+  setGiveawayTimerScheduler,
   expireTradeSessions,
 };

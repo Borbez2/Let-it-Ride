@@ -150,7 +150,7 @@ function renderPotionsEmbed(userId, successMessage) {
   // Unlucky Pot
   fields.push({
     name: '⚱✕ Unlucky Pot',
-    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-25%** for **1 hour**\n> Select a target below to apply this curse`,
+    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-25%** for **30 mins**\n> Select a target below to apply this curse`,
     inline: false,
   });
 
@@ -294,6 +294,33 @@ async function handleShopButton(interaction, parts) {
     }
     const stackCount = result.stacks || 1;
     const { embed, components } = renderShopPage(uid, 'potions', `\u2618\u26b1 Lucky Pot activated! (+5% win chance for 1 hour)`);
+    return interaction.update({ content: '', embeds: [embed], components });
+  }
+
+  if (action === 'unluckyconfirm') {
+    const targetId = parts[3];
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+
+    const potionCfg = store.getPotionConfig();
+    const result = store.buyUnluckyPot(uid, targetId);
+    if (!result.success) {
+      if (result.reason === 'insufficient_funds') return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.unluckyPotCost)}** coins!`, ephemeral: true });
+      if (result.reason === 'no_wallet') return interaction.reply({ content: "That user doesn't have a wallet!", ephemeral: true });
+      if (result.reason === 'already_active') return interaction.reply({ content: 'That user already has an active Unlucky Pot!', ephemeral: true });
+      if (result.reason === 'self_target') return interaction.reply({ content: "You can't curse yourself!", ephemeral: true });
+    }
+
+    const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
+    const targetName = targetUser ? targetUser.username : 'Unknown';
+    const { embed, components } = renderShopPage(uid, 'potions', `⚱✕ Unlucky Pot applied to ${targetName} for 30 mins!`);
+    await interaction.update({ content: '', embeds: [embed], components });
+    await interaction.channel.send({ content: `<@${targetId}> — ⚱✕ you've been hit with an **Unlucky Pot** by <@${uid}>! Your win chance is reduced by **-25%** for **30 mins**.` });
+    return;
+  }
+
+  if (action === 'unluckycancel') {
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    const { embed, components } = renderShopPage(uid, 'potions');
     return interaction.update({ content: '', embeds: [embed], components });
   }
 
@@ -444,18 +471,27 @@ async function handleShopSelectMenu(interaction) {
     if (targetId === buyerId) return interaction.reply({ content: "You can't curse yourself!", ephemeral: true });
 
     const potionCfg = store.getPotionConfig();
-    const result = store.buyUnluckyPot(buyerId, targetId);
-    if (!result.success) {
-      if (result.reason === 'insufficient_funds') return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.unluckyPotCost)}** coins!`, ephemeral: true });
-      if (result.reason === 'no_wallet') return interaction.reply({ content: "That user doesn't have a wallet!", ephemeral: true });
-      if (result.reason === 'already_active') return interaction.reply({ content: 'That user already has an active Unlucky Pot!', ephemeral: true });
-      if (result.reason === 'self_target') return interaction.reply({ content: "You can't curse yourself!", ephemeral: true });
-    }
-
     const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
     const targetName = targetUser ? targetUser.username : 'Unknown';
-    const { embed, components } = renderShopPage(buyerId, 'potions', `Unlucky Pot applied to ${targetName} for 1 hour!`);
-    return interaction.update({ content: '', embeds: [embed], components });
+
+    const confirmEmbed = {
+      title: '⚱✕ Confirm Unlucky Pot',
+      color: 0x2b2d31,
+      description: `Are you sure you want to curse <@${targetId}>?\n\n> Cost: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Effect: **-25%** win chance for **30 mins**`,
+    };
+
+    const confirmRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`shop_unluckyconfirm_${buyerId}_${targetId}`)
+        .setLabel(`Curse ${targetName}`)
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`shop_unluckycancel_${buyerId}`)
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    return interaction.update({ content: '', embeds: [confirmEmbed], components: [confirmRow] });
   }
 }
 

@@ -185,11 +185,14 @@ function renderUsersPage(adminId, statusMsg) {
     new ButtonBuilder().setCustomId(`adm_resetupgrades_${adminId}`).setLabel('↩ Reset Upgrades').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
     new ButtonBuilder().setCustomId(`adm_resetstats_${adminId}`).setLabel('📊 Reset Stats').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
   );
+  const actionRow2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`adm_removecurse_${adminId}`).setLabel('⚱✕ Remove Unlucky Pot').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
+  );
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`adm_page_dashboard_${adminId}`).setLabel('◂ Back').setStyle(ButtonStyle.Secondary),
   );
 
-  return { embeds: [embed], components: [selectRow, actionRow, navRow] };
+  return { embeds: [embed], components: [selectRow, actionRow, actionRow2, navRow] };
 }
 
 function renderEconomyPage(adminId, statusMsg) {
@@ -487,6 +490,16 @@ async function handleAdminButton(interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, 
     const wallet = store.getWallet(session.selectedUserId);
     const total = (wallet.balance || 0) + (wallet.bank || 0);
     return interaction.update(renderUsersPage(adminId, `✅ Stats reset for ${session.selectedUserName}. Lifetime → ${fmtNum(total)}`));
+  }
+  if (action === 'removecurse') {
+    const session = getSession(adminId);
+    if (!session.selectedUserId) return interaction.reply({ content: 'Select a user first.', ephemeral: true });
+    const result = store.removeUnluckyPot(session.selectedUserId);
+    if (!result.success) {
+      const reason = result.reason === 'no_wallet' ? 'That user has no wallet.' : 'No active Unlucky Pot on that user.';
+      return interaction.update(renderUsersPage(adminId, `⚠️ ${reason}`));
+    }
+    return interaction.update(renderUsersPage(adminId, `✅ Removed Unlucky Pot from ${session.selectedUserName}`));
   }
 
   // ── Economy Actions ──
