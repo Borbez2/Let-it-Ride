@@ -143,6 +143,11 @@ function renderOverview(username, wallet) {
         inline: true,
       },
       {
+        name: '🎁 Mystery Boxes',
+        value: `> Opened: **${stats.mysteryBox ? stats.mysteryBox.opened || 0 : 0}**\n> Spent: **${store.formatNumber(stats.mysteryBox ? stats.mysteryBox.spent || 0 : 0)}**\n> Dupe Comp: **${store.formatNumber(stats.mysteryBox ? stats.mysteryBox.duplicateCompEarned || 0 : 0)}**`,
+        inline: true,
+      },
+      {
         name: '▸ Most Played',
         value: topGamesText,
         inline: false,

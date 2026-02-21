@@ -143,7 +143,7 @@ function renderPotionsEmbed(userId, successMessage) {
   }
   fields.push({
     name: '☘⚱ Lucky Pot',
-    value: `${luckyStatus}\n> Boosts your win chance by **+5%** for **1 hour**\n> Affects: Flip, Duel, Let It Ride`,
+    value: `${luckyStatus}\n> Boosts your win chance by **+5%** for **30 mins**\n> Affects: Flip, Duel, Let It Ride`,
     inline: false,
   });
 
@@ -217,7 +217,11 @@ function renderMysteryBoxEmbed(userId, successMessage) {
   };
 
   if (successMessage) {
-    embed.footer = { text: successMessage };
+    if (successMessage.includes('\n')) {
+      embed.fields.push({ name: '📦 Results', value: successMessage, inline: false });
+    } else {
+      embed.footer = { text: successMessage };
+    }
   }
 
   return embed;
@@ -228,7 +232,7 @@ function buildMysteryBoxButtons(userId) {
   const cost = CONFIG.collectibles.mysteryBox.cost;
   const rows = [];
 
-  const quantities = [1, 5, 10, 25, 50];
+  const quantities = [1, 5, 10, 25];
   const buttons = quantities.map(qty => {
     const totalCost = cost * qty;
     return new ButtonBuilder()
@@ -303,6 +307,8 @@ async function handleShopButton(interaction, parts) {
     }
 
     w.balance -= totalCost;
+    store.ensureWalletStatsShape(w);
+    w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
     const items = [];
     let totalCompensation = 0;
 
@@ -331,31 +337,44 @@ async function handleShopButton(interaction, parts) {
     if (quantity === 1) {
       const item = items[0];
       if (item.isDuplicate) {
-        resultMsg = `${item.emoji} DUPLICATE — **${item.name}** → +${store.formatNumber(item.compensation)} coins`;
+        resultMsg = `**Opened x1:**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate)*\n> 💰 Duplicate compensation: **+${store.formatNumber(item.compensation)}** coins`;
       } else {
-        resultMsg = `${item.emoji} Got: **${item.name}** (${item.rarity})`;
+        resultMsg = `**Opened x1:**\n> ${item.emoji} **${item.name}** *(${item.rarity})*`;
       }
     } else {
-      const byRarity = {};
+      // Group items by name, tracking counts and metadata
+      const itemCounts = {};
       let duplicateCount = 0;
       for (const item of items) {
         if (item.isDuplicate) {
           duplicateCount++;
+          const key = `dupe_${item.name}`;
+          if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, count: 0, isDuplicate: true };
+          itemCounts[key].count++;
         } else {
-          if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
-          byRarity[item.rarity].push(item);
+          const key = item.name;
+          if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, count: 0, isDuplicate: false };
+          itemCounts[key].count++;
         }
       }
-      let lines = [`Opened x${quantity}:`];
-      for (const rarity of RARITY_ORDER) {
-        const rarityItems = byRarity[rarity];
-        if (!rarityItems || rarityItems.length === 0) continue;
-        lines.push(`${RARITIES[rarity].emoji} ${rarity}: x${rarityItems.length}`);
+      // Sort items by rarity order, then by name
+      const sorted = Object.values(itemCounts).sort((a, b) => {
+        const ra = RARITY_ORDER.indexOf(a.rarity), rb = RARITY_ORDER.indexOf(b.rarity);
+        if (ra !== rb) return rb - ra; // higher rarity first
+        return a.name.localeCompare(b.name);
+      });
+      let lines = [`**Opened x${quantity}:**`];
+      for (const entry of sorted) {
+        if (entry.isDuplicate) {
+          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}** x${entry.count} *(duplicate)*`);
+        } else {
+          lines.push(`> ${entry.emoji} **${entry.name}** x${entry.count} *(${entry.rarity})*`);
+        }
       }
       if (duplicateCount > 0) {
-        lines.push(`⚠️ Dupes: x${duplicateCount} (+${store.formatNumber(totalCompensation)})`);
+        lines.push(`> 💰 Duplicate compensation: **+${store.formatNumber(totalCompensation)}** coins`);
       }
-      resultMsg = lines.join(' | ');
+      resultMsg = lines.join('\n');
     }
 
     const { embed, components } = renderShopPage(uid, 'mysterybox', resultMsg);

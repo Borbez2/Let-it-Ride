@@ -21,10 +21,10 @@ const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
 
 // Luck buff constants – tiered single-buff system
 const LUCK_ACTIVATION_THRESHOLD = 3;   // minimum streak to activate
-const LUCK_TIER1_CAP = 7;              // losses 3-7 give 1% each
-const LUCK_TIER1_RATE = 0.01;          // 1% per loss in tier 1
-const LUCK_TIER2_CAP = 12;             // losses 8-12 give 2% each
-const LUCK_TIER2_RATE = 0.02;          // 2% per loss in tier 2
+const LUCK_TIER1_CAP = 7;              // losses 3-7 give 0.5% each
+const LUCK_TIER1_RATE = 0.005;         // 0.5% per loss in tier 1
+const LUCK_TIER2_CAP = 12;             // losses 8-12 give 1% each
+const LUCK_TIER2_RATE = 0.01;          // 1% per loss in tier 2
 const LUCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 function calculateLuckBoost(streak) {
@@ -139,7 +139,7 @@ const DEFAULT_STATS = () => ({
   letitride: { wins: 0, losses: 0 },
   duel: { wins: 0, losses: 0 },
   giveaway: { created: 0, amountGiven: 0, won: 0, amountWon: 0 },
-  mysteryBox: { duplicateCompEarned: 0, opened: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 },
+  mysteryBox: { duplicateCompEarned: 0, opened: 0, spent: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 },
   dailySpin: { won: 0, amountWon: 0 },
   interest: { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 },
   universalIncome: { totalEarned: 0 },
@@ -229,9 +229,10 @@ function ensureWalletStatsShape(w) {
     if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
   }
   if (!w.stats.giveaway) w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
-  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0, opened: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 };
+  if (!w.stats.mysteryBox) w.stats.mysteryBox = { duplicateCompEarned: 0, opened: 0, spent: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 };
   if (w.stats.mysteryBox.duplicateCompEarned === undefined) w.stats.mysteryBox.duplicateCompEarned = 0;
   if (w.stats.mysteryBox.opened === undefined) w.stats.mysteryBox.opened = 0;
+  if (w.stats.mysteryBox.spent === undefined) w.stats.mysteryBox.spent = 0;
   if (w.stats.mysteryBox.luckyHighRarity === undefined) w.stats.mysteryBox.luckyHighRarity = 0;
   if (w.stats.mysteryBox.pityStreak === undefined) w.stats.mysteryBox.pityStreak = 0;
   if (w.stats.mysteryBox.bestPityStreak === undefined) w.stats.mysteryBox.bestPityStreak = 0;
@@ -346,8 +347,17 @@ function evaluateLuckOnLoss(w, now = Date.now()) {
 
 function evaluateLuckOnWin(w, now = Date.now()) {
   ensureWalletStatsShape(w);
-  w.stats.bonuses.luck.lossStreak = 0;
-  refreshLuckBuff(w.stats.bonuses.luck, now);
+  const luck = w.stats.bonuses.luck;
+  luck.lossStreak = 0;
+  // Clear the active buff on any win so that a new losing streak always
+  // starts from scratch — winning "resets the meter" completely.
+  // This means 5 losses → win → 6 losses gives only the 6-loss buff,
+  // not a 5-loss buff shielding until the 6-loss threshold is crossed.
+  if (!luck.buff) luck.buff = { boost: 0, expiresAt: 0, streak: 0 };
+  luck.buff.boost = 0;
+  luck.buff.expiresAt = 0;
+  luck.buff.streak = 0;
+  refreshLuckBuff(luck, now);
 }
 
 function applyLuckCashback(userId, lossAmount, now = Date.now()) {
@@ -444,15 +454,32 @@ function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto
 }
 
 function trackLifeStatsHeartbeat(now = Date.now()) {
-  let wroteAny = false;
-  for (const wallet of Object.values(wallets)) {
+  const changedIds = [];
+  for (const [userId, wallet] of Object.entries(wallets)) {
     const wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', {
       minMs: CONFIG.runtime.networthHistory.heartbeatMinWriteMs,
     });
-    if (wrote) wroteAny = true;
+    if (wrote) changedIds.push(userId);
   }
-  if (wroteAny) saveWallets();
-  return wroteAny;
+  if (changedIds.length > 0) {
+    const upsertChanged = db.transaction(() => {
+      for (const userId of changedIds) {
+        const w = wallets[userId];
+        if (!w) continue;
+        ensureWalletStatsShape(w);
+        stmts.upsertWallet.run(
+          userId,
+          w.balance, w.lastDaily || 0, w.streak || 0,
+          w.bank || 0, w.lastBankPayout || 0,
+          w.interestLevel || 0, w.cashbackLevel || 0, w.spinMultLevel || 0, w.universalIncomeMultLevel || 0,
+          JSON.stringify(w.inventory || []),
+          JSON.stringify(w.stats || DEFAULT_STATS())
+        );
+      }
+    });
+    upsertChanged();
+  }
+  return changedIds.length > 0;
 }
 
 // Prepared SQL statements.
@@ -709,9 +736,29 @@ function addToLossPool(amount) {
 }
 
 // Wallet helpers.
+
+// Save a single wallet to the database (used by hot-path operations).
+function saveWallet(userId) {
+  const w = wallets[userId];
+  if (!w) return;
+  ensureWalletStatsShape(w);
+  maybeTrackNetWorthSnapshotForWallet(w);
+  stmts.upsertWallet.run(
+    userId,
+    w.balance, w.lastDaily || 0, w.streak || 0,
+    w.bank || 0, w.lastBankPayout || 0,
+    w.interestLevel || 0, w.cashbackLevel || 0, w.spinMultLevel || 0, w.universalIncomeMultLevel || 0,
+    JSON.stringify(w.inventory || []),
+    JSON.stringify(w.stats || DEFAULT_STATS())
+  );
+}
+
+// Save ALL wallets (used for bulk operations like hourly distribution).
 function saveWallets() {
+  const entries = Object.entries(wallets);
+  if (entries.length === 0) return;
   const upsertAll = db.transaction(() => {
-    for (const [userId, w] of Object.entries(wallets)) {
+    for (const [userId, w] of entries) {
       ensureWalletStatsShape(w);
       maybeTrackNetWorthSnapshotForWallet(w);
       stmts.upsertWallet.run(
@@ -738,7 +785,7 @@ function getWallet(userId) {
       inventory: [],
       stats: DEFAULT_STATS(),
     };
-    saveWallets();
+    saveWallet(userId);
   }
   const w = wallets[userId];
   if (w.balance === undefined) w.balance = STARTING_COINS;
@@ -766,7 +813,7 @@ function setBalance(userId, amount) {
   const w = getWallet(userId);
   w.balance = normalizeCoins(amount, 0);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'balance');
-  saveWallets();
+  saveWallet(userId);
 }
 
 function getInterestRate(userId) {
@@ -794,7 +841,7 @@ function applyCashback(userId, lossAmount) {
   const w = getWallet(userId);
   if (totalCashback > 0) {
     w.balance += totalCashback;
-    saveWallets();
+    saveWallet(userId);
   }
   return totalCashback;
 }
@@ -989,7 +1036,7 @@ function buyLuckyPot(userId) {
   if (w.stats.potions.lucky.stacks.length >= 1) return { success: false, reason: 'already_active' };
   w.balance -= LUCKY_POT_COST;
   w.stats.potions.lucky.stacks.push({ expiresAt: now + LUCKY_POT_DURATION_MS });
-  saveWallets();
+  saveWallet(userId);
   return { success: true, stacks: w.stats.potions.lucky.stacks.length };
 }
 
@@ -1005,7 +1052,8 @@ function buyUnluckyPot(buyerId, targetId) {
   if (activePotions.unlucky) return { success: false, reason: 'already_active' };
   buyer.balance -= UNLUCKY_POT_COST;
   target.stats.potions.unlucky = { expiresAt: Date.now() + UNLUCKY_POT_DURATION_MS, appliedBy: buyerId };
-  saveWallets();
+  saveWallet(buyerId);
+  saveWallet(targetId);
   return { success: true };
 }
 
@@ -1022,7 +1070,7 @@ function tryTriggerMinesReveal(userId) {
   const triggered = Math.random() < bonuses.minesRevealChance;
   if (triggered) {
     w.stats.bonuses.minesSaves += 1;
-    saveWallets();
+    saveWallet(userId);
   }
   return triggered;
 }
@@ -1041,6 +1089,8 @@ function computeTieredDailyInterest(balance, r) {
 }
 
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
+// Optimized: batches minutes in chunks up to the next payout boundary instead
+// of looping minute-by-minute (60x fewer iterations for a 24h gap).
 function processBank(userId, { forceFlush = false } = {}) {
   const w = getWallet(userId);
   if (!w.stats.interest) w.stats.interest = { totalEarned: 0, pendingFraction: 0, pendingCoins: 0, pendingMinutes: 0, lastAccrualAt: 0 };
@@ -1065,18 +1115,27 @@ function processBank(userId, { forceFlush = false } = {}) {
   let pendingMinutes = w.stats.interest.pendingMinutes || 0;
   let processedAt = baseLast;
   let totalPayout = 0;
+  const payoutInterval = CONFIG.economy.bank.payoutIntervalMinutes;
+  let remainingMinutes = elapsedMinutes;
 
-  for (let i = 0; i < elapsedMinutes; i++) {
-    // Use tiered slab interest per minute; recalculated each tick so balance
-    // changes from within-loop payouts (every 60 min) are reflected naturally.
-    const rawInterest = computeTieredDailyInterest(w.bank || 0, r) / 24 / 60 + pendingFraction;
-    const minuteInterest = Math.floor(rawInterest);
-    pendingFraction = rawInterest - minuteInterest;
-    pendingCoins += minuteInterest;
-    pendingMinutes += 1;
-    processedAt += minuteMs;
+  while (remainingMinutes > 0) {
+    // How many minutes until the next payout boundary?
+    const minutesToPayout = payoutInterval - pendingMinutes;
+    const batchMinutes = Math.min(remainingMinutes, minutesToPayout);
 
-    if (pendingMinutes >= CONFIG.economy.bank.payoutIntervalMinutes) {
+    // Calculate interest for the entire batch at current bank balance.
+    // perMinuteRaw is constant within a batch because bank doesn't change
+    // until a payout boundary is crossed.
+    const perMinuteRaw = computeTieredDailyInterest(w.bank || 0, r) / 24 / 60;
+    const rawInterest = perMinuteRaw * batchMinutes + pendingFraction;
+    const batchInterest = Math.floor(rawInterest);
+    pendingFraction = rawInterest - batchInterest;
+    pendingCoins += batchInterest;
+    pendingMinutes += batchMinutes;
+    processedAt += batchMinutes * minuteMs;
+    remainingMinutes -= batchMinutes;
+
+    if (pendingMinutes >= payoutInterval) {
       if (pendingCoins > 0) {
         w.bank += pendingCoins;
         totalPayout += pendingCoins;
@@ -1107,7 +1166,7 @@ function processBank(userId, { forceFlush = false } = {}) {
     maybeTrackNetWorthSnapshotForWallet(w, Date.now(), 'interest');
   }
 
-  saveWallets();
+  saveWallet(userId);
   return totalPayout;
 }
 
@@ -1137,7 +1196,7 @@ function claimDaily(userId) {
   w.balance += reward;
   w.lastDaily = now;
   maybeTrackNetWorthSnapshotForWallet(w, now, 'daily');
-  saveWallets();
+  saveWallet(userId);
   return { newBalance: w.balance, streak: w.streak, reward };
 }
 
@@ -1333,7 +1392,7 @@ function recordWin(userId, gameName, amount) {
   insertTopResult(w.stats.topWins, { game: gameName, amount, t: Date.now() });
   evaluateLuckOnWin(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
-  saveWallets();
+  saveWallet(userId);
   return { triggered: false };
 }
 
@@ -1347,7 +1406,7 @@ function recordLoss(userId, gameName, amount) {
   insertTopResult(w.stats.topLosses, { game: gameName, amount, t: Date.now() });
   const luckResult = evaluateLuckOnLoss(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
-  saveWallets();
+  saveWallet(userId);
   return luckResult;
 }
 
@@ -1362,7 +1421,7 @@ function resetStats(userId) {
   w.stats = DEFAULT_STATS();
   w.stats.lifetimeEarnings = totalBalance;
   w.stats.lifetimeLosses = 0;
-  saveWallets();
+  saveWallet(userId);
 }
 
 function resetAllActivePity() {
@@ -1488,11 +1547,12 @@ module.exports = {
   rollMysteryBox, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
   recordWin, recordLoss, resetStats, resetAllActivePity,
-  saveWallets,
+  saveWallets, saveWallet,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
   setGiveawayMessageRef,
   trackGiveawayWin, trackGiveawayCreated, trackDailySpinWin, trackUniversalIncome,
   trackMysteryBoxDuplicateComp,
+  ensureWalletStatsShape,
   trackLifeStatsHeartbeat,
   getRuntimeTuning, updateRuntimeTuning, resetRuntimeTuning, getDefaultRuntimeTuning,
   setRuntimeState, getRuntimeState, removeRuntimeState,

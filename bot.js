@@ -967,6 +967,16 @@ function scheduleAll() {
   restartLifeStatsInterval();
   scheduleNextDaily1115();
 
+  // Periodic WAL checkpoint to prevent unbounded WAL growth.
+  // Runs every 5 minutes; keeps the WAL file small and improves read performance.
+  setInterval(() => {
+    try {
+      store.checkpointWal('PASSIVE');
+    } catch (err) {
+      console.error('Periodic WAL checkpoint failed:', err?.message || err);
+    }
+  }, 5 * 60 * 1000);
+
   if (!stopDbBackupScheduler) {
     stopDbBackupScheduler = dbBackup.startHourlyBackupScheduler({ logger: console, runOnStartup: true });
   }
@@ -1000,6 +1010,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle modal submissions.
   if (interaction.isModalSubmit()) {
     try {
+      if (interaction.customId.startsWith('adm_modal_')) return await adminCmd.handleAdminModal(interaction, ADMIN_IDS, onRuntimeConfigUpdated);
       if (interaction.customId.startsWith('trade_coinmodal_')) return await economy.handleTradeModal(interaction);
       if (interaction.customId === 'giveaway_create_modal') return await economy.handleGiveawayModal(interaction);
     } catch (e) { console.error(e); }
@@ -1015,15 +1026,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return await handleLiveStatsSelectMenu(interaction);
       if (interaction.customId.startsWith('stats_'))
         return await statsCmd.handleStatsSelectMenu(interaction);
+      if (interaction.customId.startsWith('effects_'))
+        return await effectsCmd.handleEffectsSelectMenu(interaction);
       if (interaction.customId.startsWith('shop_'))
         return await shopCmd.handleShopSelectMenu(interaction);
     } catch (e) { console.error(e); }
     return;
   }
 
-  // Handle user select menu interactions (e.g., shop potions).
+  // Handle user select menu interactions (e.g., shop potions, admin panel).
   if (interaction.isUserSelectMenu()) {
     try {
+      if (interaction.customId.startsWith('adm_userselect_'))
+        return await adminCmd.handleAdminUserSelect(interaction, ADMIN_IDS);
       if (interaction.customId.startsWith('shop_'))
         return await shopCmd.handleShopSelectMenu(interaction);
     } catch (e) { console.error(e); }
@@ -1035,6 +1050,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const parts = interaction.customId.split('_');
     try {
       if (interaction.customId === 'livestats_open') return await handleLiveStatsButton(interaction);
+      if (interaction.customId.startsWith('adm_'))      return await adminCmd.handleAdminButton(
+        interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, client, runDailySpin, distributeUniversalPool,
+        ANNOUNCE_CHANNEL_ID, HOURLY_PAYOUT_CHANNEL_ID, () => isBotActive, (s) => { isBotActive = !!s; }, onRuntimeConfigUpdated,
+      );
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
       if (interaction.customId.startsWith('bank_'))     return await economy.handleBankButton(interaction, parts);

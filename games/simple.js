@@ -58,16 +58,10 @@ async function handleFlip(interaction) {
   const bal = store.getBalance(userId);
   if (bet * qty > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
 
-  let wins = 0, results = [];
-  const flipModifier = store.getWinChanceModifier(userId);
-  for (let i = 0; i < qty; i++) {
-    const r = Math.random() < CONFIG.games.flip.winChance * flipModifier;
-    results.push(r ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
-    if (r) wins++;
-  }
-
   if (qty === 1) {
-    if (wins) {
+    const flipModifier = store.getWinChanceModifier(userId);
+    const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
+    if (won) {
       const profit = store.applyProfitBoost(userId, 'flip', bet);
       const pityResult = store.recordWin(userId, 'flip', profit);
       await maybeAnnouncePityTrigger(interaction, userId, pityResult);
@@ -84,27 +78,49 @@ async function handleFlip(interaction) {
     return interaction.reply(`❌ **Flip: LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
 
-  const net = (wins - (qty - wins)) * bet;
-  const boostedNet = net > 0 ? store.applyProfitBoost(userId, 'flip', net) : net;
+  // Multi-flip: process each flip individually so that luck buffs triggered by
+  // losing streaks within the batch apply to subsequent flips, stat tracking
+  // updates per flip, and cashback is calculated on the full loss amount.
+  let wins = 0, results = [];
+  let totalBoostedWinnings = 0;
+  let totalLossAmount = 0;
+  let lastTriggeredPity = null;
+
+  for (let i = 0; i < qty; i++) {
+    // Re-evaluate modifier each flip so luck boosts earned mid-batch take effect
+    const flipModifier = store.getWinChanceModifier(userId);
+    const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
+    results.push(won ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
+    if (won) {
+      wins++;
+      const profit = store.applyProfitBoost(userId, 'flip', bet);
+      totalBoostedWinnings += profit;
+      store.recordWin(userId, 'flip', profit);
+    } else {
+      totalLossAmount += bet;
+      const pityResult = store.recordLoss(userId, 'flip', bet);
+      if (pityResult && pityResult.triggered) lastTriggeredPity = pityResult;
+    }
+  }
+
+  const boostedNet = totalBoostedWinnings - totalLossAmount;
   store.setBalance(userId, bal + boostedNet);
 
   let cbm = '';
-  if (net < 0) {
-    const cb = store.applyCashback(userId, Math.abs(net));
-    store.addToLossPool(Math.abs(net));
+  if (totalLossAmount > 0) {
+    // Cashback applies to the full losing amount (all losing flips × bet)
+    const cb = store.applyCashback(userId, totalLossAmount);
+    store.addToLossPool(totalLossAmount);
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
-  } else if (boostedNet > 0) {
-    store.addToUniversalPool(boostedNet);
+  }
+  if (totalBoostedWinnings > 0) {
+    store.addToUniversalPool(totalBoostedWinnings);
   }
 
-  if (wins > 0) {
-    const pityResult = store.recordWin(userId, 'flip', boostedNet > 0 ? boostedNet : wins * bet);
-    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
+  if (lastTriggeredPity) {
+    await maybeAnnouncePityTrigger(interaction, userId, lastTriggeredPity);
   }
-  if (qty - wins > 0) {
-    const pityResult = store.recordLoss(userId, 'flip', (qty - wins) * bet);
-    await maybeAnnouncePityTrigger(interaction, userId, pityResult);
-  }
+
   return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${boostedNet >= 0 ? '+' : ''}${store.formatNumber(boostedNet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
@@ -391,7 +407,7 @@ async function handleDuelButton(interaction, parts) {
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;
     
-    // Winner gets both bets
+    // Winner gets both bets — no pool tax on duels (zero-sum player transfer)
     const boostedProfit = store.applyProfitBoost(w, 'duel', duel.bet);
     const pityWinResult = store.recordWin(w, 'duel', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, w, pityWinResult);
@@ -399,8 +415,6 @@ async function handleDuelButton(interaction, parts) {
     await maybeAnnouncePityTrigger(interaction, li, pityLossResult);
     store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit);
     
-    store.addToUniversalPool(duel.bet);
-    store.addToLossPool(duel.bet);
     activeDuels.delete(dk);
     persistSimpleSessions();
     

@@ -103,7 +103,7 @@ function buildModifiersPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '☘ How Luck Works',
-        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +1% win chance per loss (3 losses = 1%, 7 losses = 5%)\n> **Streak 8\u201312:** +2% win chance per loss (8 losses = 7%, 12 losses = 15%)\n> \n> The buff **boosts your win chance** (stacks with Lucky Pot). It lasts **15 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.\n> Winning resets your loss streak, but any active buff keeps running until it expires.',
+        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +0.5% win chance per loss (3 losses = 0.5%, 7 losses = 2.5%)\n> **Streak 8\u201312:** +1% win chance per loss (8 losses = 3.5%, 12 losses = 7.5%)\n> \n> The buff **boosts your win chance** (stacks with Lucky Pot). It lasts **5 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.\n> Winning resets your loss streak, but any active buff keeps running until it expires.',
         inline: false,
       },
       {

@@ -431,6 +431,20 @@ function renderInventoryOverview(userId, username) {
   };
 }
 
+// Calculate per-buff-type totals for owned vs full set of a rarity
+function calcRarityBoosts(items, ownedIds, rarity) {
+  const cfg = CONFIG.collectibles.mysteryBox.perItemDisplayBuff[rarity] || {};
+  const owned = { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 };
+  const full  = { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 };
+  for (let i = 0; i < items.length; i++) {
+    const type = ITEM_BUFF_TYPES[i % 5];
+    const val  = cfg[type] || 0;
+    full[type] += val;
+    if (ownedIds.has(items[i].id)) owned[type] += val;
+  }
+  return { owned, full };
+}
+
 function renderInventoryRarityPage(userId, username, rarity, page) {
   const cs = store.getCollectionStats(userId);
   const info = cs.byRarity[rarity];
@@ -457,6 +471,41 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
     if (cb.spinWeight)           description += `> • ⟳× Spin Payout: **+${fmtWeight(cb.spinWeight)}**\n`;
   }
   description += '\n';
+
+  // Per-rarity stat boost summary: owned vs. full collection (items + set bonus)
+  const boosts = calcRarityBoosts(allItems, cs.ownedIds, rarity);
+  const fullWithBonus = { ...boosts.full };
+  if (cb) {
+    for (const key of Object.keys(fullWithBonus)) fullWithBonus[key] += cb[key] || 0;
+  }
+  if (Object.values(fullWithBonus).some(v => v > 0)) {
+    const ownedBoostLines = [];
+    const fullBoostLines  = [];
+    if (fullWithBonus.interestRate > 0) {
+      ownedBoostLines.push(`∑ **+${fmtPct(boosts.owned.interestRate, '/day')}**`);
+      fullBoostLines.push(`∑ **+${fmtPct(fullWithBonus.interestRate, '/day')}**`);
+    }
+    if (fullWithBonus.cashbackRate > 0) {
+      ownedBoostLines.push(`↩ **+${fmtPct(boosts.owned.cashbackRate)}**`);
+      fullBoostLines.push(`↩ **+${fmtPct(fullWithBonus.cashbackRate)}**`);
+    }
+    if (fullWithBonus.minesRevealChance > 0) {
+      ownedBoostLines.push(`⛁⌖ **+${fmtPct(boosts.owned.minesRevealChance)}**`);
+      fullBoostLines.push(`⛁⌖ **+${fmtPct(fullWithBonus.minesRevealChance)}**`);
+    }
+    if (fullWithBonus.universalDoubleChance > 0) {
+      ownedBoostLines.push(`∀× **+${fmtPct(boosts.owned.universalDoubleChance)}**`);
+      fullBoostLines.push(`∀× **+${fmtPct(fullWithBonus.universalDoubleChance)}**`);
+    }
+    if (fullWithBonus.spinWeight > 0) {
+      ownedBoostLines.push(`⟳× **+${fmtWeight(boosts.owned.spinWeight)}**`);
+      fullBoostLines.push(`⟳× **+${fmtWeight(fullWithBonus.spinWeight)}**`);
+    }
+    description += `**◈ Stat Boosts from this Rarity**\n`;
+    description += `> Currently: ${ownedBoostLines.join('  ')}\n`;
+    description += `> Full set:   ${fullBoostLines.join('  ')}\n`;
+    description += '\n';
+  }
 
   for (const item of allItems) {
     const owned = cs.ownedIds.has(item.id);
