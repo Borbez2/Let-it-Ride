@@ -164,23 +164,23 @@ function renderUpgradesPage(userId, successMessage) {
 
   const fields = [
     {
-      name: '🏦 Bank Interest',
+      name: '∑ Bank Interest',
       value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(2)}%**/day (hourly)\n> ${iCost ? `Next: **${((iBaseRate + 0.01) * 100).toFixed(2)}%** for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
-      name: 'Loss Cashback',
+      name: '↩ Loss Cashback',
       value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cBaseRatePct + 0.1).toFixed(2)}%** for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
     {
-      name: 'Spin Payout Mult',
+      name: '⟳× Spin Payout Mult',
       value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMult.toFixed(1)}x** payout\n> ${sCost ? `Next: **${(sMult + 0.1).toFixed(1)}x** for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
-      name: 'Double Universal Income Chance',
+      name: '∀× Universal Income Chance',
       value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(((uLvl + 1) * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0)}%** for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
@@ -201,18 +201,18 @@ function renderUpgradesPage(userId, successMessage) {
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_interest_${userId}`)
-      .setLabel(iCost ? `Interest (${store.formatNumberShort(iCost)})` : 'Interest MAXED')
+      .setLabel(iCost ? `∑ Interest (${store.formatNumberShort(iCost)})` : '∑ Interest MAXED')
       .setStyle(iCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!iCost || w.balance < iCost),
     new ButtonBuilder().setCustomId(`upgrade_cashback_${userId}`)
-      .setLabel(cCost ? `Cashback (${store.formatNumberShort(cCost)})` : 'Cashback MAXED')
+      .setLabel(cCost ? `↩ Cashback (${store.formatNumberShort(cCost)})` : '↩ Cashback MAXED')
       .setStyle(cCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!cCost || w.balance < cCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
-      .setLabel(sCost ? `Spin Payout Mult (${store.formatNumberShort(sCost)})` : 'Spin Payout Mult MAXED')
+      .setLabel(sCost ? `⟳× Spin Mult (${store.formatNumberShort(sCost)})` : '⟳× Spin Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
-      .setLabel(uCost ? `Double Universal Income Chance (${store.formatNumberShort(uCost)})` : 'Double Universal Income Chance MAXED')
+      .setLabel(uCost ? `∀× Income Chance (${store.formatNumberShort(uCost)})` : '∀× Income Chance MAXED')
       .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
@@ -335,7 +335,7 @@ function renderInventoryOverview(userId, username) {
   const cs = store.getCollectionStats(userId);
 
   // Global progress bar
-  const globalBar = renderCollectionBar(cs.totalOwned, cs.totalItems);
+  const globalBar = renderCollectionBar(cs.totalOwned, cs.totalItems, '▰', '▱', 20);
   let description = `> **${username}'s Collection**\n> ${globalBar} **${cs.totalOwned}/${cs.totalItems}**\n\n`;
 
   // Per-rarity progress (proportional bars since 120 items won't fit)
@@ -349,11 +349,11 @@ function renderInventoryOverview(userId, username) {
   // Total stat boosts
   const t = cs.totals;
   description += `\n**◈ Total Stat Boosts**\n`;
-  description += `> 🏦 Interest: **+${(t.interestRate * 100).toFixed(2)}%**/day\n`;
+  description += `> ∑ Interest: **+${(t.interestRate * 100).toFixed(2)}%**/day\n`;
   description += `> ↩ Cashback: **+${(t.cashbackRate * 100).toFixed(2)}%**\n`;
-  description += `> ◈ Mines Save: **+${(t.minesRevealChance * 100).toFixed(2)}%**\n`;
-  description += `> ⊕ Income Double: **+${(t.universalDoubleChance * 100).toFixed(2)}%**\n`;
-  description += `> ⊛ Spin Payout: **+${t.spinWeight.toFixed(2)}x**\n`;
+  description += `> ⛁⌖ Mines Save: **+${(t.minesRevealChance * 100).toFixed(2)}%**\n`;
+  description += `> ∀× Income Double: **+${(t.universalDoubleChance * 100).toFixed(2)}%**\n`;
+  description += `> ⟳× Spin Payout: **+${t.spinWeight.toFixed(2)}x**\n`;
 
   // Completed collections
   const completed = RARITY_ORDER.filter(r => cs.byRarity[r].complete);
@@ -384,21 +384,21 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
   const pageItems = allItems.slice(safePage * INVENTORY_ITEMS_PER_PAGE, (safePage + 1) * INVENTORY_ITEMS_PER_PAGE);
 
   const rarityLabel = rarity.charAt(0).toUpperCase() + rarity.slice(1);
-  // Exact bar: 1 parallelogram per item
-  const bar = renderCollectionBar(info.owned, info.total);
+  // Fixed-length bar so all rarities appear uniform
+  const bar = renderCollectionBar(info.owned, info.total, '▰', '▱', 15);
   const completeTag = info.complete ? ' ✨ **COMPLETE** — set bonus active!' : '';
 
   let description = `> ${RARITIES[rarity].emoji} **${rarityLabel} Collection** ${bar} **${info.owned}/${info.total}**${completeTag}\n\n`;
 
   // Per-item stat boost info
   const boosts = CONFIG.collectibles.mysteryBox.statBoostPerItem[rarity] || {};
-  description += `> Each item: Interest +${((boosts.interestRate || 0) * 100).toFixed(2)}% · Cashback +${((boosts.cashbackRate || 0) * 100).toFixed(2)}% · Spin +${(boosts.spinWeight || 0).toFixed(3)}x\n`;
+  description += `> **Per item: ∑** +${((boosts.interestRate || 0) * 100).toFixed(3)}% · **↩** +${((boosts.cashbackRate || 0) * 100).toFixed(3)}% · **⛁⌖** +${((boosts.minesRevealChance || 0) * 100).toFixed(3)}% · **∀×** +${((boosts.universalDoubleChance || 0) * 100).toFixed(4)}% · **⟳×** +${(boosts.spinWeight || 0).toFixed(4)}x\n`;
 
   // Collection completion bonus
   const cb = CONFIG.collectibles.mysteryBox.collectionCompleteBonus[rarity];
   if (cb) {
     const tag = info.complete ? '✨ Active' : `${info.total - info.owned} left`;
-    description += `> **Set bonus** (${tag}): Interest +${((cb.interestRate || 0) * 100).toFixed(2)}% · Cashback +${((cb.cashbackRate || 0) * 100).toFixed(2)}% · Mines +${((cb.minesRevealChance || 0) * 100).toFixed(2)}% · Income +${((cb.universalDoubleChance || 0) * 100).toFixed(2)}% · Spin +${(cb.spinWeight || 0).toFixed(2)}x\n`;
+    description += `\n> **Set bonus** (${tag}): ∑ +${((cb.interestRate || 0) * 100).toFixed(3)}% · ↩ +${((cb.cashbackRate || 0) * 100).toFixed(3)}% · ⛁⌖ +${((cb.minesRevealChance || 0) * 100).toFixed(3)}% · ∀× +${((cb.universalDoubleChance || 0) * 100).toFixed(3)}% · ⟳× +${(cb.spinWeight || 0).toFixed(3)}x\n`;
   }
   description += '\n';
 
@@ -588,15 +588,168 @@ async function handleWithdraw(interaction) {
 async function handleBank(interaction) {
   const userId = interaction.user.id;
   const payout = store.processBank(userId);
+  const { embed, components } = buildBankPage(userId, 'overview', payout);
+  return interaction.reply({ content: '', embeds: [embed], components });
+}
+
+// ── Bank Tab Helpers ──
+
+function getBankNavRow(userId, activePage) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`bank_tab_overview_${userId}`)
+      .setLabel('◈ Overview')
+      .setStyle(activePage === 'overview' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`bank_tab_breakdown_${userId}`)
+      .setLabel('∑ Breakdown')
+      .setStyle(activePage === 'breakdown' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+  );
+}
+
+function computeTieredDailyInterestLocal(balance, r) {
+  const cfg = CONFIG.economy.bank.tieredInterest;
+  if (!cfg) return balance * r;
+  const { slab1Threshold: t1, slab2Threshold: t2, slab2Scale, slab3Scale } = cfg;
+  return Math.min(balance, t1) * r
+    + Math.max(0, Math.min(balance, t2) - t1) * r * slab2Scale
+    + Math.max(0, balance - t2) * r * slab3Scale;
+}
+
+function buildBankOverviewEmbed(userId, payout) {
   const w = store.getWallet(userId);
-  const pp = payout > 0 ? `\n+**${store.formatNumber(payout)}** collected!` : '';
-  if (w.bank <= 0) return interaction.reply(`Bank empty. Use /deposit or /invest.`);
-  const rate = store.getInterestRate(userId), daily = Math.floor(w.bank * rate);
-  const hourly = Math.floor(w.bank * rate / 24);
-  const last = w.lastBankPayout || Date.now(), next = last + 3600000;
+  const r = store.getInterestRate(userId);
+  const bank = w.bank || 0;
+  const dailyInterest = Math.floor(computeTieredDailyInterestLocal(bank, r));
+  const hourlyInterest = Math.floor(dailyInterest / 24);
+  const last = w.lastBankPayout || Date.now();
+  const next = last + 3600000;
   const rem = Math.max(0, next - Date.now());
   const mins = Math.floor(rem / 60000);
-  return interaction.reply(`**Bank**\n\nDeposited: **${store.formatNumber(w.bank)}**\nRate: ${(rate * 100).toFixed(2)}% daily (Lv ${w.interestLevel || 0})\nHourly: ~**${store.formatNumber(hourly)}** | Daily: ~**${store.formatNumber(daily)}**\nNext payout: ${mins}m${pp}\n\nPurse: **${store.formatNumber(w.balance)}**`);
+  const pending = (w.stats?.interest?.pendingCoins || 0);
+  const totalEarned = w.stats?.interest?.totalEarned || 0;
+
+  const fields = [
+    {
+      name: '◈ Balance',
+      value: `> 💰 Purse: **${store.formatNumber(w.balance)}**\n> ◈ Bank: **${store.formatNumber(bank)}**`,
+      inline: true,
+    },
+    {
+      name: '∑ Interest Rate',
+      value: `> **${(r * 100).toFixed(2)}%**/day · Lv ${w.interestLevel || 0}/${CONFIG.economy.upgrades.maxLevel}\n> Paid hourly to your bank`,
+      inline: true,
+    },
+    { name: '\u200b', value: '\u200b', inline: false },
+    {
+      name: '📊 Estimates',
+      value: `> Hourly: ~**${store.formatNumber(hourlyInterest)}** coins\n> Daily: ~**${store.formatNumber(dailyInterest)}** coins`,
+      inline: true,
+    },
+    {
+      name: '⏰ Payout Timer',
+      value: `> Next payout: **${mins}m**\n> Pending: **${store.formatNumber(pending)}** coins`,
+      inline: true,
+    },
+    { name: '\u200b', value: '\u200b', inline: false },
+    {
+      name: '📜 Lifetime',
+      value: `> Total interest earned: **${store.formatNumber(totalEarned)}**`,
+      inline: false,
+    },
+  ];
+
+  const embed = {
+    title: '◈ Bank — Overview',
+    color: 0x2b2d31,
+    description: bank <= 0
+      ? '> Bank is empty. Use `/deposit` to move coins from your purse.'
+      : '> Your bank balance earns interest using a tiered rate system. See the **∑ Breakdown** tab for details.',
+    fields,
+  };
+
+  if (payout > 0) {
+    embed.footer = { text: `+${store.formatNumber(payout)} interest collected` };
+  }
+
+  return embed;
+}
+
+function buildBankBreakdownEmbed(userId) {
+  const w = store.getWallet(userId);
+  const r = store.getInterestRate(userId);
+  const bank = w.bank || 0;
+  const cfg = CONFIG.economy.bank.tieredInterest;
+  const t1 = cfg?.slab1Threshold ?? 1000000;
+  const t2 = cfg?.slab2Threshold ?? 10000000;
+  const s2 = cfg?.slab2Scale ?? 0.1;
+  const s3 = cfg?.slab3Scale ?? 0.01;
+
+  const inSlab1 = Math.min(bank, t1);
+  const inSlab2 = Math.max(0, Math.min(bank, t2) - t1);
+  const inSlab3 = Math.max(0, bank - t2);
+
+  const earn1 = Math.floor(inSlab1 * r);
+  const earn2 = Math.floor(inSlab2 * r * s2);
+  const earn3 = Math.floor(inSlab3 * r * s3);
+  const totalDaily = earn1 + earn2 + earn3;
+
+  const rPct = (r * 100).toFixed(2);
+  const r2Pct = (r * s2 * 100).toFixed(3);
+  const r3Pct = (r * s3 * 100).toFixed(4);
+
+  const fields = [
+    {
+      name: '∑ Your Rate (r)',
+      value: `> **${rPct}%**/day (base ${(CONFIG.economy.bank.baseInvestRate * 100).toFixed(0)}% + Lv${w.interestLevel || 0} upgrades + items)`,
+      inline: false,
+    },
+    {
+      name: `Slab 1 — 0 to ${store.formatNumber(t1)} · rate = r`,
+      value: `> In slab: **${store.formatNumber(inSlab1)}** coins\n> Rate: **${rPct}%** → ~**${store.formatNumber(earn1)}**/day`,
+      inline: false,
+    },
+    {
+      name: `Slab 2 — ${store.formatNumber(t1)} to ${store.formatNumber(t2)} · rate = r × ${s2}`,
+      value: `> In slab: **${store.formatNumber(inSlab2)}** coins\n> Rate: **${r2Pct}%** → ~**${store.formatNumber(earn2)}**/day`,
+      inline: false,
+    },
+    {
+      name: `Slab 3 — above ${store.formatNumber(t2)} · rate = r × ${s3}`,
+      value: `> In slab: **${store.formatNumber(inSlab3)}** coins\n> Rate: **${r3Pct}%** → ~**${store.formatNumber(earn3)}**/day`,
+      inline: false,
+    },
+    { name: '\u200b', value: '\u200b', inline: false },
+    {
+      name: '▸ Total estimated interest',
+      value: `> **${store.formatNumber(totalDaily)}**/day · **${store.formatNumber(Math.floor(totalDaily / 24))}**/hour`,
+      inline: false,
+    },
+  ];
+
+  return {
+    title: '◈ Bank — Tiered Interest Breakdown',
+    color: 0x2b2d31,
+    description: '> Interest is calculated in slabs like tax brackets. Higher balances earn at a lower marginal rate, but every slab still contributes.',
+    fields,
+  };
+}
+
+function buildBankPage(userId, page, payout = 0) {
+  const embed = page === 'breakdown'
+    ? buildBankBreakdownEmbed(userId)
+    : buildBankOverviewEmbed(userId, payout);
+  const components = [getBankNavRow(userId, page)];
+  return { embed, components };
+}
+
+async function handleBankButton(interaction, parts) {
+  // customId: bank_tab_<page>_<userId>
+  const page = parts[2];
+  const uid = parts[3];
+  if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your bank view!', ephemeral: true });
+  const { embed, components } = buildBankPage(uid, page);
+  return interaction.update({ content: '', embeds: [embed], components });
 }
 
 async function handleGive(interaction) {
@@ -1231,7 +1384,7 @@ function expireTradeSessions(ttlMs) {
 
 module.exports = {
   activeTrades,
-  handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank,
+  handleBalance, handleDaily, handleDeposit, handleWithdraw, handleBank, handleBankButton,
   handleGive, handleTrade, handleLeaderboard,
   handleInventory, handleInventoryButton, handleCollection, handlePool,
   handleTradeButton,

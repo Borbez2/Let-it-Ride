@@ -24,6 +24,15 @@ const CONFIG = {
       baseInvestRate: 0,
       interestAccrualMinuteMs: 60 * 1000,
       payoutIntervalMinutes: 60,
+      // Tiered interest: interest is calculated in slabs (like tax brackets).
+      // baseRate (= getInterestRate) applies fully to the first slab1Threshold coins,
+      // then scales down by slab2Scale and slab3Scale for higher balances.
+      tieredInterest: {
+        slab1Threshold: 1000000,   // 1M — full rate up to here
+        slab2Threshold: 10000000,  // 10M — reduced rate from 1M to 10M
+        slab2Scale: 0.1,           // r * 0.1 on balance between t1 and t2
+        slab3Scale: 0.01,          // r * 0.01 on balance above t2
+      },
     },
     pools: {
       universalTaxRate: 0.05,

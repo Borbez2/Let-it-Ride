@@ -11,10 +11,10 @@ async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   const channel = interaction.channel;
   if (!channel || typeof channel.send !== 'function') return;
 
-  const cashbackPct = (pityResult.cashbackRate * 100).toFixed(1);
+  const boostPct = (pityResult.winChanceBoost * 100).toFixed(1);
 
   await channel.send(
-    `\u2618 <@${userId}> luck triggered: ${cashbackPct}% cashback | loss streak: ${pityResult.lossStreak}`
+    `\u2618 <@${userId}> luck triggered: +${boostPct}% win chance boost | loss streak: ${pityResult.lossStreak}`
   ).catch(() => null);
 }
 

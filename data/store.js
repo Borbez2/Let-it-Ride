@@ -39,11 +39,11 @@ const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 
 // Potion system constants
 const LUCKY_POT_DURATION_MS = 60 * 60 * 1000;
-const LUCKY_POT_COST = 75000;
+const LUCKY_POT_COST = 100000;
 const LUCKY_POT_BOOST = 0.05;
 const UNLUCKY_POT_DURATION_MS = 60 * 60 * 1000;
-const UNLUCKY_POT_COST = 500000;
-const UNLUCKY_POT_PENALTY = 0.10;
+const UNLUCKY_POT_COST = 200000;
+const UNLUCKY_POT_PENALTY = 0.25;
 
 const { COLLECTIBLES } = require('../config');
 
@@ -302,8 +302,8 @@ function getLuckState(w, now = Date.now()) {
   const active = buff.boost > 0 && buff.expiresAt > now;
   return {
     active,
-    cashbackRate: active ? buff.boost : 0,
-    maxCashbackRate: LUCK_MAX_BOOST,
+    winChanceBoost: active ? buff.boost : 0,
+    maxWinChanceBoost: LUCK_MAX_BOOST,
     buffStreak: active ? (buff.streak || 0) : 0,
     lossStreak: luck.lossStreak || 0,
     bestLossStreak: luck.bestLossStreak || 0,
@@ -339,7 +339,7 @@ function evaluateLuckOnLoss(w, now = Date.now()) {
   return {
     triggered: true,
     previousBoost,
-    cashbackRate: newBoost,
+    winChanceBoost: newBoost,
     lossStreak: streak,
   };
 }
@@ -789,21 +789,20 @@ function applyCashback(userId, lossAmount) {
   if (rate > 0) {
     totalCashback += Math.floor(loss * rate);
   }
-  // Also apply luck buff cashback
+  // Luck buff no longer gives cashback — it now boosts win chance instead.
+  // (Legacy block removed)
   const w = getWallet(userId);
-  ensureWalletStatsShape(w);
-  const luck = w.stats.bonuses.luck;
-  refreshLuckBuff(luck);
-  const luckBoost = luck.buff.boost || 0;
-  if (luckBoost > 0) {
-    const luckCb = Math.floor(loss * luckBoost);
-    if (luckCb > 0) {
-      totalCashback += luckCb;
-      luck.totalCashback = (luck.totalCashback || 0) + luckCb;
-    }
+  if (totalCashback > 0) {
+    w.balance += totalCashback;
+    saveWallets();
   }
-  if (totalCashback > 0) { w.balance += totalCashback; saveWallets(); }
   return totalCashback;
+}
+
+// Luck buff is now applied as a win-chance modifier (via getWinChanceModifier), not cashback.
+// This function is kept as a no-op for any legacy callers.
+function applyLuckCashback(userId, lossAmount, now = Date.now()) {
+  return 0;
 }
 
 function getSpinWeight(userId) {
@@ -881,8 +880,8 @@ function getUserBonuses(userId) {
     },
     luck: {
       active: luckState.active,
-      cashbackRate: luckState.cashbackRate,
-      maxCashbackRate: luckState.maxCashbackRate,
+      winChanceBoost: luckState.winChanceBoost,
+      maxWinChanceBoost: luckState.maxWinChanceBoost,
       buffStreak: luckState.buffStreak,
       lossStreak: luckState.lossStreak,
       bestLossStreak: luckState.bestLossStreak,
@@ -909,8 +908,8 @@ function getUserPityStatus(userId, now = Date.now()) {
 
   return {
     active,
-    cashbackRate: active ? buff.boost : 0,
-    maxCashbackRate: LUCK_MAX_BOOST,
+    winChanceBoost: active ? buff.boost : 0,
+    maxWinChanceBoost: LUCK_MAX_BOOST,
     buffStreak: active ? (buff.streak || 0) : 0,
     lossStreak: luck.lossStreak || 0,
     bestLossStreak: luck.bestLossStreak || 0,
@@ -962,11 +961,18 @@ function getWinChanceModifier(userId, now = Date.now()) {
   const potions = getActivePotions(userId, now);
   let modifier = 1.0;
   if (potions.lucky) {
-    // Each stack gives 1%, up to 5 stacks
+    // One active stack gives LUCKY_POT_BOOST
     const stacks = potions.lucky.stacks ? potions.lucky.stacks.length : 1;
-    modifier += Math.min(stacks, 5) * 0.01;
+    modifier += Math.min(stacks, 1) * LUCKY_POT_BOOST;
   }
   if (potions.unlucky) modifier -= UNLUCKY_POT_PENALTY;
+  // Losing streak win chance boost stacks on top of potions
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const luck = w.stats.bonuses.luck;
+  refreshLuckBuff(luck, now);
+  const luckBoost = (luck.buff && luck.buff.boost > 0 && luck.buff.expiresAt > now) ? luck.buff.boost : 0;
+  modifier += luckBoost;
   return modifier;
 }
 
@@ -980,7 +986,7 @@ function buyLuckyPot(userId) {
   if (!Array.isArray(w.stats.potions.lucky.stacks)) w.stats.potions.lucky.stacks = [];
   // Remove expired stacks
   w.stats.potions.lucky.stacks = w.stats.potions.lucky.stacks.filter(s => s.expiresAt > now);
-  if (w.stats.potions.lucky.stacks.length >= 5) return { success: false, reason: 'max_stacks' };
+  if (w.stats.potions.lucky.stacks.length >= 1) return { success: false, reason: 'already_active' };
   w.balance -= LUCKY_POT_COST;
   w.stats.potions.lucky.stacks.push({ expiresAt: now + LUCKY_POT_DURATION_MS });
   saveWallets();
@@ -1021,6 +1027,19 @@ function tryTriggerMinesReveal(userId) {
   return triggered;
 }
 
+// Compute the total daily interest on `balance` using a tiered slab system.
+// Interest for balance[0..t1] uses full rate r; balance[t1..t2] uses r * slab2Scale;
+// balance above t2 uses r * slab3Scale.  Mirrors tax-bracket semantics.
+function computeTieredDailyInterest(balance, r) {
+  const cfg = CONFIG.economy.bank.tieredInterest;
+  if (!cfg) return balance * r; // fallback: flat rate
+  const { slab1Threshold: t1, slab2Threshold: t2, slab2Scale, slab3Scale } = cfg;
+  const slab1 = Math.min(balance, t1) * r;
+  const slab2 = Math.max(0, Math.min(balance, t2) - t1) * r * slab2Scale;
+  const slab3 = Math.max(0, balance - t2) * r * slab3Scale;
+  return slab1 + slab2 + slab3;
+}
+
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
 function processBank(userId, { forceFlush = false } = {}) {
   const w = getWallet(userId);
@@ -1040,7 +1059,7 @@ function processBank(userId, { forceFlush = false } = {}) {
   const elapsedMinutes = Math.floor((now - baseLast) / minuteMs);
   if (elapsedMinutes < 1 && !forceFlush) return 0;
 
-  const perMinuteRate = getInterestRate(userId) / 24 / 60;
+  const r = getInterestRate(userId);
   let pendingFraction = w.stats.interest.pendingFraction || 0;
   let pendingCoins = w.stats.interest.pendingCoins || 0;
   let pendingMinutes = w.stats.interest.pendingMinutes || 0;
@@ -1048,7 +1067,9 @@ function processBank(userId, { forceFlush = false } = {}) {
   let totalPayout = 0;
 
   for (let i = 0; i < elapsedMinutes; i++) {
-    const rawInterest = ((w.bank || 0) * perMinuteRate) + pendingFraction;
+    // Use tiered slab interest per minute; recalculated each tick so balance
+    // changes from within-loop payouts (every 60 min) are reflected naturally.
+    const rawInterest = computeTieredDailyInterest(w.bank || 0, r) / 24 / 60 + pendingFraction;
     const minuteInterest = Math.floor(rawInterest);
     pendingFraction = rawInterest - minuteInterest;
     pendingCoins += minuteInterest;

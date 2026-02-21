@@ -21,24 +21,24 @@ function buildEconomyPage() {
     description: '> A quick rundown of how the economy works, how to earn, and what you can spend on.',
     fields: [
       {
-        name: '\u25C8 Money',
+        name: '◈ Money',
         value: '> Your **Purse** holds coins you can freely spend on bets, trades, and mystery boxes. Your **Bank** is a safe place where coins sit and grow over time with hourly interest payouts. You can move coins between the two with `/deposit` and `/withdraw`.',
         inline: false,
       },
       {
-        name: '\u25C8 Earning Coins',
+        name: '◈ Earning Coins',
         value: `> Use **/daily** every day to collect free coins and build up a streak bonus. When you win a game, **${taxPct}%** of your profit is taxed and goes into the **Universal Pool**, which gets split between all players every hour (paid to your bank). When you lose, **${lossPct}%** of your loss goes into the **Spin Pool**, and one lucky player wins the whole pot each day at 11:15pm.`,
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: '\u2B99 Upgrades',
-        value: '> Head to **/upgrades** to spend coins on permanent boosts.\n> \u00A4 **Interest** raises your daily bank rate (+1%/level, caps at 10%)\n> \u21A9 **Cashback** refunds a small % of every loss\n> \u229B **Spin Mult** multiplies your daily spin winnings if you get picked\n> \u2295 **Income Mult** gives you a chance to double your hourly universal payout',
+        name: '◈ Shop — /shop',
+        value: '> **/shop** has three sections:\n> \n> **⧉ Upgrades** — Permanently improve your passive stats:\n> ∑ **Bank Interest** · ↩ **Cashback** · ⟳× **Daily Spin Mult** · ∀× **Universal Income Mult**\n> \n> **Potions** — Temporary effects for 1 hour:\n> ☘⚱ **Lucky Pot** (100k) — boosts your win chance by +5% for 1 hour (1 active at a time)\n> ⚱✕ **Unlucky Pot** (200k) — reduces a target player\'s win chance by -25%\n> \n> **🎁 Mystery Boxes** — Buy boxes to get collectible items. Collectibles passively boost your stats: ∑ interest, ↩ cashback, ☘ luck, ⟳× spin weight, ∀× income chance, and ⛁⌖ mines save. Use **/mysterybox** to buy, **/inventory** to manage.',
         inline: false,
       },
       {
-        name: '\u29C9 Collectibles',
-        value: '> Buy **/mysterybox** to get randomized collectible items. Some of them come with passive bonuses like \u00A4 interest, \u21A9 cashback, \u2618 luck, \u25C8 mines-save, or \u21AF EV boosts. Manage your stuff with **/inventory**, check the community with **/collection**, or swap items with **/trade**.',
+        name: '⧉ Collectibles',
+        value: '> Collectibles from mystery boxes come with **passive stat bonuses** applied automatically to your account. Higher-rarity items give larger bonuses. If you collect every item of a rarity tier, you get an additional **set completion bonus** on top.\n> \n> Possible buffs: ∑ interest · ↩ cashback · ☘ luck (pity) · ⛁⌖ mines save · ⟳× spin weight · ∀× universal income chance\n> \n> Manage with **/inventory**, browse the server with **/collection**, or swap with **/trade**.',
         inline: false,
       },
     ],
@@ -65,7 +65,7 @@ function buildGamesCommandsPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '\u25B8 Money Commands',
-        value: '> `/balance` `/daily` `/bank` `/pool`\n> `/deposit` `/invest` `/withdraw`\n> `/upgrades`',
+        value: '> `/balance` `/daily` `/bank` `/pool`\n> `/deposit` `/invest` `/withdraw`\n> `/shop`',
         inline: true,
       },
       {
@@ -93,22 +93,22 @@ function buildModifiersPage() {
   return {
     title: PAGE_TITLES[2],
     color: 0x2b2d31,
-    description: '> The game does its base math first, then your effects get layered on top. Nothing here forces you to win, it just shifts the numbers in your favor. See all your active effects under **/stats** \u2192 Effects.',
+    description: '> The game does its base math first, then your effects get layered on top. Nothing here forces you to win \u2014 it just shifts the numbers in your favor. Check all your active values under **/effects**.',
     fields: [
       {
-        name: '\u2726 Active Effects',
-        value: '> \u2618 **Luck** \u2027 Scaling cashback buff on a losing streak (Flip, Duel, Let It Ride only)\n> \u00A4 **Bank Interest** \u2027 Passive daily interest on your bank balance\n> \u21A9 **Cashback** \u2027 Refunds a % of every loss\n> \u229B **Spin Multiplier** \u2027 Multiplies daily spin winnings\n> \u2295 **Income Multiplier** \u2027 Chance to double hourly universal payout\n> \u25C8 **Mines Save** \u2027 Chance to auto-reveal a safe tile in Mines\n> \u21AF **EV Boost** \u2027 Per-game profit boost from items',
+        name: '◈ All Effects',
+        value: '> ☘ **Luck** ‧ Scaling win-chance buff built from a losing streak (Flip, Duel, Let It Ride) — stacks with Lucky Pot\n> ∑ **Bank Interest** ‧ Passive hourly interest on bank balance (tiered rate, see /bank)\n> ↩ **Cashback** ‧ Refunds a % of every loss\n> ⟳× **Daily Spin Mult** ‧ Multiplies your daily spin winnings if you\'re picked\n> ∀× **Universal Income Mult** ‧ Chance to double your hourly universal pool payout\n> ⛁⌖ **Mines Save** ‧ Chance to auto-reveal a safe tile in Mines\n> \n> **Upgradeable in /shop:** ∑ Interest · ↩ Cashback · ⟳× Spin Mult · ∀× Income Mult\n> **From collectibles:** all of the above, plus ☘ Luck and ⛁⌖ Mines Save',
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: '\u2618 How Luck Works',
-        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +1% cashback per loss (3 losses = 1%, 7 losses = 5%)\n> **Streak 8\u201312:** +2% cashback per loss (8 losses = 7%, 12 losses = 15%)\n> \n> The buff lasts **15 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.',
+        name: '☘ How Luck Works',
+        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +1% win chance per loss (3 losses = 1%, 7 losses = 5%)\n> **Streak 8\u201312:** +2% win chance per loss (8 losses = 7%, 12 losses = 15%)\n> \n> The buff **boosts your win chance** (stacks with Lucky Pot). It lasts **15 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.\n> Winning resets your loss streak, but any active buff keeps running until it expires.',
         inline: false,
       },
       {
-        name: '\u2618 Luck Details',
-        value: '> Winning a game resets your loss streak counter, but any active buff keeps running until it expires. This means you keep the cashback bonus even after you start winning again.\n> \n> Check your live luck status and full breakdown under **/effects**.',
+        name: '∑ How Bank Interest Works',
+        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 1M in your bank; higher balances earn at a reduced rate:\n> \n> **Slab 1** (0 \u2192 1M): rate = r\n> **Slab 2** (1M \u2192 10M): rate = r \u00d7 0.1\n> **Slab 3** (above 10M): rate = r \u00d7 0.01\n> \n> Your rate **r** is determined by your base rate + upgrade levels + collectible bonuses. See the full daily breakdown in `/bank` \u2192 \u2211 Breakdown.',
         inline: false,
       },
     ],
@@ -144,7 +144,7 @@ function buildCollectiblesPage() {
   return {
     title: PAGE_TITLES[3],
     color: 0x2b2d31,
-    description: '> Everything about mystery boxes, drop rates, and what happens when you pull a duplicate.',
+    description: '> Everything about mystery boxes, collectibles, drop rates, and passive bonuses.',
     fields: [
       {
         name: '\u25C8 Mystery Boxes',
@@ -163,8 +163,8 @@ function buildCollectiblesPage() {
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
-        name: '\u25C8 Item Effects',
-        value: '> Items can roll with passive bonuses:\n> \u00A4 Interest  \u2027  \u21A9 Cashback  \u2027  \u2618 Luck\n> \u25C8 Mines-save  \u2027  \u21AF EV boost (per game)\n> Most placeholders don\'t have effects assigned yet, but the ones that do are applied automatically.\n> \n> See what\'s active under **/stats** \u2192 Effects. Manage with **/inventory**, **/collection**, **/trade**.',
+        name: '\u29C9 Collectible Buffs',
+        value: '> Every collectible item you own passively applies bonuses to your account. The higher the rarity, the larger the effect per item:\n> \n> \u2211 **Bank Interest** \u00b7 \u21a9 **Cashback** \u00b7 \u2618 **Luck** \u00b7 \u27f3\u00d7 **Spin Weight** \u00b7 \u2200\u00d7 **Universal Income Chance** \u00b7 \u26c1\u2316 **Mines Save**\n> \n> Collecting **every item of a rarity tier** also awards a **set completion bonus** on top. Duplicates convert to coins automatically.\n> \n> Manage with **/inventory**, browse with **/collection**, swap with **/trade**.',
         inline: false,
       },
     ],

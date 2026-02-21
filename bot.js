@@ -1015,6 +1015,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId === 'livestats_open') return await handleLiveStatsButton(interaction);
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
+      if (interaction.customId.startsWith('bank_'))     return await economy.handleBankButton(interaction, parts);
       if (interaction.customId.startsWith('upgrade_'))  return await shopCmd.handleUpgradeButton(interaction, parts);
       if (interaction.customId.startsWith('shop_'))      return await shopCmd.handleShopButton(interaction, parts);
       if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);

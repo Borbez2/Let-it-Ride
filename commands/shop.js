@@ -44,26 +44,30 @@ function renderUpgradesEmbed(userId, successMessage) {
 
   const bar = (lvl, max) => '▰'.repeat(lvl) + '▱'.repeat(max - lvl);
 
+  const sMultFull = sMult + bonuses.spinWeightBonus;
+  const iGain = CONFIG.economy.upgrades.interestPerLevel * 100;
+  const uGain = CONFIG.economy.upgrades.universalIncomePerLevelChance * 100;
+
   const fields = [
     {
-      name: '🏦 Bank Interest',
-      value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(2)}%**/day (hourly)\n> ${iCost ? `Next: **${((iBaseRate + 0.01) * 100).toFixed(2)}%** for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
+      name: '∑ Bank Interest',
+      value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(2)}%**/day (hourly)\n> ${iCost ? `Next: **${((iRate + CONFIG.economy.upgrades.interestPerLevel) * 100).toFixed(2)}%** (+${iGain.toFixed(2)}%) for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
-      name: 'Loss Cashback',
-      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cBaseRatePct + 0.1).toFixed(2)}%** for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
+      name: '↩ Loss Cashback',
+      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cRatePct + 0.1).toFixed(2)}%** (+0.10%) for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
     {
-      name: 'Spin Payout Mult',
-      value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMult.toFixed(1)}x** payout\n> ${sCost ? `Next: **${(sMult + 0.1).toFixed(1)}x** for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
+      name: '⟳× Spin Payout Mult',
+      value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMultFull.toFixed(2)}x** payout\n> ${sCost ? `Next: **${(sMultFull + 0.1).toFixed(2)}x** (+0.10x) for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
-      name: 'Double Universal Income Chance',
-      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(((uLvl + 1) * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0)}%** for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
+      name: '∀× Universal Income Chance',
+      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(uChance + uGain).toFixed(2)}%** (+${uGain.toFixed(0)}%) for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
@@ -100,18 +104,18 @@ function buildUpgradeButtons(userId) {
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_interest_${userId}`)
-      .setLabel(iCost ? `Interest (${store.formatNumberShort(iCost)})` : 'Interest MAXED')
+      .setLabel(iCost ? `∑ Interest (${store.formatNumberShort(iCost)})` : '∑ Interest MAXED')
       .setStyle(iCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!iCost || w.balance < iCost),
     new ButtonBuilder().setCustomId(`upgrade_cashback_${userId}`)
-      .setLabel(cCost ? `Cashback (${store.formatNumberShort(cCost)})` : 'Cashback MAXED')
+      .setLabel(cCost ? `↩ Cashback (${store.formatNumberShort(cCost)})` : '↩ Cashback MAXED')
       .setStyle(cCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!cCost || w.balance < cCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
-      .setLabel(sCost ? `Spin Payout Mult (${store.formatNumberShort(sCost)})` : 'Spin Payout Mult MAXED')
+      .setLabel(sCost ? `⟳× Spin Mult (${store.formatNumberShort(sCost)})` : '⟳× Spin Mult MAXED')
       .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
-      .setLabel(uCost ? `Double Universal Income Chance (${store.formatNumberShort(uCost)})` : 'Double Universal Income Chance MAXED')
+      .setLabel(uCost ? `∀× Income Chance (${store.formatNumberShort(uCost)})` : '∀× Income Chance MAXED')
       .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
   ));
   rows.push(new ActionRowBuilder().addComponents(
@@ -138,15 +142,15 @@ function renderPotionsEmbed(userId, successMessage) {
     luckyStatus = `> Available for **${store.formatNumber(potionCfg.luckyPotCost)}** coins`;
   }
   fields.push({
-    name: '🧪 Lucky Pot',
-    value: `${luckyStatus}\n> Boosts your win chance by **+10%** for **1 hour**\n> Affects: Flip, Duel, Let It Ride`,
+    name: '☘⚱ Lucky Pot',
+    value: `${luckyStatus}\n> Boosts your win chance by **+5%** for **1 hour**\n> Affects: Flip, Duel, Let It Ride`,
     inline: false,
   });
 
   // Unlucky Pot
   fields.push({
-    name: '💀 Unlucky Pot',
-    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-10%** for **1 hour**\n> Select a target below to apply this curse`,
+    name: '⚱✕ Unlucky Pot',
+    value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-25%** for **1 hour**\n> Select a target below to apply this curse`,
     inline: false,
   });
 
@@ -174,7 +178,7 @@ function buildPotionButtons(userId) {
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`shop_buylucky_${userId}`)
-      .setLabel(potions.lucky ? 'Lucky Pot (Active)' : `Buy Lucky Pot (${store.formatNumberShort(potionCfg.luckyPotCost)})`)
+      .setLabel(potions.lucky ? '☘⚱ Lucky Pot (Active)' : `☘⚱ Buy Lucky Pot (${store.formatNumberShort(potionCfg.luckyPotCost)})`)
       .setStyle(potions.lucky ? ButtonStyle.Secondary : ButtonStyle.Success)
       .setDisabled(!!potions.lucky || w.balance < potionCfg.luckyPotCost),
   ));
@@ -182,7 +186,7 @@ function buildPotionButtons(userId) {
   // User select for unlucky pot target
   const userSelect = new UserSelectMenuBuilder()
     .setCustomId(`shop_unluckytarget_${userId}`)
-    .setPlaceholder(`Select target for Unlucky Pot (${store.formatNumberShort(potionCfg.unluckyPotCost)})`)
+    .setPlaceholder(`⚱✕ Select target for Unlucky Pot (${store.formatNumberShort(potionCfg.unluckyPotCost)})`)
     .setMinValues(1)
     .setMaxValues(1);
   rows.push(new ActionRowBuilder().addComponents(userSelect));
@@ -280,9 +284,10 @@ async function handleShopButton(interaction, parts) {
     const result = store.buyLuckyPot(uid);
     if (!result.success) {
       if (result.reason === 'insufficient_funds') return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.luckyPotCost)}** coins!`, ephemeral: true });
-      if (result.reason === 'already_active') return interaction.reply({ content: 'You already have an active Lucky Pot!', ephemeral: true });
+      if (result.reason === 'already_active') return interaction.reply({ content: '\u2618\u26b1 You already have an active Lucky Pot!', ephemeral: true });
     }
-    const { embed, components } = renderShopPage(uid, 'potions', 'Lucky Pot activated for 1 hour!');
+    const stackCount = result.stacks || 1;
+    const { embed, components } = renderShopPage(uid, 'potions', `\u2618\u26b1 Lucky Pot activated! (+5% win chance for 1 hour)`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
 

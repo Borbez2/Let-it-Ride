@@ -12,7 +12,7 @@ function renderEffectsPage(username, userId, wallet) {
     const tv = tempPct * mult;
     const total = bv + iv + tv;
     let parts = [`**${bv.toFixed(2)}${suffix}**`];
-    if (iv > 0) parts.push(`🩷 +${iv.toFixed(2)}${suffix}`);
+    if (iv > 0) parts.push(`🎒 +${iv.toFixed(2)}${suffix}`);
     if (tv > 0) parts.push(`🔥 +${tv.toFixed(2)}${suffix}`);
     const totalStr = (parts.length > 1) ? ` ᐅ **${total.toFixed(2)}${suffix}**` : '';
     return parts.join('  ') + totalStr;
@@ -20,7 +20,7 @@ function renderEffectsPage(username, userId, wallet) {
 
   function statLineRaw(baseVal, itemVal, tempVal, suffix = 'x', decimals = 1) {
     let parts = [`**${baseVal.toFixed(decimals)}${suffix}**`];
-    if (itemVal > 0) parts.push(`🩷 +${itemVal.toFixed(decimals)}${suffix}`);
+    if (itemVal > 0) parts.push(`🎒 +${itemVal.toFixed(decimals)}${suffix}`);
     if (tempVal > 0) parts.push(`🔥 +${tempVal.toFixed(decimals)}${suffix}`);
     const total = baseVal + itemVal + tempVal;
     const totalStr = (parts.length > 1) ? ` ᐅ **${total.toFixed(decimals)}${suffix}**` : '';
@@ -29,43 +29,52 @@ function renderEffectsPage(username, userId, wallet) {
 
   const fields = [];
 
-  // Active Potions
+  // Win Chance — combined breakdown of all sources (potions + streak), total first
   const potions = store.getActivePotions(userId);
-  let potionText = '';
-  if (potions.lucky) {
-    const minsLeft = Math.max(0, Math.ceil((potions.lucky.expiresAt - Date.now()) / 60000));
-    potionText += `> 🧪 **Lucky Pot** — +10% win chance (${minsLeft}m left)\n`;
-  }
-  if (potions.unlucky) {
-    const minsLeft = Math.max(0, Math.ceil((potions.unlucky.expiresAt - Date.now()) / 60000));
-    potionText += `> 💀 **Unlucky Pot** — -10% win chance (${minsLeft}m left)\n`;
-  }
-  if (!potionText) potionText = '> No active potions\n';
+  const potionConfig = store.getPotionConfig();
+  const luckyStacks = potions.lucky ? (potions.lucky.stacks ? potions.lucky.stacks.length : 1) : 0;
+  const luckyPotBoost = Math.min(luckyStacks, 1) * potionConfig.luckyPotBoost;
+  const unluckyPotPenalty = potions.unlucky ? potionConfig.unluckyPotPenalty : 0;
+  const streakBoost = luck.active ? (luck.winChanceBoost || 0) : 0;
+  const totalWinChanceBoost = luckyPotBoost - unluckyPotPenalty + streakBoost;
+  const totalSign = totalWinChanceBoost >= 0 ? '+' : '';
 
-  const modifier = store.getWinChanceModifier(userId);
-  if (modifier !== 1.0) {
-    const sign = modifier > 1 ? '+' : '';
-    potionText += `> ⚡ Win Chance Modifier: **${sign}${((modifier - 1) * 100).toFixed(0)}%**\n`;
+  let winChanceText = `> **Total: ${totalSign}${(totalWinChanceBoost * 100).toFixed(1)}%** win chance\n`;
+  winChanceText += `> Base: **0%**\n`;
+  if (luckyPotBoost > 0) {
+    const luckyMinsLeft = Math.max(0, Math.ceil((potions.lucky.expiresAt - Date.now()) / 60000));
+    winChanceText += `> ☘⚱ Lucky Pot (${luckyStacks} stack${luckyStacks !== 1 ? 's' : ''}, ${luckyMinsLeft}m left): **+${(luckyPotBoost * 100).toFixed(1)}%**\n`;
+  }
+  if (unluckyPotPenalty > 0) {
+    const unluckyMinsLeft = Math.max(0, Math.ceil((potions.unlucky.expiresAt - Date.now()) / 60000));
+    winChanceText += `> ⚱✕ Unlucky Pot (${unluckyMinsLeft}m left): **-${(unluckyPotPenalty * 100).toFixed(1)}%**\n`;
+  }
+  if (streakBoost > 0) {
+    const streakMinsLeft = Math.max(0, Math.ceil(luck.expiresInMs / 60000));
+    winChanceText += `> 🔥 Losing Streak (${streakMinsLeft}m left): **+${(streakBoost * 100).toFixed(1)}%**\n`;
+  }
+  if (luckyPotBoost === 0 && unluckyPotPenalty === 0 && streakBoost === 0) {
+    winChanceText += `> No active win chance effects\n`;
   }
 
   fields.push({
-    name: '🧪 Potions',
-    value: potionText,
+    name: '🎯 Win Chance',
+    value: winChanceText,
     inline: false,
   });
 
-  // Luck (temporary buff) — discrete parallelogram bar (1 per stack)
+  // Luck (losing streak) — win chance boost bar + streak info
   const pityStatus = store.getUserPityStatus(userId);
   const maxStacks = pityStatus.tier2Cap - pityStatus.activationThreshold + 1;
   const activeStacks = pityStatus.active ? (pityStatus.buffStreak - pityStatus.activationThreshold + 1) : 0;
   const stackBar = '▰'.repeat(activeStacks) + '▱'.repeat(maxStacks - activeStacks);
-  const boostPct = (pityStatus.cashbackRate * 100).toFixed(1);
-  const maxPct = (pityStatus.maxCashbackRate * 100).toFixed(1);
+  const boostPct = ((pityStatus.winChanceBoost || 0) * 100).toFixed(1);
+  const maxPct = (pityStatus.maxWinChanceBoost * 100).toFixed(1);
 
   let luckText;
   if (pityStatus.active) {
     const minsLeft = Math.max(0, Math.ceil(pityStatus.expiresInMs / 60000));
-    luckText = `> ● ${stackBar} **${boostPct}%/${maxPct}%** cashback (🔥 ${minsLeft}m left)\n`;
+    luckText = `> ● ${stackBar} **${boostPct}%/${maxPct}%** win chance (🔥 ${minsLeft}m left)\n`;
     luckText += `> From Streak: **${pityStatus.buffStreak}** · Stacks: **${activeStacks}/${maxStacks}**\n`;
     luckText += `> Keep losing to upgrade the buff. A higher streak replaces the current boost.`;
   } else {
@@ -76,22 +85,21 @@ function renderEffectsPage(username, userId, wallet) {
 
   fields.push({
     name: '☘ Luck (Flip, Duel, Let It Ride)',
-    value: `${luckText}\n> Loss Streak: **${pityStatus.lossStreak}** (Best: ${pityStatus.bestLossStreak})\n> Triggers: **${pityStatus.triggers}** · Total Cashback: **${store.formatNumber(pityStatus.totalCashback)}**`,
+    value: `${luckText}\n> Loss Streak: **${pityStatus.lossStreak}** (Best: ${pityStatus.bestLossStreak})\n> Triggers: **${pityStatus.triggers}**`,
     inline: false,
   });
 
   // Bank Interest — base (upgrades) + items
   fields.push({
-    name: '\u00A4 Bank Interest',
+    name: '∑ Bank Interest',
     value: `> ${statLine(base.interestRate, items.interestRate, 0)}/day`,
     inline: true,
   });
 
-  // Cashback — base + items + luck temp
-  const luckCashbackTemp = luck.active ? luck.cashbackRate : 0;
+  // Cashback — base + items (streak no longer contributes here)
   fields.push({
-    name: '\u21A9 Cashback',
-    value: `> ${statLine(base.cashbackRate, items.cashbackRate, luckCashbackTemp)}`,
+    name: '↩ Cashback',
+    value: `> ${statLine(base.cashbackRate, items.cashbackRate, 0)}`,
     inline: true,
   });
 
@@ -99,23 +107,23 @@ function renderEffectsPage(username, userId, wallet) {
 
   // Spin Multiplier — base + items
   fields.push({
-    name: '\u229B Spin Multiplier',
+    name: '⟳× Spin Multiplier',
     value: `> ${statLineRaw(base.spinWeight, items.spinWeight, 0)}`,
     inline: true,
   });
 
   // Universal Income Multiplier — base + items
   fields.push({
-    name: '\u2295 Income Multiplier',
+    name: '∀× Income Multiplier',
     value: `> Double: ${statLine(base.universalDoubleChance, items.universalDoubleChance, 0)}`,
     inline: true,
   });
 
   fields.push({ name: '\u200b', value: '\u200b', inline: false });
 
-  // Mines Save — items only (no base upgrade for this)
+  // Mines Save — items only
   fields.push({
-    name: '\u25C8 Mines Save',
+    name: '⛁⌖ Mines Save',
     value: `> Reveal: ${statLine(base.minesRevealChance, items.minesRevealChance, 0)}`,
     inline: true,
   });
@@ -125,7 +133,7 @@ function renderEffectsPage(username, userId, wallet) {
   // Legend
   fields.push({
     name: 'Legend',
-    value: '> Base (upgrades) · 🩷 Collection items · 🔥 Temporary · 🧪 Potions',
+    value: '> Base (upgrades) · 🎒 Collection items · 🔥 Temporary · ☘⚱ Lucky pot · ⚱✕ Unlucky pot',
     inline: false,
   });
 
