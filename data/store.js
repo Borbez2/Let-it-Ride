@@ -348,15 +348,11 @@ function evaluateLuckOnLoss(w, now = Date.now()) {
 function evaluateLuckOnWin(w, now = Date.now()) {
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
+  // Reset the loss streak counter so the next losing streak starts fresh.
+  // The active buff is intentionally NOT cleared here — it persists for its
+  // full 5-minute duration regardless of wins. If a new, higher-tier boost
+  // is earned during that window it will replace (not stack on) this one.
   luck.lossStreak = 0;
-  // Clear the active buff on any win so that a new losing streak always
-  // starts from scratch — winning "resets the meter" completely.
-  // This means 5 losses → win → 6 losses gives only the 6-loss buff,
-  // not a 5-loss buff shielding until the 6-loss threshold is crossed.
-  if (!luck.buff) luck.buff = { boost: 0, expiresAt: 0, streak: 0 };
-  luck.buff.boost = 0;
-  luck.buff.expiresAt = 0;
-  luck.buff.streak = 0;
   refreshLuckBuff(luck, now);
 }
 
