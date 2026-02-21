@@ -209,10 +209,12 @@ function renderMysteryBoxEmbed(userId, successMessage) {
     },
   ];
 
+  const boxesOpened = (w.stats && w.stats.mysteryBox && w.stats.mysteryBox.opened) || 0;
+
   const embed = {
     title: '🎁 Mystery Box Shop',
     color: 0x2b2d31,
-    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins`,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins\n> 📦 Boxes Opened: **${store.formatNumber(boxesOpened)}**`,
     fields,
   };
 
