@@ -36,7 +36,7 @@ function renderUpgradesEmbed(userId, successMessage) {
   const bonuses = store.getUserBonuses(userId);
   const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sMult = (1 + sLvl * 0.1), uChance = bonuses.universalIncomeDoubleChance * 100;
   const iBaseRate = CONFIG.economy.bank.baseInvestRate + (iLvl * CONFIG.economy.upgrades.interestPerLevel);
-  const cBaseRatePct = cLvl * 0.1;
+  const cBaseRatePct = cLvl * CONFIG.economy.upgrades.cashbackPerLevel * 100;
   const iCost = iLvl < maxLevel ? interestCosts[iLvl] : null;
   const cCost = cLvl < maxLevel ? cashbackCosts[cLvl] : null;
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
@@ -56,7 +56,7 @@ function renderUpgradesEmbed(userId, successMessage) {
     },
     {
       name: '↩ Loss Cashback',
-      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cRatePct + 0.1).toFixed(2)}%** (+0.10%) for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cRatePct + CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(2)}%** (+${(CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(2)}%) for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
