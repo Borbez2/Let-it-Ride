@@ -9,8 +9,8 @@ This folder is managed automatically by the bot.
   - `gambling.db-wal` (if present at backup time)
   - `gambling.db-shm` (if present at backup time)
   - `meta.json`
-- `legacy/flat-backup-files/` — old loose backup files moved from the root of `backups/`
-- `legacy/data-pre-restore/` — old `data/*.pre-restore*` files moved out of `data/`
+- `legacy/flat-backup-files/`  - old loose backup files moved from the root of `backups/`
+- `legacy/data-pre-restore/`  - old `data/*.pre-restore*` files moved out of `data/`
 
 ## Retention
 

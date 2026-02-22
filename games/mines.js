@@ -8,17 +8,23 @@ const MINES_TOTAL = CONFIG.games.mines.total;
 
 const activeMines = new Map();
 
+/* ── Pity announcement ──────────────────────────────────── */
+
 async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   if (!pityResult || !pityResult.triggered) return;
   const channel = interaction.channel;
   if (!channel || typeof channel.send !== 'function') return;
 
   const boostPct = (pityResult.winChanceBoost * 100).toFixed(1);
-
-  await channel.send(
-    `\u2618 <@${userId}> luck triggered: +${boostPct}% win chance boost | loss streak: ${pityResult.lossStreak}`
-  ).catch(() => null);
+  await channel.send({
+    embeds: [{
+      description: `☘ <@${userId}> luck triggered: **+${boostPct}%** win chance boost | loss streak: ${pityResult.lossStreak}`,
+      color: 0x57f287,
+    }],
+  }).catch(() => null);
 }
+
+/* ── Session persistence ────────────────────────────────── */
 
 function persistMinesSessions() {
   store.setRuntimeState('session:mines', {
@@ -37,6 +43,8 @@ function restoreMinesSessions() {
 }
 
 restoreMinesSessions();
+
+/* ── Grid helpers ───────────────────────────────────────── */
 
 function createMinesGrid(mc) {
   const g = Array(MINES_TOTAL).fill(false);
@@ -96,21 +104,57 @@ function gridToString(game, hitIdx) {
   return gr;
 }
 
+function buildFullGrid(game) {
+  let gr = '';
+  for (let r = 0; r < MINES_ROWS; r++) {
+    for (let c = 0; c < MINES_COLS; c++) {
+      const i = r * MINES_COLS + c;
+      gr += game.grid[i] ? `${CONFIG.games.mines.symbols.mine} ` : `${CONFIG.games.mines.symbols.revealedSafe} `;
+    }
+    gr += '\n';
+  }
+  return gr;
+}
+
+/* ── Embed builders ─────────────────────────────────────── */
+
+function buildMinesEmbed({ title, grid, color, description, fields = [] }) {
+  const embed = {
+    title: `💣 ${title}`,
+    description: grid ? `\`\`\`\n${grid}\`\`\`\n${description || ''}` : (description || ''),
+    color,
+    fields,
+  };
+  return embed;
+}
+
+/* ── Slash command handler ──────────────────────────────── */
+
 async function handleCommand(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
   const balance = store.getBalance(userId);
-  if (balance <= 0) return interaction.reply(`Not enough coins. You only have **${store.formatNumber(balance)}**`);
-  
+  if (balance <= 0) {
+    return interaction.reply({
+      embeds: [{ description: `You don't have enough coins. Balance: **${store.formatNumber(balance)}**`, color: 0xed4245 }],
+      ephemeral: true,
+    });
+  }
+
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply(CONFIG.commands.invalidAmountText);
+    return interaction.reply({ content: CONFIG.commands.invalidAmountText, ephemeral: true });
   }
-  
+
   const mc = interaction.options.getInteger('mines');
   const bal = store.getBalance(userId);
-  if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
-  if (mc >= MINES_TOTAL) return interaction.reply(`Max ${MINES_TOTAL - 1} mines`);
+  if (bet > bal) {
+    return interaction.reply({
+      embeds: [{ description: `You only have **${store.formatNumber(bal)}**`, color: 0xed4245 }],
+      ephemeral: true,
+    });
+  }
+  if (mc >= MINES_TOTAL) return interaction.reply({ content: `Max ${MINES_TOTAL - 1} mines`, ephemeral: true });
 
   store.setBalance(userId, bal - bet);
   const g = {
@@ -121,10 +165,17 @@ async function handleCommand(interaction) {
   activeMines.set(userId, g);
   persistMinesSessions();
   return interaction.reply({
-    content: `**Mines** (${mc} mines, ${MINES_TOTAL - mc} safe)\nRevealed: 0 | 1.00x`,
+    embeds: [{
+      title: '💣 Mines',
+      description: `${mc} mines, ${MINES_TOTAL - mc} safe tiles\nRevealed: **0** | **1.00x**`,
+      color: 0x5865f2,
+      footer: { text: `Bet: ${store.formatNumber(bet)}` },
+    }],
     components: renderMinesGrid(g),
   });
 }
+
+/* ── Button handler ─────────────────────────────────────── */
 
 async function handleButton(interaction, parts) {
   const uid = parts[parts.length - 1];
@@ -132,7 +183,7 @@ async function handleButton(interaction, parts) {
   const game = activeMines.get(uid);
   if (!game) return interaction.reply({ content: "Expired!", ephemeral: true });
 
-  // Cashout
+  // ── Cashout ──
   if (parts[1] === 'cashout') {
     const baseWin = Math.floor(game.bet * game.multiplier);
     let finalWin = baseWin;
@@ -148,18 +199,29 @@ async function handleButton(interaction, parts) {
     activeMines.delete(uid);
     persistMinesSessions();
     const gr = gridToString(game);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    const detailParts = [
+      `${game.revealedCount} tiles at **${game.multiplier.toFixed(2)}x**`,
+      `Won **+${store.formatNumber(finalWin - game.bet)}**`,
+    ];
+    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
+    detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
     return interaction.update({
-      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **+${store.formatNumber(finalWin - game.bet)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: '',
+      embeds: [buildMinesEmbed({
+        title: 'Mines - Cashed Out',
+        grid: gr,
+        color: 0x57f287,
+        description: detailParts.join('\n'),
+      })],
       components: [],
     });
   }
 
-  // Reveal tile
+  // ── Reveal tile ──
   const ti = parseInt(parts[1]);
   if (game.revealed[ti]) return interaction.reply({ content: "Already revealed!", ephemeral: true });
 
-  // Hit a mine
+  // ── Hit a mine ──
   if (game.grid[ti]) {
     const savedByCharm = store.tryTriggerMinesReveal(uid);
     if (savedByCharm) {
@@ -168,6 +230,7 @@ async function handleButton(interaction, parts) {
       game.multiplier = getMinesMultiplier(game.revealedCount, game.mineCount);
       persistMinesSessions();
 
+      // Perfect clear after charm
       if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
         const baseWin = Math.floor(game.bet * game.multiplier);
         let finalWin = baseWin;
@@ -182,26 +245,30 @@ async function handleButton(interaction, parts) {
         store.setBalance(uid, store.getBalance(uid) + finalWin);
         activeMines.delete(uid);
         persistMinesSessions();
-        let gr = '';
-        for (let r = 0; r < MINES_ROWS; r++) {
-          for (let c = 0; c < MINES_COLS; c++) {
-            const i = r * MINES_COLS + c;
-            gr += game.grid[i] ? `${CONFIG.games.mines.symbols.mine} ` : `${CONFIG.games.mines.symbols.revealedSafe} `;
-          }
-          gr += '\n';
-        }
         return interaction.update({
-          content: `✨ **Mines Charm Proc** saved you from a mine\n\`\`\`\n${gr}\`\`\`\nPerfect clear payout: **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+          content: '',
+          embeds: [buildMinesEmbed({
+            title: 'Mines - Charm Save + Perfect Clear!',
+            grid: buildFullGrid(game),
+            color: 0x57f287,
+            description: `✨ Mines Charm saved you from a mine!\nPerfect clear payout: **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+          })],
           components: [],
         });
       }
 
       return interaction.update({
-        content: `✨ **Mines Charm Proc** saved you from a mine\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
+        embeds: [{
+          title: '💣 Mines - ✨ Charm Save!',
+          description: `Mines Charm saved you from a mine!\nRevealed: **${game.revealedCount}** | **${game.multiplier.toFixed(2)}x**\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
+          color: 0x57f287,
+          footer: { text: `Bet: ${store.formatNumber(game.bet)}` },
+        }],
         components: renderMinesGrid(game),
       });
     }
 
+    // Actually hit a mine - loss
     const potentialCashout = Math.floor(game.bet * game.multiplier);
     const pityResult = store.recordLoss(uid, 'mines', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
@@ -210,18 +277,25 @@ async function handleButton(interaction, parts) {
     activeMines.delete(uid);
     persistMinesSessions();
     const gr = gridToString(game, ti);
-    const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
-    let lossText = `Lost **${store.formatNumber(game.bet)}** (initial bet)`;
+    const detailParts = [`Lost **${store.formatNumber(game.bet)}** (initial bet)`];
     if (game.revealedCount > 0) {
-      lossText += `\nMissed cashout: **+${store.formatNumber(potentialCashout - game.bet)}** (${game.multiplier.toFixed(2)}x)`;
+      detailParts.push(`Missed cashout: **+${store.formatNumber(potentialCashout - game.bet)}** (${game.multiplier.toFixed(2)}x)`);
     }
+    if (cb > 0) detailParts.push(`+${store.formatNumber(cb)} cashback`);
+    detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
     return interaction.update({
-      content: `**Mines - BOOM**\n\`\`\`\n${gr}\`\`\`\n${lossText}${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: '',
+      embeds: [buildMinesEmbed({
+        title: 'Mines - BOOM',
+        grid: gr,
+        color: 0xed4245,
+        description: detailParts.join('\n'),
+      })],
       components: [],
     });
   }
 
-  // Safe tile
+  // ── Safe tile ──
   game.revealed[ti] = true;
   game.revealedCount++;
   game.multiplier = getMinesMultiplier(game.revealedCount, game.mineCount);
@@ -243,26 +317,34 @@ async function handleButton(interaction, parts) {
     store.setBalance(uid, store.getBalance(uid) + finalWin);
     activeMines.delete(uid);
     persistMinesSessions();
-    let gr = '';
-    for (let r = 0; r < MINES_ROWS; r++) {
-      for (let c = 0; c < MINES_COLS; c++) {
-        const i = r * MINES_COLS + c;
-        gr += game.grid[i] ? `${CONFIG.games.mines.symbols.mine} ` : `${CONFIG.games.mines.symbols.revealedSafe} `;
-      }
-      gr += '\n';
-    }
-    const taxLine = clearTax > 0 ? `\n${store.formatNumber(clearTax)} tax → pool` : '';
+    const detailParts = [`Won **+${store.formatNumber(finalWin - game.bet)}**`];
+    if (clearTax > 0) detailParts.push(`${store.formatNumber(clearTax)} tax → pool`);
+    detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
     return interaction.update({
-      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **+${store.formatNumber(finalWin - game.bet)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: '',
+      embeds: [buildMinesEmbed({
+        title: 'Mines - PERFECT CLEAR',
+        grid: buildFullGrid(game),
+        color: 0x57f287,
+        description: detailParts.join('\n'),
+      })],
       components: [],
     });
   }
 
+  // Normal reveal continue
   return interaction.update({
-    content: `**Mines** (${game.mineCount} mines)\nRevealed: ${game.revealedCount} | ${game.multiplier.toFixed(2)}x\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
+    embeds: [{
+      title: '💣 Mines',
+      description: `${game.mineCount} mines\nRevealed: **${game.revealedCount}** | **${game.multiplier.toFixed(2)}x**\nPotential: **+${store.formatNumber(Math.floor(game.bet * game.multiplier) - game.bet)}**`,
+      color: 0x5865f2,
+      footer: { text: `Bet: ${store.formatNumber(game.bet)}` },
+    }],
     components: renderMinesGrid(game),
   });
 }
+
+/* ── Session expiry ─────────────────────────────────────── */
 
 function expireSessions(ttlMs) {
   const now = Date.now();

@@ -161,10 +161,10 @@ function renderUsersPage(adminId, statusMsg) {
   const session = getSession(adminId);
   const selectedText = session.selectedUserId
     ? `**Selected**: <@${session.selectedUserId}> (${session.selectedUserName})\nBalance: **${fmtNum(store.getBalance(session.selectedUserId))}**`
-    : '**No user selected** — use the menu below';
+    : '**No user selected**  - use the menu below';
 
   const embed = {
-    title: '🛡️ Admin — User Management',
+    title: '🛡️ Admin  - User Management',
     color: 0x5865f2,
     description: selectedText,
   };
@@ -197,7 +197,7 @@ function renderUsersPage(adminId, statusMsg) {
 
 function renderEconomyPage(adminId, statusMsg) {
   const embed = {
-    title: '🛡️ Admin — Economy Settings',
+    title: '🛡️ Admin  - Economy Settings',
     color: 0xfee75c,
     description: formatEconomySnapshot(),
   };
@@ -217,7 +217,7 @@ function renderEconomyPage(adminId, statusMsg) {
 
 function renderRuntimePage(adminId, statusMsg) {
   const embed = {
-    title: '🛡️ Admin — Runtime Tuning',
+    title: '🛡️ Admin  - Runtime Tuning',
     color: 0xeb459e,
     description: formatRuntimeSnapshot(),
   };
@@ -236,7 +236,7 @@ function renderRuntimePage(adminId, statusMsg) {
 
 function renderSystemPage(adminId, statusMsg) {
   const embed = {
-    title: '🛡️ Admin — System Actions',
+    title: '🛡️ Admin  - System Actions',
     color: 0xe67e22,
     description: 'Trigger system actions manually.',
   };
@@ -269,7 +269,7 @@ function buildEconomyModal(adminId) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId(key)
-          .setLabel(`${meta.label} (${meta.min}–${meta.max})`)
+          .setLabel(`${meta.label} (${meta.min}-${meta.max})`)
           .setStyle(TextInputStyle.Short)
           .setValue(String(current))
           .setRequired(false),
@@ -314,7 +314,7 @@ function buildRuntimeModal(adminId) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId(key)
-          .setLabel(`${meta.description} (${meta.min}–${meta.max})`)
+          .setLabel(`${meta.description} (${meta.min}-${meta.max})`)
           .setStyle(TextInputStyle.Short)
           .setValue(String(cfg[key]))
           .setRequired(false),

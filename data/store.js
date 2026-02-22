@@ -19,7 +19,7 @@ const RARITY_TIER = {
 };
 const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
 
-// Luck buff constants – tiered single-buff system
+// Luck buff constants - tiered single-buff system
 const LUCK_ACTIVATION_THRESHOLD = 3;   // minimum streak to activate
 const LUCK_TIER1_CAP = 7;              // losses 3-7 give 0.5% each
 const LUCK_TIER1_RATE = 0.005;         // 0.5% per loss in tier 1
@@ -349,7 +349,7 @@ function evaluateLuckOnWin(w, now = Date.now()) {
   ensureWalletStatsShape(w);
   const luck = w.stats.bonuses.luck;
   // Reset the loss streak counter so the next losing streak starts fresh.
-  // The active buff is intentionally NOT cleared here — it persists for its
+  // The active buff is intentionally NOT cleared here  - it persists for its
   // full 5-minute duration regardless of wins. If a new, higher-tier boost
   // is earned during that window it will replace (not stack on) this one.
   luck.lossStreak = 0;
@@ -403,7 +403,7 @@ function compactNetworthHistory(history, now = Date.now()) {
 
     const bucketMs = tiers[tierIdx].bucketMs;
 
-    // bucketMs === 0 means raw – keep every point as-is.
+    // bucketMs === 0 means raw - keep every point as-is.
     if (bucketMs === 0) {
       result.push(point);
       lastBucketKey = null;
@@ -415,7 +415,7 @@ function compactNetworthHistory(history, now = Date.now()) {
     const bucketKey = `${tierIdx}:${bucketStart}`;
 
     if (bucketKey === lastBucketKey && result.length > 0) {
-      // Same bucket – replace with the later (more recent) point.
+      // Same bucket - replace with the later (more recent) point.
       result[result.length - 1] = point;
     } else {
       result.push(point);
@@ -865,7 +865,7 @@ function applyCashback(userId, lossAmount) {
   if (rate > 0) {
     totalCashback += Math.floor(loss * rate);
   }
-  // Luck buff no longer gives cashback — it now boosts win chance instead.
+  // Luck buff no longer gives cashback  - it now boosts win chance instead.
   // (Legacy block removed)
   const w = getWallet(userId);
   if (totalCashback > 0) {

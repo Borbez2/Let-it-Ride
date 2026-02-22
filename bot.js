@@ -5,8 +5,18 @@ const { CONFIG } = require('./config');
 const store = require('./data/store');
 const blackjack = require('./games/blackjack');
 const mines = require('./games/mines');
-const simple = require('./games/simple');
-const economy = require('./commands/economy');
+const flip = require('./games/flip');
+const roulette = require('./games/roulette');
+const letitride = require('./games/letitride');
+const duel = require('./games/duel');
+const balanceCmd = require('./commands/balance');
+const bankCmd = require('./commands/bank');
+const poolCmd = require('./commands/pool');
+const giveCmd = require('./commands/give');
+const tradeCmd = require('./commands/trade');
+const leaderboardCmd = require('./commands/leaderboard');
+const inventoryCmd = require('./commands/inventory');
+const giveawayCmd = require('./commands/giveaway');
 const adminCmd = require('./commands/admin');
 const helpCmd = require('./commands/help');
 const statsCmd = require('./commands/stats');
@@ -337,7 +347,7 @@ const commands = [
   new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw from your bank')
     .addStringOption(o => o.setName('amount').setDescription(`Amount to withdraw (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
   new SlashCommandBuilder().setName('bank').setDescription('Check your bank status'),
-  new SlashCommandBuilder().setName('shop').setDescription('Browse the shop — upgrades, potions, and mystery boxes'),
+  new SlashCommandBuilder().setName('shop').setDescription('Browse the shop - upgrades, potions, and mystery boxes'),
   new SlashCommandBuilder().setName('effects').setDescription('View your active effects, potions, and stat bonuses')
     .addUserOption(o => o.setName('user').setDescription('User to check effects for (optional)').setRequired(false)),
   new SlashCommandBuilder().setName('inventory').setDescription('View your collectibles')
@@ -915,8 +925,10 @@ function sweepExpiredSessions() {
   let total = 0;
   total += blackjack.expireSessions(SESSION_EXPIRY_MS);
   total += mines.expireSessions(SESSION_EXPIRY_MS);
-  total += simple.expireSessions(SESSION_EXPIRY_MS);
-  total += economy.expireTradeSessions(SESSION_EXPIRY_MS);
+  total += roulette.expireSessions(SESSION_EXPIRY_MS);
+  total += letitride.expireSessions(SESSION_EXPIRY_MS);
+  total += duel.expireSessions(SESSION_EXPIRY_MS);
+  total += tradeCmd.expireTradeSessions(SESSION_EXPIRY_MS);
   // Sweep live graph sessions that passed their TTL
   const now = Date.now();
   for (const [viewerId, session] of liveGraphSessions) {
@@ -977,8 +989,8 @@ function scheduleAll() {
   }
 
   scheduleNextHourly();
-  // Wire up the scheduler so economy.js can trigger it after creating a giveaway.
-  economy.setGiveawayTimerScheduler(scheduleGiveawayTimer);
+  // Wire up the scheduler so giveaway module can trigger it after creating a giveaway.
+  giveawayCmd.setGiveawayTimerScheduler(scheduleGiveawayTimer);
   // Reschedule timers for any giveaways that survived a bot restart.
   for (const g of store.getAllGiveaways()) scheduleGiveawayTimer(g.id);
   setInterval(sweepExpiredSessions, SESSION_SWEEP_INTERVAL_MS);
@@ -1029,8 +1041,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isModalSubmit()) {
     try {
       if (interaction.customId.startsWith('adm_modal_')) return await adminCmd.handleAdminModal(interaction, ADMIN_IDS, onRuntimeConfigUpdated);
-      if (interaction.customId.startsWith('trade_coinmodal_')) return await economy.handleTradeModal(interaction);
-      if (interaction.customId === 'giveaway_create_modal') return await economy.handleGiveawayModal(interaction);
+      if (interaction.customId.startsWith('trade_coinmodal_')) return await tradeCmd.handleTradeModal(interaction);
+      if (interaction.customId === 'giveaway_create_modal') return await giveawayCmd.handleGiveawayModal(interaction);
     } catch (e) { console.error(e); }
     return;
   }
@@ -1039,7 +1051,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isStringSelectMenu()) {
     try {
       if (interaction.customId.startsWith('trade_selectitem_') || interaction.customId.startsWith('trade_unselectitem_') || interaction.customId.startsWith('trade_pickrarity_'))
-        return await economy.handleTradeSelectMenu(interaction);
+        return await tradeCmd.handleTradeSelectMenu(interaction);
       if (interaction.customId.startsWith('livestats_'))
         return await handleLiveStatsSelectMenu(interaction);
       if (interaction.customId.startsWith('stats_'))
@@ -1074,22 +1086,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       );
       if (interaction.customId.startsWith('stats_'))    return await statsCmd.handleStatsButton(interaction);
       if (interaction.customId.startsWith('help_'))     return await helpCmd.handleHelpButton(interaction);
-      if (interaction.customId.startsWith('bank_'))     return await economy.handleBankButton(interaction, parts);
+      if (interaction.customId.startsWith('bank_'))     return await bankCmd.handleBankButton(interaction, parts);
       if (interaction.customId.startsWith('upgrade_'))  return await shopCmd.handleUpgradeButton(interaction, parts);
       if (interaction.customId.startsWith('shop_'))      return await shopCmd.handleShopButton(interaction, parts);
-      if (interaction.customId.startsWith('trade_'))    return await economy.handleTradeButton(interaction, parts);
-      if (interaction.customId.startsWith('inv_'))      return await economy.handleInventoryButton(interaction, parts);
+      if (interaction.customId.startsWith('trade_'))    return await tradeCmd.handleTradeButton(interaction, parts);
+      if (interaction.customId.startsWith('inv_'))      return await inventoryCmd.handleInventoryButton(interaction, parts);
       if (interaction.customId.startsWith('mines_'))    return await mines.handleButton(interaction, parts);
-      if (interaction.customId.startsWith('duel_'))     return await simple.handleDuelButton(interaction, parts);
-      if (interaction.customId.startsWith('ride_'))     return await simple.handleRideButton(interaction, parts);
+      if (interaction.customId.startsWith('duel_'))     return await duel.handleDuelButton(interaction, parts);
+      if (interaction.customId.startsWith('ride_'))     return await letitride.handleRideButton(interaction, parts);
       if (interaction.customId.startsWith('bjsplit_'))  return await blackjack.handleButton(interaction, parts);
       if (interaction.customId.startsWith('bj_'))       return await blackjack.handleButton(interaction, parts);
-      if (interaction.customId.startsWith('allin17_'))  return await simple.handleAllIn17Button(interaction, parts);
-      if (interaction.customId.startsWith('roulette_')) return await simple.handleRouletteButton(interaction, parts);
+      if (interaction.customId.startsWith('allin17_'))  return await roulette.handleAllIn17Button(interaction, parts);
+      if (interaction.customId.startsWith('roulette_')) return await roulette.handleRouletteButton(interaction, parts);
 
       if (interaction.customId.startsWith('giveaway_join_')) {
         const giveawayId = interaction.customId.slice('giveaway_join_'.length);
-        return await economy.handleGiveawayJoin(interaction, giveawayId);
+        return await giveawayCmd.handleGiveawayJoin(interaction, giveawayId);
       }
     } catch (e) { console.error(e); }
     return;
@@ -1110,31 +1122,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
     store.processBank(userId);
 
     switch (cmd) {
-      case 'balance':      return await economy.handleBalance(interaction);
-      case 'daily':        return await economy.handleDaily(interaction);
-      case 'flip':         return await simple.handleFlip(interaction);
+      case 'balance':      return await balanceCmd.handleBalance(interaction);
+      case 'daily':        return await balanceCmd.handleDaily(interaction);
+      case 'flip':         return await flip.handleFlip(interaction);
 
       case 'blackjack':    return await blackjack.handleCommand(interaction);
-      case 'roulette':     return await simple.handleRoulette(interaction);
-      case 'allin17black': return await simple.handleAllIn17(interaction);
+      case 'roulette':     return await roulette.handleRoulette(interaction);
+      case 'allin17black': return await roulette.handleAllIn17(interaction);
       case 'mines':        return await mines.handleCommand(interaction);
-      case 'leaderboard':  return await economy.handleLeaderboard(interaction, client);
-      case 'give':         return await economy.handleGive(interaction);
-      case 'trade':        return await economy.handleTrade(interaction);
-      case 'duel':         return await simple.handleDuel(interaction);
-      case 'letitride':    return await simple.handleLetItRide(interaction);
+      case 'leaderboard':  return await leaderboardCmd.handleLeaderboard(interaction, client);
+      case 'give':         return await giveCmd.handleGive(interaction);
+      case 'trade':        return await tradeCmd.handleTrade(interaction);
+      case 'duel':         return await duel.handleDuel(interaction);
+      case 'letitride':    return await letitride.handleLetItRide(interaction);
       case 'deposit':
-      case 'invest':       return await economy.handleDeposit(interaction);
-      case 'withdraw':     return await economy.handleWithdraw(interaction);
-      case 'bank':         return await economy.handleBank(interaction);
+      case 'invest':       return await balanceCmd.handleDeposit(interaction);
+      case 'withdraw':     return await balanceCmd.handleWithdraw(interaction);
+      case 'bank':         return await bankCmd.handleBank(interaction);
       case 'shop':          return await shopCmd.handleShop(interaction);
       case 'effects':       return await effectsCmd.handleEffects(interaction);
-      case 'inventory':    return await economy.handleInventory(interaction);
-      case 'collection':   return await economy.handleCollection(interaction, client);
-      case 'pool':         return await economy.handlePool(interaction);
+      case 'inventory':    return await inventoryCmd.handleInventory(interaction);
+      case 'collection':   return await leaderboardCmd.handleCollection(interaction, client);
+      case 'pool':         return await poolCmd.handlePool(interaction);
       case 'stats':        return await statsCmd.handleStats(interaction);
       case 'help':         return await helpCmd.handleHelp(interaction);
-      case 'giveaway':     return await economy.handleGiveawayStart(interaction);
+      case 'giveaway':     return await giveawayCmd.handleGiveawayStart(interaction);
       case 'admin':        return await adminCmd.handleAdmin(
         interaction,
         client,

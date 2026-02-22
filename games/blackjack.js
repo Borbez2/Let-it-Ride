@@ -6,17 +6,23 @@ const store = require('../data/store');
 const activeGames = new Map();
 const activeSplitGames = new Map();
 
+/* ── Pity announcement (luck buff triggered) ────────────── */
+
 async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   if (!pityResult || !pityResult.triggered) return;
   const channel = interaction.channel;
   if (!channel || typeof channel.send !== 'function') return;
 
   const boostPct = (pityResult.winChanceBoost * 100).toFixed(1);
-
-  await channel.send(
-    `\u2618 <@${userId}> luck triggered: +${boostPct}% win chance boost | loss streak: ${pityResult.lossStreak}`
-  ).catch(() => null);
+  await channel.send({
+    embeds: [{
+      description: `☘ <@${userId}> luck triggered: **+${boostPct}%** win chance boost | loss streak: ${pityResult.lossStreak}`,
+      color: 0x57f287,
+    }],
+  }).catch(() => null);
 }
+
+/* ── Session persistence ────────────────────────────────── */
 
 function persistBlackjackSessions() {
   store.setRuntimeState('session:blackjack', {
@@ -42,6 +48,8 @@ function restoreBlackjackSessions() {
 
 restoreBlackjackSessions();
 
+/* ── UI helpers ─────────────────────────────────────────── */
+
 function bjButtons(userId, canDbl, canSplt, handIdx) {
   const pfx = handIdx !== undefined ? `bjsplit_${handIdx}` : 'bj';
   const btns = [
@@ -53,52 +61,110 @@ function bjButtons(userId, canDbl, canSplt, handIdx) {
   return new ActionRowBuilder().addComponents(btns);
 }
 
+/** Build an in-progress embed (blue) showing player/dealer hands. */
+function buildHandEmbed(title, playerCards, dealerStr, bet, extra) {
+  const pv = getHandValue(playerCards);
+  const fields = [
+    { name: 'Your Hand', value: `${formatHand(playerCards)} (${pv})`, inline: true },
+    { name: 'Dealer', value: dealerStr, inline: true },
+  ];
+  if (extra) fields.push({ name: '\u200b', value: extra, inline: false });
+  return {
+    title: `🃏 ${title}`,
+    color: 0x5865f2,
+    fields,
+    footer: { text: `Bet: ${store.formatNumber(bet)}` },
+  };
+}
+
+/** Build a result embed with color-coded outcome. */
+function buildResultEmbed({ title, playerCards, pv, dealerCards, dv, outcome, color, details }) {
+  const fields = [
+    { name: 'Your Hand', value: `${formatHand(playerCards)} (${pv})`, inline: true },
+    { name: 'Dealer', value: `${formatHand(dealerCards)} (${dv})`, inline: true },
+    { name: '\u200b', value: '\u200b', inline: false },
+  ];
+  if (details) {
+    for (const d of details) {
+      fields.push({ name: d.name, value: d.value, inline: d.inline ?? true });
+    }
+  }
+  return {
+    title: `🃏 ${title}`,
+    description: outcome,
+    color,
+    fields,
+  };
+}
+
 function renderSplitStatus(game) {
-  let t = `${CONFIG.games.blackjack.labels.splitTitle} - ${store.formatNumber(game.betPerHand)} per hand\n\n`;
+  const fields = [];
   for (let h = 0; h < game.hands.length; h++) {
     const hand = game.hands[h], val = getHandValue(hand.cards);
     const st = hand.done ? (val > 21 ? ' BUST' : ' ✓') : (h === game.activeHand ? ' ◀' : '');
-    t += `Hand ${h + 1}: ${formatHand(hand.cards)} (${val})${st}\n`;
+    fields.push({
+      name: `Hand ${h + 1}${st}`,
+      value: `${formatHand(hand.cards)} (${val})`,
+      inline: true,
+    });
   }
-  t += `\nDealer: ${formatCard(game.dealerHand[0])} + ?`;
-  return t;
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
+  fields.push({
+    name: 'Dealer',
+    value: `${formatCard(game.dealerHand[0])} + ?`,
+    inline: false,
+  });
+  return {
+    title: `🃏 ${CONFIG.games.blackjack.labels.splitTitle}`,
+    color: 0x5865f2,
+    fields,
+    footer: { text: `${store.formatNumber(game.betPerHand)} per hand` },
+  };
 }
 
-// Resolve the dealer hand and all split hands.
+/* ── Resolve split game ─────────────────────────────────── */
+
 async function resolveSplitGame(interaction, uid, game) {
   let dv = getHandValue(game.dealerHand);
-  while (dv < CONFIG.games.blackjack.dealerStandValue) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
+  while (dv < CONFIG.games.blackjack.dealerStandValue) {
+    game.dealerHand.push(game.deck.pop());
+    dv = getHandValue(game.dealerHand);
+  }
 
   const totalStake = game.hands.reduce((sum, hand) => sum + hand.bet, 0);
-  let payout = 0, rt = '';
+  let payout = 0;
+  const handFields = [];
+
   for (let h = 0; h < game.hands.length; h++) {
     const hh = game.hands[h], v = getHandValue(hh.cards);
     let o = '';
     if (hh.busted) {
       o = `BUST -${store.formatNumber(hh.bet)}`;
-    }
-    else if (dv > 21) {
+    } else if (dv > 21) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
       payout += hh.bet + boostedProfit;
       o = `Dealer busts +${store.formatNumber(boostedProfit)}`;
-    }
-    else if (v > dv) {
+    } else if (v > dv) {
       const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
       payout += hh.bet + boostedProfit;
       o = `Win +${store.formatNumber(boostedProfit)}`;
-    }
-    else if (v < dv) {
+    } else if (v < dv) {
       o = `Lose -${store.formatNumber(hh.bet)}`;
+    } else {
+      payout += hh.bet;
+      o = 'Push';
     }
-    else { payout += hh.bet; o = `Push`; }
-    rt += `Hand ${h + 1}: ${formatHand(hh.cards)} (${v}) ${o}\n`;
+    handFields.push({
+      name: `Hand ${h + 1}`,
+      value: `${formatHand(hh.cards)} (${v})\n${o}`,
+      inline: true,
+    });
   }
 
   const profit = payout - totalStake;
   const netProfit = Math.max(0, profit);
   const netLoss = Math.max(0, -profit);
   let cashback = 0;
-
   let splitTax = 0;
 
   store.setBalance(uid, store.getBalance(uid) + payout);
@@ -106,7 +172,6 @@ async function resolveSplitGame(interaction, uid, game) {
     const pityResult = store.recordWin(uid, 'blackjack', netProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     splitTax = store.addToUniversalPool(netProfit, uid);
-    // Deduct tax from player balance after the fact
     store.setBalance(uid, store.getBalance(uid) - splitTax);
   }
   if (netLoss > 0) {
@@ -118,79 +183,125 @@ async function resolveSplitGame(interaction, uid, game) {
   activeSplitGames.delete(uid);
   persistBlackjackSessions();
 
-  const cashbackLine = cashback > 0 ? `\nCashback: **+${store.formatNumber(cashback)}**` : '';
-  const taxLine = splitTax > 0 ? `\n${store.formatNumber(splitTax)} tax → pool` : '';
+  const color = profit > 0 ? 0x57f287 : profit < 0 ? 0xed4245 : 0x5865f2;
+  const sign = profit >= 0 ? '+' : '';
+
+  const detailParts = [`**Net: ${sign}${store.formatNumber(profit)}**`];
+  if (cashback > 0) detailParts.push(`Cashback: +${store.formatNumber(cashback)}`);
+  if (splitTax > 0) detailParts.push(`${store.formatNumber(splitTax)} tax → pool`);
+  detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
+
+  handFields.push({ name: '\u200b', value: '\u200b', inline: false });
+  handFields.push({
+    name: 'Dealer',
+    value: `${formatHand(game.dealerHand)} (${dv})`,
+    inline: false,
+  });
 
   return interaction.update({
-    content: `🃏 **Blackjack Split Results**\n\n${rt}\nDealer: ${formatHand(game.dealerHand)} (${dv})\n\nNet: **${profit >= 0 ? '+' : ''}${store.formatNumber(profit)}**${cashbackLine}${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+    content: '',
+    embeds: [{
+      title: '🃏 Blackjack Split Results',
+      color,
+      fields: handFields,
+      description: detailParts.join('\n'),
+    }],
     components: [],
   });
 }
 
-// Resolve a regular blackjack round after stand/double.
-// The bet is already deducted at game start:
-//   win  => return bet + winnings
-//   lose => no further deduction needed
-//   push => return bet
+/* ── Resolve standard hand ──────────────────────────────── */
+
 async function resolveStandard(interaction, uid, game, doubled) {
   const pv = getHandValue(game.playerHand);
   const bal = store.getBalance(uid);
   let dv = getHandValue(game.dealerHand);
-  while (dv < CONFIG.games.blackjack.dealerStandValue) { game.dealerHand.push(game.deck.pop()); dv = getHandValue(game.dealerHand); }
+  while (dv < CONFIG.games.blackjack.dealerStandValue) {
+    game.dealerHand.push(game.deck.pop());
+    dv = getHandValue(game.dealerHand);
+  }
 
-  let res;
+  const label = doubled ? CONFIG.games.blackjack.labels.resultDoubled : CONFIG.games.blackjack.labels.resultBase;
+  let outcome, color, detailParts = [];
+
   if (dv > 21) {
     const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const tax = store.addToUniversalPool(boostedProfit, uid);
     store.setBalance(uid, bal + game.bet + boostedProfit - tax);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
-    res = `Dealer busts! +**${store.formatNumber(boostedProfit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
+    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
+    outcome = `Dealer busts! **+${store.formatNumber(boostedProfit - tax)}**`;
+    color = 0x57f287;
   } else if (pv > dv) {
     const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const tax = store.addToUniversalPool(boostedProfit, uid);
     store.setBalance(uid, bal + game.bet + boostedProfit - tax);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
-    res = `Win! ${pv}>${dv} +**${store.formatNumber(boostedProfit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
+    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
+    outcome = `You win! ${pv} > ${dv} - **+${store.formatNumber(boostedProfit - tax)}**`;
+    color = 0x57f287;
   } else if (dv > pv) {
     const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    // bet already deducted, no further deduction needed
-    const cb = store.applyCashback(uid, game.bet); store.addToLossPool(game.bet);
-    const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
-    res = `Dealer wins ${dv}>${pv}\n-**${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
+    const cb = store.applyCashback(uid, game.bet);
+    store.addToLossPool(game.bet);
+    if (cb > 0) detailParts.push(`+${store.formatNumber(cb)} cashback`);
+    outcome = `Dealer wins ${dv} > ${pv} - **-${store.formatNumber(game.bet)}**`;
+    color = 0xed4245;
   } else {
-    // push, return the bet
     store.setBalance(uid, bal + game.bet);
-    res = `Push at ${pv}. Bet returned.\nBalance: **${store.formatNumber(bal + game.bet)}**`;
+    outcome = `Push at ${pv}. Bet returned.`;
+    color = 0x5865f2;
   }
 
   activeGames.delete(uid);
   persistBlackjackSessions();
-  const label = doubled ? CONFIG.games.blackjack.labels.resultDoubled : CONFIG.games.blackjack.labels.resultBase;
+
+  detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
+
   return interaction.update({
-    content: `🃏 **${label}**\nYou: ${formatHand(game.playerHand)} (${pv})\nDealer: ${formatHand(game.dealerHand)} (${dv})\n${res}`,
+    content: '',
+    embeds: [buildResultEmbed({
+      title: label,
+      playerCards: game.playerHand,
+      pv,
+      dealerCards: game.dealerHand,
+      dv,
+      outcome,
+      color,
+      details: [{ name: '\u200b', value: detailParts.join('\n'), inline: false }],
+    })],
     components: [],
   });
 }
 
-// Slash command handler.
+/* ── Slash command handler ──────────────────────────────── */
+
 async function handleCommand(interaction) {
   const userId = interaction.user.id;
   const rawAmount = interaction.options.getString('amount');
   const balance = store.getBalance(userId);
-  if (balance <= 0) return interaction.reply(`Not enough coins. You only have **${store.formatNumber(balance)}**`);
-  
+  if (balance <= 0) {
+    return interaction.reply({
+      embeds: [{ description: `You don't have enough coins. Balance: **${store.formatNumber(balance)}**`, color: 0xed4245 }],
+      ephemeral: true,
+    });
+  }
+
   const bet = store.parseAmount(rawAmount, balance);
   if (!bet || bet <= 0) {
-    return interaction.reply(CONFIG.commands.invalidAmountText);
+    return interaction.reply({ content: CONFIG.commands.invalidAmountText, ephemeral: true });
   }
-  
+
   const bal = store.getBalance(userId);
-  if (bet > bal) return interaction.reply(`You only have **${store.formatNumber(bal)}**`);
+  if (bet > bal) {
+    return interaction.reply({
+      embeds: [{ description: `You only have **${store.formatNumber(bal)}**`, color: 0xed4245 }],
+      ephemeral: true,
+    });
+  }
 
   // Deduct the bet up front so funds are reserved.
   store.setBalance(userId, bal - bet);
@@ -210,7 +321,16 @@ async function handleCommand(interaction) {
     if (dvv === 21) {
       // Push, return the original bet.
       store.setBalance(userId, bal);
-      return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21)\nDealer: ${formatHand(dh)} (21)\nPush! Balance: **${store.formatNumber(bal)}**`);
+      return interaction.reply({
+        embeds: [buildResultEmbed({
+          title: 'Blackjack - Push',
+          playerCards: ph, pv: 21,
+          dealerCards: dh, dv: 21,
+          outcome: 'Both natural 21. Bet returned.',
+          color: 0x5865f2,
+          details: [{ name: '\u200b', value: `Balance: **${store.formatNumber(bal)}**`, inline: false }],
+        })],
+      });
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit).
     const baseProfit = Math.floor(bet * CONFIG.games.blackjack.naturalBlackjackProfitMultiplier);
@@ -220,26 +340,36 @@ async function handleCommand(interaction) {
     const tax = store.addToUniversalPool(boostedProfit, userId);
     store.setBalance(userId, bal + boostedProfit - tax);
     const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
-    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(boostedProfit - tax)}**!${taxLine} Balance: **${store.formatNumber(store.getBalance(userId))}**`);
+    return interaction.reply({
+      embeds: [buildResultEmbed({
+        title: 'Blackjack!',
+        playerCards: ph, pv: 21,
+        dealerCards: dh, dv: dvv,
+        outcome: `🎉 Natural Blackjack! **+${store.formatNumber(boostedProfit - tax)}**`,
+        color: 0x57f287,
+        details: [{ name: '\u200b', value: `${taxLine ? store.formatNumber(tax) + ' tax → pool\n' : ''}Balance: **${store.formatNumber(store.getBalance(userId))}**`, inline: false }],
+      })],
+    });
   }
 
   // Check if the player can afford a double/split using remaining balance.
   const currentBal = store.getBalance(userId);
   const cd = currentBal >= bet, cs = canSplit(ph) && currentBal >= bet;
   return interaction.reply({
-    content: `🃏 **Blackjack** - Bet: ${store.formatNumber(bet)}\nYou: ${formatHand(ph)} (${pv})\nDealer: ${formatCard(dh[0])} + ?`,
+    embeds: [buildHandEmbed('Blackjack', ph, `${formatCard(dh[0])} + ?`, bet)],
     components: [bjButtons(userId, cd, cs)],
   });
 }
 
-// Button interaction handler.
+/* ── Button handler ─────────────────────────────────────── */
+
 async function handleButton(interaction, parts) {
   const uid = interaction.user.id;
 
   // Split-hand buttons.
   if (interaction.customId.startsWith('bjsplit_')) {
     const hi = parseInt(parts[1]), act = parts[2], ownerId = parts[3];
-    if (uid !== ownerId) return interaction.reply({ content: "Not yours!", ephemeral: true });
+    if (uid !== ownerId) return interaction.reply({ content: "Not your game!", ephemeral: true });
     const game = activeSplitGames.get(uid);
     if (!game) return interaction.reply({ content: "Expired!", ephemeral: true });
     const hand = game.hands[hi];
@@ -274,7 +404,7 @@ async function handleButton(interaction, parts) {
 
     const ah = game.hands[game.activeHand];
     const cd = store.getBalance(uid) >= game.betPerHand && ah.cards.length === 2;
-    return interaction.update({ content: renderSplitStatus(game), components: [bjButtons(uid, cd, false, game.activeHand)] });
+    return interaction.update({ content: '', embeds: [renderSplitStatus(game)], components: [bjButtons(uid, cd, false, game.activeHand)] });
   }
 
   // Standard blackjack buttons.
@@ -294,11 +424,10 @@ async function handleButton(interaction, parts) {
     activeGames.delete(uid);
     persistBlackjackSessions();
     const cd = store.getBalance(uid) >= game.bet && h1.cards.length === 2;
-    return interaction.update({ content: renderSplitStatus(sg), components: [bjButtons(uid, cd, false, 0)] });
+    return interaction.update({ content: '', embeds: [renderSplitStatus(sg)], components: [bjButtons(uid, cd, false, 0)] });
   }
 
   if (act === 'double') {
-    // Deduct the extra bet when doubling.
     const bal = store.getBalance(uid);
     if (bal < game.bet) return interaction.reply({ content: "Can't double!", ephemeral: true });
     store.setBalance(uid, bal - game.bet);
@@ -307,16 +436,25 @@ async function handleButton(interaction, parts) {
     persistBlackjackSessions();
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
-      // Bust after doubling; the full bet is already deducted.
       const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
       store.addToLossPool(game.bet);
-      const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
       activeGames.delete(uid);
       persistBlackjackSessions();
+      const detailParts = [];
+      if (cb > 0) detailParts.push(`+${store.formatNumber(cb)} cashback`);
+      detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
       return interaction.update({
-        content: `🃏 **Blackjack - Doubled**\nYou: ${formatHand(game.playerHand)} (${pv}) BUST\nDealer: ${formatHand(game.dealerHand)} (${getHandValue(game.dealerHand)})\nLost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+        content: '',
+        embeds: [buildResultEmbed({
+          title: 'Blackjack - Doubled',
+          playerCards: game.playerHand, pv,
+          dealerCards: game.dealerHand, dv: getHandValue(game.dealerHand),
+          outcome: `BUST! **-${store.formatNumber(game.bet)}**`,
+          color: 0xed4245,
+          details: [{ name: '\u200b', value: detailParts.join('\n'), inline: false }],
+        })],
         components: [],
       });
     }
@@ -328,16 +466,25 @@ async function handleButton(interaction, parts) {
     persistBlackjackSessions();
     const pv = getHandValue(game.playerHand);
     if (pv > 21) {
-      // Bust on hit; the bet was already deducted at game start.
       const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
       store.addToLossPool(game.bet);
-      const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
       activeGames.delete(uid);
       persistBlackjackSessions();
+      const detailParts = [];
+      if (cb > 0) detailParts.push(`+${store.formatNumber(cb)} cashback`);
+      detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
       return interaction.update({
-        content: `🃏 **Blackjack**\nYou: ${formatHand(game.playerHand)} (${pv}) BUST\nDealer: ${formatHand(game.dealerHand)} (${getHandValue(game.dealerHand)})\nLost **${store.formatNumber(game.bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+        content: '',
+        embeds: [buildResultEmbed({
+          title: 'Blackjack',
+          playerCards: game.playerHand, pv,
+          dealerCards: game.dealerHand, dv: getHandValue(game.dealerHand),
+          outcome: `BUST! **-${store.formatNumber(game.bet)}**`,
+          color: 0xed4245,
+          details: [{ name: '\u200b', value: detailParts.join('\n'), inline: false }],
+        })],
         components: [],
       });
     }
@@ -346,7 +493,8 @@ async function handleButton(interaction, parts) {
       new ButtonBuilder().setCustomId(`bj_stand_${uid}`).setLabel('Stand').setStyle(ButtonStyle.Secondary),
     );
     return interaction.update({
-      content: `🃏 **Blackjack**\nYou: ${formatHand(game.playerHand)} (${pv})\nDealer: ${formatCard(game.dealerHand[0])} + ?`,
+      content: '',
+      embeds: [buildHandEmbed('Blackjack', game.playerHand, `${formatCard(game.dealerHand[0])} + ?`, game.bet)],
       components: [row],
     });
   }
@@ -355,6 +503,8 @@ async function handleButton(interaction, parts) {
     return resolveStandard(interaction, uid, game, false);
   }
 }
+
+/* ── Session expiry ─────────────────────────────────────── */
 
 function expireSessions(ttlMs) {
   const now = Date.now();

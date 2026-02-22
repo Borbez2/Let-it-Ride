@@ -137,7 +137,7 @@ function renderPotionsEmbed(userId, successMessage) {
   let luckyStatus;
   if (potions.lucky) {
     const minsLeft = Math.max(0, Math.ceil((potions.lucky.expiresAt - Date.now()) / 60000));
-    luckyStatus = `> 🟢 **Active** — ${minsLeft}m remaining`;
+    luckyStatus = `> 🟢 **Active** - ${minsLeft}m remaining`;
   } else {
     luckyStatus = `> Available for **${store.formatNumber(potionCfg.luckyPotCost)}** coins`;
   }
@@ -210,7 +210,7 @@ function renderMysteryBoxEmbed(userId, successMessage) {
     },
     {
       name: '💎 Premium Mystery Box',
-      value: `> Price: **${store.formatNumber(premiumCost)}** coins each\n> No common items — starts at **uncommon**\n> Proportionally improved odds for rare+ tiers\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
+      value: `> Price: **${store.formatNumber(premiumCost)}** coins each\n> No common items - starts at **uncommon**\n> Proportionally improved odds for rare+ tiers\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
       inline: false,
     },
   ];
@@ -332,7 +332,7 @@ async function handleShopButton(interaction, parts) {
     const targetName = targetUser ? targetUser.username : 'Unknown';
     const { embed, components } = renderShopPage(uid, 'potions', `⚱✕ Unlucky Pot applied to ${targetName} for 30 mins!`);
     await interaction.update({ content: '', embeds: [embed], components });
-    await interaction.channel.send({ content: `<@${targetId}> — ⚱✕ you've been hit with an **Unlucky Pot** by <@${uid}>! Your win chance is reduced by **-25%** for **30 mins**.` });
+    await interaction.channel.send({ content: `<@${targetId}> ⚱✕ you've been hit with an **Unlucky Pot** by <@${uid}>! Your win chance is reduced by **-25%** for **30 mins**.` });
     return;
   }
 

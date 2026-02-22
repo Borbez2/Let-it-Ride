@@ -248,7 +248,7 @@ const CONFIG = {
         mythic: 0.05,
         divine: 0.01,
       },
-      // Per-item stat boosts: zeroed out — bonuses only come from completing a full set.
+      // Per-item stat boosts: zeroed out - bonuses only come from completing a full set.
       // perItemDisplayBuff below defines the DISPLAYED value per item (informational only).
       statBoostPerItem: {
         common:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
@@ -259,7 +259,7 @@ const CONFIG = {
         mythic:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
         divine:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
       },
-      // Displayed buff per individual item (purely informational — unlocked only when full set is complete).
+      // Displayed buff per individual item (purely informational - unlocked only when full set is complete).
       // Each item shows ONE buff type cycling: interest → cashback → mines → income → spin.
       perItemDisplayBuff: {
         common:    { interestRate: 0.00001, cashbackRate: 0.0000025, minesRevealChance: 0.00001, universalDoubleChance: 0.00002, spinWeight: 0.0001  },
@@ -282,7 +282,7 @@ const CONFIG = {
       },
     },
 
-    // Premium mystery box — no common tier, proportional odds
+    // Premium mystery box - no common tier, proportional odds
     premiumMysteryBox: {
       cost: 500000,
       duplicateCompensationByRarity: {

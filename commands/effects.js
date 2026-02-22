@@ -85,14 +85,14 @@ function renderGameplayPage(username, userId) {
     const minsLeft = Math.max(0, Math.ceil(pityStatus.expiresInMs / 60000));
     luckText = `> ● ${stackBar} **${boostPct}%/${maxPct}%** (🔥 ${minsLeft}m left)\n`;
     luckText += `> Triggered at streak: **${pityStatus.buffStreak}** losses\n`;
-    luckText += `> *Keep losing in a row to upgrade — a higher streak replaces the buff.*\n`;
+    luckText += `> *Keep losing in a row to upgrade  - a higher streak replaces the buff.*\n`;
     luckText += `> *Any win **clears** this buff and resets your streak to 0.*`;
   } else {
     const lossesNeeded = Math.max(1, pityStatus.activationThreshold - pityStatus.lossStreak);
     luckText = `> ○ ${stackBar} **0%/${maxPct}%** *(not active)*\n`;
     luckText += `> Lose **${lossesNeeded}** more in a row to trigger (streak: ${pityStatus.lossStreak})\n`;
     luckText += `> *Stacks are counted only from your current unbroken losing run.*\n`;
-    luckText += `> *A win clears the buff and resets the streak — no carryover.*`;
+    luckText += `> *A win clears the buff and resets the streak  - no carryover.*`;
   }
   const luckFooter = `\n> Current loss streak: **${pityStatus.lossStreak}** · Best: **${pityStatus.bestLossStreak}** · Total triggers: **${pityStatus.triggers}**`;
 
@@ -107,10 +107,10 @@ function renderGameplayPage(username, userId) {
   const revealTotal = (base.minesRevealChance + items.minesRevealChance) * 100;
   let minesText = `> **${revealTotal.toFixed(2)}%** chance to reveal & survive a mine\n`;
   if (items.minesRevealChance > 0) minesText += `> 🎒 Items: **+${(items.minesRevealChance * 100).toFixed(2)}%**\n`;
-  if (revealTotal === 0) minesText += `> *0% — upgrades don't affect mines; items only*`;
+  if (revealTotal === 0) minesText += `> *0%  - upgrades don't affect mines; items only*`;
 
   return {
-    title: `✦ ${username}'s Effects — Gameplay`,
+    title: `✦ ${username}'s Effects  - Gameplay`,
     color: 0x2b2d31,
     fields: [
       { name: '🎯 Win Chance Modifier (Flip · Duel · Let It Ride)', value: winText.trimEnd(), inline: false },
@@ -133,14 +133,14 @@ function renderPassivePage(username, userId) {
   let intText = `> **${totalIntPct.toFixed(3)}%/day** applied to your bank balance\n`;
   intText += `> Upgrades: **${baseIntPct.toFixed(3)}%/day**\n`;
   if (itemIntPct > 0) intText += `> 🎒 Items: **+${itemIntPct.toFixed(3)}%/day**\n`;
-  intText += `> *(Tiered slabs: full rate on first 1 M, ×0.5 on 1–10 M, ×0.1 above 10 M)*`;
+  intText += `> *(Tiered slabs: full rate on first 1 M, ×0.5 on 1-10 M, ×0.1 above 10 M)*`;
 
   // Daily Spin Multiplier
   const totalSpin = base.spinWeight + items.spinWeight;
   let spinText = `> **${totalSpin.toFixed(2)}x** spin weight\n`;
   spinText += `> Upgrades: **${base.spinWeight.toFixed(2)}x** (each upgrade level adds +0.1x)\n`;
   if (items.spinWeight > 0) spinText += `> 🎒 Items: **+${items.spinWeight.toFixed(2)}x**\n`;
-  spinText += `> *(Your weight relative to other players — a 2.0x weight doubles your lottery odds vs a 1.0x player.)*`;
+  spinText += `> *(Your weight relative to other players  - a 2.0x weight doubles your lottery odds vs a 1.0x player.)*`;
 
   // Hourly Universal Income Double Chance
   const baseDoublePct = base.universalDoubleChance * 100;
@@ -152,7 +152,7 @@ function renderPassivePage(username, userId) {
   incomeText += `> *(If triggered, your share of the hourly universal pool is doubled for that payout.)*`;
 
   return {
-    title: `✦ ${username}'s Effects — Passive`,
+    title: `✦ ${username}'s Effects  - Passive`,
     color: 0x2b2d31,
     fields: [
       { name: '∑ Bank Interest', value: intText, inline: false },
@@ -177,7 +177,7 @@ function renderFlipPage(username, userId) {
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
   return {
-    title: `✦ ${username}'s Effects — Coin Flip`,
+    title: `✦ ${username}'s Effects  - Coin Flip`,
     color: 0x2b2d31,
     fields: [{ name: '🪙 Coin Flip', value: text, inline: false }],
   };
@@ -198,7 +198,7 @@ function renderDuelPage(username, userId) {
   text += `> *Each player's modifier is computed from their own active effects.*`;
 
   return {
-    title: `✦ ${username}'s Effects — Duel`,
+    title: `✦ ${username}'s Effects  - Duel`,
     color: 0x2b2d31,
     fields: [{ name: '⚔️ Duel', value: text, inline: false }],
   };
@@ -218,7 +218,7 @@ function renderLetItRidePage(username, userId) {
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of original bet returned`;
 
   return {
-    title: `✦ ${username}'s Effects — Let It Ride`,
+    title: `✦ ${username}'s Effects  - Let It Ride`,
     color: 0x2b2d31,
     fields: [{ name: '🏇 Let It Ride', value: text, inline: false }],
   };
@@ -233,11 +233,11 @@ function renderBlackjackPage(username, userId) {
   text += `> Regular win: **2x** bet (+1x profit)\n`;
   text += `> Push (tie): bet returned · Bust/loss: bet lost\n`;
   text += `> Double/Split available under standard rules\n`;
-  text += `> Win chance modifier: **not applied** — outcome is card-based\n`;
+  text += `> Win chance modifier: **not applied**  - outcome is card-based\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
   return {
-    title: `✦ ${username}'s Effects — Blackjack`,
+    title: `✦ ${username}'s Effects  - Blackjack`,
     color: 0x2b2d31,
     fields: [{ name: '🃏 Blackjack', value: text, inline: false }],
   };
@@ -254,16 +254,16 @@ function renderMinesPage(username, userId) {
   const total = rows * cols;
   const revealPct = ((base.minesRevealChance + items.minesRevealChance) * 100).toFixed(2);
 
-  let text = `> Grid: **${rows}×${cols}** (${total} tiles total), mines: 1–15\n`;
+  let text = `> Grid: **${rows}×${cols}** (${total} tiles total), mines: 1-15\n`;
   text += `> Each safe tile found multiplies the pot; hit a mine and you lose\n`;
-  text += `> Mine save/reveal chance: **${revealPct}%** — survives a mine hit\n`;
+  text += `> Mine save/reveal chance: **${revealPct}%**  - survives a mine hit\n`;
   if (items.minesRevealChance > 0) text += `> 🎒 Items: **+${(items.minesRevealChance * 100).toFixed(2)}%** (base is 0%)\n`;
-  if (parseFloat(revealPct) === 0) text += `> *No mine save chance — items only, upgrades don't affect mines*\n`;
-  text += `> Win chance modifier: **not applied** — tile picks are pure RNG\n`;
+  if (parseFloat(revealPct) === 0) text += `> *No mine save chance  - items only, upgrades don't affect mines*\n`;
+  text += `> Win chance modifier: **not applied**  - tile picks are pure RNG\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
   return {
-    title: `✦ ${username}'s Effects — Mines`,
+    title: `✦ ${username}'s Effects  - Mines`,
     color: 0x2b2d31,
     fields: [{ name: '💣 Mines', value: text, inline: false }],
   };
@@ -284,11 +284,11 @@ function renderRoulettePage(username, userId) {
   text += `> ⚫ Black (${blackCount} numbers): **${blackChance}%** → **2x** payout (+1x profit)\n`;
   text += `> 🟩 Green (0): **${greenChance}%** → **${cfg.payoutProfitMultipliers.green + 1}x** payout (+${cfg.payoutProfitMultipliers.green}x profit)\n`;
   text += `> 🎲 All-In #${cfg.allIn.luckyNumber}: **${greenChance}%** → **${cfg.payoutProfitMultipliers.allIn17 + 1}x** payout (+${cfg.payoutProfitMultipliers.allIn17}x profit)\n`;
-  text += `> Win chance modifier: **not applied** — outcome is wheel-based\n`;
+  text += `> Win chance modifier: **not applied**  - outcome is wheel-based\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
   return {
-    title: `✦ ${username}'s Effects — Roulette`,
+    title: `✦ ${username}'s Effects  - Roulette`,
     color: 0x2b2d31,
     fields: [{ name: '🎡 Roulette', value: text, inline: false }],
   };
