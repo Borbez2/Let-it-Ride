@@ -7,6 +7,7 @@ const PAGE_TITLES = [
   '\u25c8 Games & Commands',
   '\u25c8 Effects & Modifiers',
   '\u25c8 Collectibles & Boxes',
+  '\u25c8 Number Shorthands',
 ];
 
 const TOTAL_PAGES = PAGE_TITLES.length;
@@ -103,12 +104,12 @@ function buildModifiersPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '☘ How Luck Works',
-        value: '> Lose **3 games in a row** (Flip, Duel, or Let It Ride only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +0.5% win chance per loss (3 losses = 0.5%, 7 losses = 2.5%)\n> **Streak 8\u201312:** +1% win chance per loss (8 losses = 3.5%, 12 losses = 7.5%)\n> \n> The buff **boosts your win chance** (stacks with Lucky Pot). It lasts **5 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.\n> Winning resets your loss streak, but any active buff keeps running until it expires.',
+        value: '> Lose **3 games in a row** (Flip or Duel only) to activate a luck buff. Each additional loss raises the buff:\n> \n> **Streak 3\u20137:** +0.5% win chance per loss (3 losses = 0.5%, 7 losses = 2.5%)\n> **Streak 8\u201312:** +1% win chance per loss (8 losses = 3.5%, 12 losses = 7.5%)\n> \n> The buff **boosts your win chance** (stacks with Lucky Pot). It lasts **5 minutes**. Only the highest boost applies \u2014 a new trigger at a lower streak won\'t overwrite a higher one still active.\n> Winning resets your loss streak, but any active buff keeps running until it expires.\n> \n> **Note:** Let It Ride does **not** count toward the loss streak to prevent abuse.',
         inline: false,
       },
       {
         name: '∑ How Bank Interest Works',
-        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 1M in your bank; higher balances earn at a reduced rate:\n> \n> **Slab 1** (0 \u2192 1M): rate = r\n> **Slab 2** (1M \u2192 10M): rate = r \u00d7 0.1\n> **Slab 3** (above 10M): rate = r \u00d7 0.01\n> \n> Your rate **r** is determined by your base rate + upgrade levels + collectible bonuses. See the full daily breakdown in `/bank` \u2192 \u2211 Breakdown.',
+        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 1M in your bank; higher balances earn at progressively reduced rates:\n> \n> **Slab 1** (0 \u2192 1M): rate = r\n> **Slab 2** (1M \u2192 10M): rate = r \u00d7 0.50\n> **Slab 3** (10M \u2192 100M): rate = r \u00d7 0.05\n> **Slab 4** (100M \u2192 1B): rate = r \u00d7 0.01\n> **Slab 5** (1B \u2192 1T): rate = r \u00d7 0.005\n> **Slab 6** (above 1T): rate = r \u00d7 0.001\n> \n> Your rate **r** is determined by your base rate + upgrade levels + collectible bonuses. See the full daily breakdown in `/bank` \u2192 \u2211 Breakdown.',
         inline: false,
       },
     ],
@@ -174,7 +175,42 @@ function buildCollectiblesPage() {
   };
 }
 
-const PAGE_BUILDERS = [buildEconomyPage, buildGamesCommandsPage, buildModifiersPage, buildCollectiblesPage];
+const PAGE_BUILDERS = [buildEconomyPage, buildGamesCommandsPage, buildModifiersPage, buildCollectiblesPage, buildNumberShorthandsPage];
+
+function buildNumberShorthandsPage() {
+  return {
+    title: PAGE_TITLES[4],
+    color: 0x2b2d31,
+    description: '> Numbers are abbreviated once they reach million and above. The exact value is always shown in parentheses.',
+    fields: [
+      {
+        name: '\u25c8 Display Format',
+        value: '> Large numbers are displayed as e.g. **1.34m (1,340,000)**.\n> The abbreviated form shows 2 decimal places; the full number is always in parentheses.',
+        inline: false,
+      },
+      {
+        name: '\u25c8 Number Suffixes',
+        value: [
+          '> **k** \u2236 Thousand (1,000)',
+          '> **m** \u2236 Million (1,000,000)',
+          '> **b** \u2236 Billion (1,000,000,000)',
+          '> **t** \u2236 Trillion (1,000,000,000,000)',
+          '> **qa** \u2236 Quadrillion (1,000,000,000,000,000)',
+          '> **qi** \u2236 Quintillion (1,000,000,000,000,000,000)',
+          '> **sx** \u2236 Sextillion (1,000,000,000,000,000,000,000)',
+        ].join('\n'),
+        inline: false,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: '\u25c8 Input Examples',
+        value: '> You can use these suffixes when entering amounts:\n> `100` \u2027 `4.7k` \u2027 `1.2m` \u2027 `2b` \u2027 `500t` \u2027 `1qa` \u2027 `all`\n> \n> All values are rounded down to the nearest whole coin.',
+        inline: false,
+      },
+    ],
+    footer: { text: 'Amount formats: 100 \u2027 4.7k \u2027 1.2m \u2027 2b \u2027 500t \u2027 1qa \u2027 all' },
+  };
+}
 
 function getNavRow(pageIndex) {
   const row = new ActionRowBuilder();

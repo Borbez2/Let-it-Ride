@@ -136,19 +136,21 @@ async function handleButton(interaction, parts) {
   if (parts[1] === 'cashout') {
     const baseWin = Math.floor(game.bet * game.multiplier);
     let finalWin = baseWin;
+    let tax = 0;
     if (baseWin > game.bet) {
       const baseProfit = baseWin - game.bet;
       const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
-      finalWin = game.bet + boostedProfit;
+      tax = store.addToUniversalPool(boostedProfit, uid);
+      finalWin = game.bet + boostedProfit - tax;
       store.recordWin(uid, 'mines', boostedProfit);
-      store.addToUniversalPool(boostedProfit);
     }
     store.setBalance(uid, store.getBalance(uid) + finalWin);
     activeMines.delete(uid);
     persistMinesSessions();
     const gr = gridToString(game);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
     return interaction.update({
-      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - Cashed Out**\n\`\`\`\n${gr}\`\`\`\n${game.revealedCount} tiles at ${game.multiplier.toFixed(2)}x\nWon **+${store.formatNumber(finalWin - game.bet)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }
@@ -172,10 +174,10 @@ async function handleButton(interaction, parts) {
         if (baseWin > game.bet) {
           const baseProfit = baseWin - game.bet;
           const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
-          finalWin = game.bet + boostedProfit;
           const pityResult = store.recordWin(uid, 'mines', boostedProfit);
           await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-          store.addToUniversalPool(boostedProfit);
+          const tax = store.addToUniversalPool(boostedProfit, uid);
+          finalWin = game.bet + boostedProfit - tax;
         }
         store.setBalance(uid, store.getBalance(uid) + finalWin);
         activeMines.delete(uid);
@@ -229,13 +231,14 @@ async function handleButton(interaction, parts) {
   if (game.revealedCount >= MINES_TOTAL - game.mineCount) {
     const baseWin = Math.floor(game.bet * game.multiplier);
     let finalWin = baseWin;
+    let clearTax = 0;
     if (baseWin > game.bet) {
       const baseProfit = baseWin - game.bet;
       const boostedProfit = store.applyProfitBoost(uid, 'mines', baseProfit);
-      finalWin = game.bet + boostedProfit;
       const pityResult = store.recordWin(uid, 'mines', boostedProfit);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-      store.addToUniversalPool(boostedProfit);
+      clearTax = store.addToUniversalPool(boostedProfit, uid);
+      finalWin = game.bet + boostedProfit - clearTax;
     }
     store.setBalance(uid, store.getBalance(uid) + finalWin);
     activeMines.delete(uid);
@@ -248,8 +251,9 @@ async function handleButton(interaction, parts) {
       }
       gr += '\n';
     }
+    const taxLine = clearTax > 0 ? `\n${store.formatNumber(clearTax)} tax → pool` : '';
     return interaction.update({
-      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **+${store.formatNumber(finalWin - game.bet)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      content: `**Mines - PERFECT CLEAR**\n\`\`\`\n${gr}\`\`\`\nWon **+${store.formatNumber(finalWin - game.bet)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
       components: [],
     });
   }

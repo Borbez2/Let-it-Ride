@@ -375,27 +375,28 @@ async function distributeUniversalPool() {
     interestRows.push({ id, interest });
   }
 
-  let share = 0;
-  if (poolData.universalPool > 0) {
-    share = Math.floor(poolData.universalPool / ids.length);
-  }
+  // Flat pool distribution: everyone gets an equal share.
+  let share = ids.length > 0 && poolData.universalPool > 0
+    ? Math.floor(poolData.universalPool / ids.length)
+    : 0;
 
   const doubledPayouts = [];
-  if (share > 0) {
+  let totalDistributed = 0;
+  if (poolData.universalPool > 0 && share > 0) {
     for (const id of ids) {
       const doubleChance = store.getUniversalIncomeDoubleChance(id);
-      // Support overflow: 120% = guaranteed 2x + 20% chance of 3x (avg 2.2x)
       const guaranteed = Math.floor(doubleChance);
       const frac = doubleChance - guaranteed;
       const totalMult = 1 + guaranteed + (Math.random() < frac ? 1 : 0);
       const payout = share * totalMult;
       store.getWallet(id).bank += payout;
       store.trackUniversalIncome(id, payout);
+      totalDistributed += share;
       if (totalMult > 1) {
         doubledPayouts.push({ id, payout, mult: totalMult });
       }
     }
-    poolData.universalPool -= share * ids.length;
+    poolData.universalPool -= totalDistributed;
   }
 
   poolData.lastHourlyPayout = Date.now();

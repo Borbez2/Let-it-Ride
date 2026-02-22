@@ -99,11 +99,15 @@ async function resolveSplitGame(interaction, uid, game) {
   const netLoss = Math.max(0, -profit);
   let cashback = 0;
 
+  let splitTax = 0;
+
   store.setBalance(uid, store.getBalance(uid) + payout);
   if (netProfit > 0) {
     const pityResult = store.recordWin(uid, 'blackjack', netProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.addToUniversalPool(netProfit);
+    splitTax = store.addToUniversalPool(netProfit, uid);
+    // Deduct tax from player balance after the fact
+    store.setBalance(uid, store.getBalance(uid) - splitTax);
   }
   if (netLoss > 0) {
     const pityResult = store.recordLoss(uid, 'blackjack', netLoss);
@@ -115,9 +119,10 @@ async function resolveSplitGame(interaction, uid, game) {
   persistBlackjackSessions();
 
   const cashbackLine = cashback > 0 ? `\nCashback: **+${store.formatNumber(cashback)}**` : '';
+  const taxLine = splitTax > 0 ? `\n${store.formatNumber(splitTax)} tax → pool` : '';
 
   return interaction.update({
-    content: `🃏 **Blackjack Split Results**\n\n${rt}\nDealer: ${formatHand(game.dealerHand)} (${dv})\n\nNet: **${profit >= 0 ? '+' : ''}${store.formatNumber(profit)}**${cashbackLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+    content: `🃏 **Blackjack Split Results**\n\n${rt}\nDealer: ${formatHand(game.dealerHand)} (${dv})\n\nNet: **${profit >= 0 ? '+' : ''}${store.formatNumber(profit)}**${cashbackLine}${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
     components: [],
   });
 }
@@ -138,14 +143,18 @@ async function resolveStandard(interaction, uid, game, doubled) {
     const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.setBalance(uid, bal + game.bet + boostedProfit); store.addToUniversalPool(boostedProfit);
-    res = `Dealer busts! +**${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
+    const tax = store.addToUniversalPool(boostedProfit, uid);
+    store.setBalance(uid, bal + game.bet + boostedProfit - tax);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    res = `Dealer busts! +**${store.formatNumber(boostedProfit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
   } else if (pv > dv) {
     const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.setBalance(uid, bal + game.bet + boostedProfit); store.addToUniversalPool(boostedProfit);
-    res = `Win! ${pv}>${dv} +**${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
+    const tax = store.addToUniversalPool(boostedProfit, uid);
+    store.setBalance(uid, bal + game.bet + boostedProfit - tax);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    res = `Win! ${pv}>${dv} +**${store.formatNumber(boostedProfit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`;
   } else if (dv > pv) {
     const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
@@ -208,9 +217,10 @@ async function handleCommand(interaction) {
     const boostedProfit = store.applyProfitBoost(userId, 'blackjack', baseProfit);
     const pityResult = store.recordWin(userId, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
-    store.setBalance(userId, bal + boostedProfit);
-    store.addToUniversalPool(boostedProfit);
-    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(boostedProfit)}**! Balance: **${store.formatNumber(store.getBalance(userId))}**`);
+    const tax = store.addToUniversalPool(boostedProfit, userId);
+    store.setBalance(userId, bal + boostedProfit - tax);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    return interaction.reply(`✅ 🃏 **Blackjack**\nYou: ${formatHand(ph)} (21 BLACKJACK!)\nDealer: ${formatHand(dh)} (${dvv})\nWon **${store.formatNumber(boostedProfit - tax)}**!${taxLine} Balance: **${store.formatNumber(store.getBalance(userId))}**`);
   }
 
   // Check if the player can afford a double/split using remaining balance.

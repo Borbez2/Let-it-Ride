@@ -751,11 +751,23 @@ function getBankNavRow(userId, activePage) {
 
 function computeTieredDailyInterestLocal(balance, r) {
   const cfg = CONFIG.economy.bank.tieredInterest;
-  if (!cfg) return balance * r;
-  const { slab1Threshold: t1, slab2Threshold: t2, slab2Scale, slab3Scale } = cfg;
-  return Math.min(balance, t1) * r
-    + Math.max(0, Math.min(balance, t2) - t1) * r * slab2Scale
-    + Math.max(0, balance - t2) * r * slab3Scale;
+  if (!cfg || !cfg.slabs) return balance * r;
+  const { slabs, finalScale } = cfg;
+  let total = 0;
+  let remaining = balance;
+  let prevThreshold = 0;
+  for (const slab of slabs) {
+    const slabSize = slab.threshold - prevThreshold;
+    const applicable = Math.min(remaining, slabSize);
+    if (applicable <= 0) break;
+    total += applicable * r * slab.scale;
+    remaining -= applicable;
+    prevThreshold = slab.threshold;
+  }
+  if (remaining > 0) {
+    total += remaining * r * (finalScale || 0.001);
+  }
+  return total;
 }
 
 function buildBankOverviewEmbed(userId, payout) {
@@ -822,23 +834,33 @@ function buildBankBreakdownEmbed(userId) {
   const r = store.getInterestRate(userId);
   const bank = w.bank || 0;
   const cfg = CONFIG.economy.bank.tieredInterest;
-  const t1 = cfg?.slab1Threshold ?? 1000000;
-  const t2 = cfg?.slab2Threshold ?? 10000000;
-  const s2 = cfg?.slab2Scale ?? 0.1;
-  const s3 = cfg?.slab3Scale ?? 0.01;
+  const slabs = cfg?.slabs || [];
+  const finalScale = cfg?.finalScale ?? 0.001;
 
-  const inSlab1 = Math.min(bank, t1);
-  const inSlab2 = Math.max(0, Math.min(bank, t2) - t1);
-  const inSlab3 = Math.max(0, bank - t2);
-
-  const earn1 = Math.floor(inSlab1 * r);
-  const earn2 = Math.floor(inSlab2 * r * s2);
-  const earn3 = Math.floor(inSlab3 * r * s3);
-  const totalDaily = earn1 + earn2 + earn3;
+  // Compute per-slab amounts
+  const slabData = [];
+  let remaining = bank;
+  let prevThreshold = 0;
+  let totalDaily = 0;
+  for (const slab of slabs) {
+    const slabSize = slab.threshold - prevThreshold;
+    const inSlab = Math.min(remaining, slabSize);
+    const earn = Math.floor(inSlab * r * slab.scale);
+    totalDaily += earn;
+    slabData.push({ from: prevThreshold, to: slab.threshold, scale: slab.scale, inSlab, earn });
+    remaining -= inSlab;
+    prevThreshold = slab.threshold;
+    if (remaining <= 0) break;
+  }
+  // Final slab (above last threshold)
+  let finalEarn = 0;
+  if (remaining > 0) {
+    finalEarn = Math.floor(remaining * r * finalScale);
+    totalDaily += finalEarn;
+    slabData.push({ from: prevThreshold, to: null, scale: finalScale, inSlab: remaining, earn: finalEarn });
+  }
 
   const rPct = (r * 100).toFixed(2);
-  const r2Pct = (r * s2 * 100).toFixed(3);
-  const r3Pct = (r * s3 * 100).toFixed(4);
 
   const fields = [
     {
@@ -846,28 +868,27 @@ function buildBankBreakdownEmbed(userId) {
       value: `> **${rPct}%**/day (base ${(CONFIG.economy.bank.baseInvestRate * 100).toFixed(0)}% + Lv${w.interestLevel || 0} upgrades + items)`,
       inline: false,
     },
-    {
-      name: `Slab 1 — 0 to ${store.formatNumber(t1)} · rate = r`,
-      value: `> In slab: **${store.formatNumber(inSlab1)}** coins\n> Rate: **${rPct}%** → ~**${store.formatNumber(earn1)}**/day`,
-      inline: false,
-    },
-    {
-      name: `Slab 2 — ${store.formatNumber(t1)} to ${store.formatNumber(t2)} · rate = r × ${s2}`,
-      value: `> In slab: **${store.formatNumber(inSlab2)}** coins\n> Rate: **${r2Pct}%** → ~**${store.formatNumber(earn2)}**/day`,
-      inline: false,
-    },
-    {
-      name: `Slab 3 — above ${store.formatNumber(t2)} · rate = r × ${s3}`,
-      value: `> In slab: **${store.formatNumber(inSlab3)}** coins\n> Rate: **${r3Pct}%** → ~**${store.formatNumber(earn3)}**/day`,
-      inline: false,
-    },
-    { name: '\u200b', value: '\u200b', inline: false },
-    {
-      name: '▸ Total estimated interest',
-      value: `> **${store.formatNumber(totalDaily)}**/day · **${store.formatNumber(Math.floor(totalDaily / 24))}**/hour`,
-      inline: false,
-    },
   ];
+
+  for (let i = 0; i < slabData.length; i++) {
+    const s = slabData[i];
+    const effectiveRatePct = (r * s.scale * 100);
+    const rateFmt = effectiveRatePct >= 0.01 ? effectiveRatePct.toFixed(3) : effectiveRatePct.toFixed(4);
+    const toLabel = s.to !== null ? store.formatNumber(s.to) : '∞';
+    const scaleLabel = s.scale === 1 ? 'r' : `r × ${s.scale}`;
+    fields.push({
+      name: `Slab ${i + 1} — ${store.formatNumber(s.from)} to ${toLabel} · rate = ${scaleLabel}`,
+      value: `> In slab: **${store.formatNumber(s.inSlab)}** coins\n> Rate: **${rateFmt}%** → ~**${store.formatNumber(s.earn)}**/day`,
+      inline: false,
+    });
+  }
+
+  fields.push({ name: '\u200b', value: '\u200b', inline: false });
+  fields.push({
+    name: '▸ Total estimated interest',
+    value: `> **${store.formatNumber(totalDaily)}**/day · **${store.formatNumber(Math.floor(totalDaily / 24))}**/hour`,
+    inline: false,
+  });
 
   return {
     title: '◈ Bank — Tiered Interest Breakdown',
@@ -1134,7 +1155,29 @@ async function handlePool(interaction) {
   const minsH = Math.max(0, Math.floor((nextHourly - Date.now()) / 60000));
   const players = Object.keys(wallets).length;
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
-  let text = `**Universal Pool** (5% win tax)\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
+
+  const taxMin = CONFIG.economy.pools.universalTaxMinNetWorth || 1000000;
+  const baseRate = CONFIG.economy.pools.universalTaxRate;
+  const basePct = (baseRate * 100).toFixed(0);
+  let text = `**Universal Pool** (${basePct}% flat win tax — only when net worth > ${store.formatNumber(taxMin)})\nTotal: **${store.formatNumber(poolData.universalPool)}** coins\nPlayers: ${players} | Your share: ~**${store.formatNumber(share)}**\nNext payout: ${minsH}m\n\n`;
+
+  // Contribution slabs — how much of the taxed amount enters the pool
+  const contSlabs = CONFIG.economy.pools.contributionSlabs || [];
+  const contFinal = CONFIG.economy.pools.contributionFinalScale ?? 0.005;
+  text += `**Pool Contribution Slabs** (how much of your ${basePct}% tax enters the pool)\n`;
+  text += `> You always pay ${basePct}% tax, but only this portion is added to the pool:\n`;
+  let prevThreshold = 0;
+  for (let i = 0; i < contSlabs.length; i++) {
+    const s = contSlabs[i];
+    const pct = (s.scale * 100).toFixed(0);
+    const toLabel = store.formatNumber(s.threshold);
+    text += `> Slab ${i + 1}: ${store.formatNumber(prevThreshold)} → ${toLabel} — **${pct}%** of tax\n`;
+    prevThreshold = s.threshold;
+  }
+  const finalPct = (contFinal * 100);
+  const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
+  text += `> Slab ${contSlabs.length + 1}: ${store.formatNumber(prevThreshold)} → ∞ — **${finalFmt}%** of tax\n\n`;
+
   text += `**Daily Spin Pool** (5% loss tax)\nTotal: **${store.formatNumber(poolData.lossPool)}** coins\nSpins daily at 11:15pm, winnings multiplied by Spin Payout Mult upgrade`;
   return interaction.reply(text);
 }

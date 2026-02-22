@@ -65,9 +65,10 @@ async function handleFlip(interaction) {
       const profit = store.applyProfitBoost(userId, 'flip', bet);
       const pityResult = store.recordWin(userId, 'flip', profit);
       await maybeAnnouncePityTrigger(interaction, userId, pityResult);
-      store.setBalance(userId, bal + profit);
-      store.addToUniversalPool(profit);
-      return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(profit)}**\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+      const tax = store.addToUniversalPool(profit, userId);
+      store.setBalance(userId, bal + profit - tax);
+      const taxLine = tax > 0 ? ` (${store.formatNumber(tax)} tax → pool)` : '';
+      return interaction.reply(`✅ **Flip: WIN** +**${store.formatNumber(profit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
     }
     store.setBalance(userId, bal - bet);
     const pityResult = store.recordLoss(userId, 'flip', bet);
@@ -104,7 +105,12 @@ async function handleFlip(interaction) {
   }
 
   const boostedNet = totalBoostedWinnings - totalLossAmount;
-  store.setBalance(userId, bal + boostedNet);
+  let totalTax = 0;
+
+  if (totalBoostedWinnings > 0) {
+    totalTax = store.addToUniversalPool(totalBoostedWinnings, userId);
+  }
+  store.setBalance(userId, bal + boostedNet - totalTax);
 
   let cbm = '';
   if (totalLossAmount > 0) {
@@ -113,15 +119,15 @@ async function handleFlip(interaction) {
     store.addToLossPool(totalLossAmount);
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
   }
-  if (totalBoostedWinnings > 0) {
-    store.addToUniversalPool(totalBoostedWinnings);
-  }
+
+  const displayNet = boostedNet - totalTax;
 
   if (lastTriggeredPity) {
     await maybeAnnouncePityTrigger(interaction, userId, lastTriggeredPity);
   }
 
-  return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${boostedNet >= 0 ? '+' : ''}${store.formatNumber(boostedNet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
+  const taxLine = totalTax > 0 ? ` (${store.formatNumber(totalTax)} tax → pool)` : '';
+  return interaction.reply(`**Flip x${qty}**\n${results.join(' ')}\n${wins}W ${qty - wins}L | Net: **${displayNet >= 0 ? '+' : ''}${store.formatNumber(displayNet)}**${taxLine}${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`);
 }
 
 // Roulette command.
@@ -170,8 +176,10 @@ async function handleRouletteButton(interaction, parts) {
     const boostedProfit = store.applyProfitBoost(uid, 'roulette', profit);
     const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    store.setBalance(uid, bal + boostedProfit); store.addToUniversalPool(boostedProfit);
-    await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(boostedProfit)}**\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
+    const tax = store.addToUniversalPool(boostedProfit, uid);
+    store.setBalance(uid, bal + boostedProfit - tax);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    await interaction.update({ content: `**Roulette**\nBall: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(boostedProfit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`, components: [] });
   } else {
     const pityResult = store.recordLoss(uid, 'roulette', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
@@ -240,13 +248,14 @@ async function handleAllIn17Button(interaction, parts) {
   if (num === CONFIG.games.roulette.allIn.luckyNumber) {
     const baseProfit = purse * CONFIG.games.roulette.payoutProfitMultipliers.allIn17;
     const boostedProfit = store.applyProfitBoost(uid, 'roulette', baseProfit);
-    const payout = purse + boostedProfit;
     const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
+    const tax = store.addToUniversalPool(boostedProfit, uid);
+    const payout = purse + boostedProfit - tax;
     store.setBalance(uid, payout);
-    store.addToUniversalPool(boostedProfit);
+    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
     return interaction.update({
-      content: `🎰 **ALL IN 17 BLACK** 🎰\nBall: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\nPurse only bet: ${store.formatNumber(purse)} → **${store.formatNumber(payout)}**\nBank was not used.`,
+      content: `🎰 **ALL IN 17 BLACK** 🎰\nBall: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\nPurse only bet: ${store.formatNumber(purse)} → **${store.formatNumber(payout)}**${taxLine}\nBank was not used.`,
       components: [],
     });
   }
@@ -306,18 +315,20 @@ async function handleRideButton(interaction, parts) {
 
   if (action === 'cashout') {
     let payout = ride.current;
+    let rideTax = 0;
     if (ride.current > ride.original) {
       const baseProfit = ride.current - ride.original;
       const boostedProfit = store.applyProfitBoost(uid, 'letitride', baseProfit);
-      payout = ride.original + boostedProfit;
       const pityResult = store.recordWin(uid, 'letitride', boostedProfit);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-      store.addToUniversalPool(boostedProfit);
+      rideTax = store.addToUniversalPool(boostedProfit, uid);
+      payout = ride.original + boostedProfit - rideTax;
     }
     store.setBalance(uid, store.getBalance(uid) + payout);
     activeRides.delete(uid);
     persistSimpleSessions();
-    return interaction.update({ content: `**Let It Ride - Cashed Out**\n${store.formatNumber(payout)} coins after ${ride.wins} wins!`, components: [] });
+    const taxLine = rideTax > 0 ? `\n${store.formatNumber(rideTax)} tax → pool` : '';
+    return interaction.update({ content: `**Let It Ride - Cashed Out**\n${store.formatNumber(payout)} coins after ${ride.wins} wins!${taxLine}`, components: [] });
   }
 
   if (action === 'ride') {
@@ -407,19 +418,21 @@ async function handleDuelButton(interaction, parts) {
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;
     
-    // Winner gets both bets — no pool tax on duels (zero-sum player transfer)
+    // Winner gets both bets — tax deducted from winnings
     const boostedProfit = store.applyProfitBoost(w, 'duel', duel.bet);
     const pityWinResult = store.recordWin(w, 'duel', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, w, pityWinResult);
     const pityLossResult = store.recordLoss(li, 'duel', duel.bet);
     await maybeAnnouncePityTrigger(interaction, li, pityLossResult);
-    store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit);
+    const tax = store.addToUniversalPool(boostedProfit, w);
+    store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit - tax);
     
     activeDuels.delete(dk);
     persistSimpleSessions();
     
+    const taxLine = tax > 0 ? ` (${store.formatNumber(tax)} tax → pool)` : '';
     const emoji = w === cid ? '✅' : '❌';
-    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** beats **${ln}** and wins **${store.formatNumber(boostedProfit)}**!`, components: [] });
+    return interaction.update({ content: `${emoji} **DUEL** — **${wn}** beats **${ln}** and wins **${store.formatNumber(boostedProfit - tax)}**!${taxLine}`, components: [] });
   }
 }
 

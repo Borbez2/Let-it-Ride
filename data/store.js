@@ -4,7 +4,7 @@ const Database = require('better-sqlite3');
 const {
   CONFIG,
   STARTING_COINS, BASE_INVEST_RATE,
-  POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS,
+  POOL_TAX_RATE, LOSS_POOL_RATE, MYSTERY_BOX_POOLS, PREMIUM_MYSTERY_BOX_POOLS,
 } = require('../config');
 
 const GAME_KEYS = CONFIG.stats.games;
@@ -719,10 +719,43 @@ function savePool() {
 
 function getPoolData() { return poolData; }
 
-function addToUniversalPool(amount) {
-  const tax = Math.floor(amount * POOL_TAX_RATE);
-  if (tax > 0) { poolData.universalPool += tax; savePool(); }
-  return tax;
+function computeTieredTax(amount, baseRate) {
+  const cfg = CONFIG.economy.pools;
+  const slabs = cfg.contributionSlabs;
+  if (!slabs || !slabs.length) return Math.floor(amount * baseRate);
+  const finalScale = cfg.contributionFinalScale ?? 0.005;
+  let total = 0;
+  let remaining = amount;
+  let prevThreshold = 0;
+  for (const slab of slabs) {
+    const slabSize = slab.threshold - prevThreshold;
+    const applicable = Math.min(remaining, slabSize);
+    if (applicable <= 0) break;
+    total += applicable * baseRate * slab.scale;
+    remaining -= applicable;
+    prevThreshold = slab.threshold;
+  }
+  if (remaining > 0) {
+    total += remaining * baseRate * finalScale;
+  }
+  return Math.floor(total);
+}
+
+function addToUniversalPool(amount, userId) {
+  // Win tax only applies when player has more than 1M net worth
+  if (userId) {
+    const w = wallets[userId];
+    if (w) {
+      const netWorth = (w.balance || 0) + (w.bank || 0);
+      if (netWorth <= (CONFIG.economy.pools.universalTaxMinNetWorth || 1000000)) return 0;
+    }
+  }
+  // Player always pays the full flat 5% tax
+  const flatTax = Math.floor(amount * POOL_TAX_RATE);
+  // But only a tiered portion actually enters the pool (rest is burned)
+  const poolContribution = computeTieredTax(amount, POOL_TAX_RATE);
+  if (poolContribution > 0) { poolData.universalPool += poolContribution; savePool(); }
+  return flatTax;
 }
 
 function addToLossPool(amount) {
@@ -1084,16 +1117,28 @@ function tryTriggerMinesReveal(userId) {
 }
 
 // Compute the total daily interest on `balance` using a tiered slab system.
-// Interest for balance[0..t1] uses full rate r; balance[t1..t2] uses r * slab2Scale;
-// balance above t2 uses r * slab3Scale.  Mirrors tax-bracket semantics.
+// Interest for each slab uses progressive rate scaling.
+// Mirrors tax-bracket semantics with an array of slab definitions.
 function computeTieredDailyInterest(balance, r) {
   const cfg = CONFIG.economy.bank.tieredInterest;
-  if (!cfg) return balance * r; // fallback: flat rate
-  const { slab1Threshold: t1, slab2Threshold: t2, slab2Scale, slab3Scale } = cfg;
-  const slab1 = Math.min(balance, t1) * r;
-  const slab2 = Math.max(0, Math.min(balance, t2) - t1) * r * slab2Scale;
-  const slab3 = Math.max(0, balance - t2) * r * slab3Scale;
-  return slab1 + slab2 + slab3;
+  if (!cfg || !cfg.slabs) return balance * r; // fallback: flat rate
+  const { slabs, finalScale } = cfg;
+  let total = 0;
+  let remaining = balance;
+  let prevThreshold = 0;
+  for (const slab of slabs) {
+    const slabSize = slab.threshold - prevThreshold;
+    const applicable = Math.min(remaining, slabSize);
+    if (applicable <= 0) break;
+    total += applicable * r * slab.scale;
+    remaining -= applicable;
+    prevThreshold = slab.threshold;
+  }
+  // Anything above the last slab threshold
+  if (remaining > 0) {
+    total += remaining * r * (finalScale || 0.001);
+  }
+  return total;
 }
 
 // Process minute-accrued bank interest, paid to bank on hourly boundaries.
@@ -1249,6 +1294,44 @@ function rollMysteryBox(userId = null) {
   return { ...item, _rarity: 'common', _isHighRarity: false };
 }
 
+function rollPremiumMysteryBox(userId = null) {
+  let luck = 0;
+  if (userId) {
+    const w = getWallet(userId);
+    ensureWalletStatsShape(w);
+    const luckInfo = getMysteryBoxLuckInfo(userId);
+    luck = Math.max(0, luckInfo.totalLuck);
+  }
+
+  const adjustedPools = Object.entries(PREMIUM_MYSTERY_BOX_POOLS).map(([rarity, pool]) => {
+    let mult = 1;
+    const rules = CONFIG.collectibles.premiumMysteryBox.luckWeightMultipliers[rarity];
+    if (luck > 0 && rules) {
+      mult = 1 + (luck * rules.slope);
+      if (Number.isFinite(rules.floor)) {
+        mult = Math.max(rules.floor, mult);
+      }
+    }
+    return [rarity, { ...pool, adjustedWeight: pool.weight * mult }];
+  });
+
+  const totalW = adjustedPools.reduce((s, [, p]) => s + p.adjustedWeight, 0);
+  let roll = Math.random() * totalW;
+  for (const [rarity, pool] of adjustedPools) {
+    roll -= pool.adjustedWeight;
+    if (roll <= 0) {
+      const it = pool.items;
+      const item = it[Math.floor(Math.random() * it.length)];
+      const isHighRarity = (RARITY_TIER[rarity] || 1) >= RARITY_TIER[CONFIG.collectibles.premiumMysteryBox.highRarityThreshold];
+      return { ...item, _rarity: rarity, _isHighRarity: isHighRarity };
+    }
+  }
+  // fallback to uncommon
+  const u = PREMIUM_MYSTERY_BOX_POOLS.uncommon.items;
+  const item = u[Math.floor(Math.random() * u.length)];
+  return { ...item, _rarity: 'uncommon', _isHighRarity: false };
+}
+
 // Apply mystery box stats after a successful interaction reply.
 function applyMysteryBoxStats(userId, items) {
   const w = getWallet(userId);
@@ -1279,16 +1362,38 @@ function getDuplicateCompensationTable() {
 }
 
 // Number formatting helpers.
-function formatNumber(num) {
+const NUMBER_TIERS = [
+  { threshold: 1e21, suffix: 'sx' },
+  { threshold: 1e18, suffix: 'qi' },
+  { threshold: 1e15, suffix: 'qa' },
+  { threshold: 1e12, suffix: 't' },
+  { threshold: 1e9,  suffix: 'b' },
+  { threshold: 1e6,  suffix: 'm' },
+];
+
+function formatNumberRaw(num) {
   return normalizeCoins(num, 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function formatNumber(num) {
+  num = normalizeCoins(num, 0);
+  for (const tier of NUMBER_TIERS) {
+    if (num >= tier.threshold) {
+      const abbr = (num / tier.threshold).toFixed(2) + tier.suffix;
+      const full = num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      return `${abbr} (${full})`;
+    }
+  }
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 function formatNumberShort(num) {
   num = normalizeCoins(num, 0);
-  if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B';
-  if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
+  for (const tier of NUMBER_TIERS) {
+    if (num >= tier.threshold) return (num / tier.threshold).toFixed(1) + tier.suffix.toUpperCase();
+  }
   if (num >= 1e4) return (num / 1e3).toFixed(1) + 'K';
-  return formatNumber(num);
+  return formatNumberRaw(num);
 }
 
 // Parse abbreviated amounts like 1k/1m/1b.
@@ -1304,16 +1409,20 @@ function parseAmount(str, maxValue = null) {
     return cap !== null ? cap : null;
   }
   
-  // Parse numeric values with optional k/m/b suffixes.
-  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kmb]?)$/);
+  // Parse numeric values with optional k/m/b/t/qa/qi/sx suffixes.
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(k|m|b|t|qa|qi|sx)?$/);
   if (!match) return null;
   
   let num = parseFloat(match[1]);
-  const suffix = match[2];
+  const suffix = match[2] || '';
   
-  if (suffix === 'k') num *= 1000;
-  else if (suffix === 'm') num *= 1000000;
-  else if (suffix === 'b') num *= 1000000000;
+  if (suffix === 'k') num *= 1e3;
+  else if (suffix === 'm') num *= 1e6;
+  else if (suffix === 'b') num *= 1e9;
+  else if (suffix === 't') num *= 1e12;
+  else if (suffix === 'qa') num *= 1e15;
+  else if (suffix === 'qi') num *= 1e18;
+  else if (suffix === 'sx') num *= 1e21;
   
   num = Math.floor(num);
   if (cap !== null && num > cap) num = cap;
@@ -1390,6 +1499,10 @@ function insertTopResult(arr, entry, limit = 5) {
   if (arr.length > limit) arr.length = limit;
 }
 
+// Games that qualify for the luck/pity streak system.
+// letitride is excluded because users can abuse it with tiny bets to build streaks.
+const LUCK_ELIGIBLE_GAMES = new Set(['flip', 'duel']);
+
 function recordWin(userId, gameName, amount) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
@@ -1398,7 +1511,7 @@ function recordWin(userId, gameName, amount) {
   }
   w.stats.lifetimeEarnings += amount;
   insertTopResult(w.stats.topWins, { game: gameName, amount, t: Date.now() });
-  evaluateLuckOnWin(w);
+  if (LUCK_ELIGIBLE_GAMES.has(gameName)) evaluateLuckOnWin(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
   saveWallet(userId);
   return { triggered: false };
@@ -1412,7 +1525,7 @@ function recordLoss(userId, gameName, amount) {
   }
   w.stats.lifetimeLosses += amount;
   insertTopResult(w.stats.topLosses, { game: gameName, amount, t: Date.now() });
-  const luckResult = evaluateLuckOnLoss(w);
+  const luckResult = LUCK_ELIGIBLE_GAMES.has(gameName) ? evaluateLuckOnLoss(w) : { triggered: false };
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
   saveWallet(userId);
   return luckResult;
@@ -1552,7 +1665,7 @@ module.exports = {
   applyProfitBoost, tryTriggerMinesReveal,
   getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot, removeUnluckyPot,
   checkDaily, claimDaily,
-  rollMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,
+  rollMysteryBox, rollPremiumMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
   recordWin, recordLoss, resetStats, resetAllActivePity,
   saveWallets, saveWallet,

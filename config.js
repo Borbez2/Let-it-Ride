@@ -25,20 +25,37 @@ const CONFIG = {
       interestAccrualMinuteMs: 60 * 1000,
       payoutIntervalMinutes: 60,
       // Tiered interest: interest is calculated in slabs (like tax brackets).
-      // baseRate (= getInterestRate) applies fully to the first slab1Threshold coins,
-      // then scales down by slab2Scale and slab3Scale for higher balances.
+      // baseRate (= getInterestRate) applies fully to the first slab threshold,
+      // then scales down progressively for higher balances.
       tieredInterest: {
-        slab1Threshold: 1000000,   // 1M - full rate up to here
-        slab2Threshold: 10000000,  // 10M - reduced rate from 1M to 10M
-        slab2Scale: 0.5,           // r * 0.5 on balance between t1 and t2
-        slab3Scale: 0.1,           // r * 0.1 on balance above t2
+        slabs: [
+          { threshold: 1000000,             scale: 1 },       // Slab 1: 0 → 1M, full rate r
+          { threshold: 10000000,            scale: 0.5 },     // Slab 2: 1M → 10M, r × 0.5
+          { threshold: 100000000,           scale: 0.05 },    // Slab 3: 10M → 100M, r × 0.05
+          { threshold: 1000000000,          scale: 0.01 },    // Slab 4: 100M → 1B, r × 0.01
+          { threshold: 1000000000000,       scale: 0.0001 },  // Slab 5: 1B → 1T, r × 0.0001
+          { threshold: 1000000000000000,    scale: 0.00005 }, // Slab 6: 1T → 1Q, r × 0.00005
+          // Slab 7: above 1Q, r × 0.00001
+        ],
+        finalScale: 0.00001,
       },
     },
     pools: {
       universalTaxRate: 0.05,
+      universalTaxMinNetWorth: 1000000, // Win tax only applies when net worth > 1M
       lossTaxRate: 0.05,
       hourlyPayoutMs: 60 * 60 * 1000,
       giveawayExpiryCheckMs: 30 * 1000,
+      // Tiered contribution tax: larger wins are taxed at progressively lower
+      // rates (mirrors bank interest slab design). Base rate = universalTaxRate.
+      contributionSlabs: [
+        { threshold: 100000,      scale: 1 },      // Slab 1: 0 → 100K, full 5%
+        { threshold: 1000000,     scale: 0.5 },    // Slab 2: 100K → 1M, 2.5%
+        { threshold: 10000000,    scale: 0.1 },    // Slab 3: 1M → 10M, 0.5%
+        { threshold: 100000000,   scale: 0.05 },   // Slab 4: 10M → 100M, 0.25%
+        { threshold: 1000000000,  scale: 0.01 },   // Slab 5: 100M → 1B, 0.05%
+      ],
+      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.025%
     },
     upgrades: {
       maxLevel: 10,
@@ -111,8 +128,8 @@ const CONFIG = {
   // Shared command UX
   // -------------------------------
   commands: {
-    amountExamples: '100, 4.7k, 1.2m, all',
-    invalidAmountText: 'Invalid amount. Use examples like "100", "4.7k", "1.2m", or "all"',
+    amountExamples: '100, 4.7k, 1.2m, 2b, 500t, all',
+    invalidAmountText: 'Invalid amount. Use examples like "100", "4.7k", "1.2m", "2b", "500t", or "all"',
     limits: {
       flipQuantity: { min: 1, max: 10 },
       minesCount: { min: 1, max: 15 },
@@ -264,6 +281,41 @@ const CONFIG = {
         divine:    { interestRate: 0.05,    cashbackRate: 0.05,    minesRevealChance: 0.05,    universalDoubleChance: 0.1,    spinWeight: 0.5    },
       },
     },
+
+    // Premium mystery box — no common tier, proportional odds
+    premiumMysteryBox: {
+      cost: 500000,
+      duplicateCompensationByRarity: {
+        uncommon: 3500,
+        rare: 12000,
+        epic: 30000,
+        legendary: 100000,
+        mythic: 300000,
+        divine: 1250000,
+      },
+      pity: {
+        luckPerStreakStep: 0.02,
+        maxLuckBonus: 0.5,
+      },
+      luckWeightMultipliers: {
+        uncommon:  { slope: -0.35, floor: 0.35 },
+        rare:      { slope: 0.8,   floor: null  },
+        epic:      { slope: 1.4,   floor: null  },
+        legendary: { slope: 1.8,   floor: null  },
+        mythic:    { slope: 2.6,   floor: null  },
+        divine:    { slope: 3.2,   floor: null  },
+      },
+      highRarityThreshold: 'epic',
+      // Proportional redistribution of non-common weights from the base box (sum ~20)
+      weightsByRarity: {
+        uncommon:  18.29,
+        rare:       1,
+        epic:       0.5,
+        legendary:  0.15,
+        mythic:     0.05,
+        divine:     0.01,
+      },
+    },
   },
 
   // -------------------------------
@@ -386,6 +438,13 @@ const MYSTERY_BOX_POOLS = Object.fromEntries(
   ])
 );
 
+const PREMIUM_MYSTERY_BOX_POOLS = Object.fromEntries(
+  Object.entries(CONFIG.collectibles.premiumMysteryBox.weightsByRarity).map(([rarity, weight]) => [
+    rarity,
+    { weight, items: COLLECTIBLES.filter((item) => item.rarity === rarity) },
+  ])
+);
+
 // ---------------------------------------
 // Backward-compat aliases (legacy imports)
 // ---------------------------------------
@@ -420,4 +479,5 @@ module.exports = {
   RARITIES,
   COLLECTIBLES,
   MYSTERY_BOX_POOLS,
+  PREMIUM_MYSTERY_BOX_POOLS,
 };

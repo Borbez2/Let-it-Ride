@@ -199,12 +199,18 @@ function buildPotionButtons(userId) {
 function renderMysteryBoxEmbed(userId, successMessage) {
   const w = store.getWallet(userId);
   const cost = CONFIG.collectibles.mysteryBox.cost;
+  const premiumCost = CONFIG.collectibles.premiumMysteryBox.cost;
   const maxQty = CONFIG.commands.limits.mysteryBoxQuantity.max;
 
   const fields = [
     {
       name: '🎁 Mystery Box',
       value: `> Price: **${store.formatNumber(cost)}** coins each\n> Contains a random collectible item\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
+      inline: false,
+    },
+    {
+      name: '💎 Premium Mystery Box',
+      value: `> Price: **${store.formatNumber(premiumCost)}** coins each\n> No common items — starts at **uncommon**\n> Proportionally improved odds for rare+ tiers\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
       inline: false,
     },
   ];
@@ -232,6 +238,7 @@ function renderMysteryBoxEmbed(userId, successMessage) {
 function buildMysteryBoxButtons(userId) {
   const w = store.getWallet(userId);
   const cost = CONFIG.collectibles.mysteryBox.cost;
+  const premiumCost = CONFIG.collectibles.premiumMysteryBox.cost;
   const rows = [];
 
   const quantities = [1, 5, 10, 25];
@@ -244,7 +251,17 @@ function buildMysteryBoxButtons(userId) {
       .setDisabled(w.balance < totalCost);
   });
 
+  const premiumButtons = quantities.map(qty => {
+    const totalCost = premiumCost * qty;
+    return new ButtonBuilder()
+      .setCustomId(`shop_buyboxp_${userId}_${qty}`)
+      .setLabel(`💎 x${qty} (${store.formatNumberShort(totalCost)})`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(w.balance < totalCost);
+  });
+
   rows.push(new ActionRowBuilder().addComponents(buttons.slice(0, 5)));
+  rows.push(new ActionRowBuilder().addComponents(premiumButtons.slice(0, 5)));
   return rows;
 }
 
@@ -308,6 +325,7 @@ async function handleShopButton(interaction, parts) {
       if (result.reason === 'no_wallet') return interaction.reply({ content: "That user doesn't have a wallet!", ephemeral: true });
       if (result.reason === 'already_active') return interaction.reply({ content: 'That user already has an active Unlucky Pot!', ephemeral: true });
       if (result.reason === 'self_target') return interaction.reply({ content: "You can't curse yourself!", ephemeral: true });
+      return interaction.reply({ content: 'Something went wrong!', ephemeral: true });
     }
 
     const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
@@ -360,6 +378,7 @@ async function handleShopButton(interaction, parts) {
     }
 
     w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
+    store.applyMysteryBoxStats(uid, items);
     store.saveWallets();
 
     let resultMsg;
@@ -371,19 +390,17 @@ async function handleShopButton(interaction, parts) {
         resultMsg = `**Opened x1:**\n> ${item.emoji} **${item.name}** *(${item.rarity})*`;
       }
     } else {
-      // Group items by name, tracking counts and metadata
+      // Group items by id, tracking new and duplicate counts separately
       const itemCounts = {};
       let duplicateCount = 0;
       for (const item of items) {
+        const key = item.id;
+        if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, newCount: 0, dupCount: 0 };
         if (item.isDuplicate) {
           duplicateCount++;
-          const key = `dupe_${item.name}`;
-          if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, count: 0, isDuplicate: true };
-          itemCounts[key].count++;
+          itemCounts[key].dupCount++;
         } else {
-          const key = item.name;
-          if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, count: 0, isDuplicate: false };
-          itemCounts[key].count++;
+          itemCounts[key].newCount++;
         }
       }
       // Sort items by rarity order, then by name
@@ -394,10 +411,101 @@ async function handleShopButton(interaction, parts) {
       });
       let lines = [`**Opened x${quantity}:**`];
       for (const entry of sorted) {
-        if (entry.isDuplicate) {
-          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}** x${entry.count} *(duplicate)*`);
+        const total = entry.newCount + entry.dupCount;
+        const countStr = total > 1 ? ` x${total}` : '';
+        if (entry.dupCount === 0) {
+          lines.push(`> ${entry.emoji} **${entry.name}**${countStr} *(${entry.rarity})*`);
+        } else if (entry.newCount === 0) {
+          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}**${countStr} *(duplicate)*`);
         } else {
-          lines.push(`> ${entry.emoji} **${entry.name}** x${entry.count} *(${entry.rarity})*`);
+          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}**${countStr} *(${entry.newCount} new, ${entry.dupCount} dupe)*`);
+        }
+      }
+      if (duplicateCount > 0) {
+        lines.push(`> 💰 Duplicate compensation: **+${store.formatNumber(totalCompensation)}** coins`);
+      }
+      resultMsg = lines.join('\n');
+    }
+
+    const { embed, components } = renderShopPage(uid, 'mysterybox', resultMsg);
+    return interaction.update({ content: '', embeds: [embed], components });
+  }
+
+  if (action === 'buyboxp') {
+    const quantity = parseInt(parts[3], 10) || 1;
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    const w = store.getWallet(uid);
+    const cost = CONFIG.collectibles.premiumMysteryBox.cost;
+    const totalCost = quantity * cost;
+
+    if (w.balance < totalCost) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`, ephemeral: true });
+    }
+
+    w.balance -= totalCost;
+    store.ensureWalletStatsShape(w);
+    const items = [];
+    let totalCompensation = 0;
+
+    for (let i = 0; i < quantity; i++) {
+      const item = store.rollPremiumMysteryBox(uid);
+
+      if (item.id && item.id.startsWith('placeholder_')) {
+        const isDuplicate = w.inventory.some(inv => inv.id === item.id);
+        if (isDuplicate) {
+          const compensation = store.getDuplicateCompensation(item.id, item._rarity);
+          w.balance += compensation;
+          store.trackMysteryBoxDuplicateComp(uid, compensation);
+          totalCompensation += compensation;
+          items.push({ ...item, isDuplicate: true, compensation });
+          continue;
+        }
+      }
+
+      w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
+      items.push(item);
+    }
+
+    w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
+    store.applyMysteryBoxStats(uid, items);
+    store.saveWallets();
+
+    let resultMsg;
+    if (quantity === 1) {
+      const item = items[0];
+      if (item.isDuplicate) {
+        resultMsg = `**💎 Opened x1 (Premium):**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate)*\n> 💰 Duplicate compensation: **+${store.formatNumber(item.compensation)}** coins`;
+      } else {
+        resultMsg = `**💎 Opened x1 (Premium):**\n> ${item.emoji} **${item.name}** *(${item.rarity})*`;
+      }
+    } else {
+      const itemCounts = {};
+      let duplicateCount = 0;
+      for (const item of items) {
+        const key = item.id;
+        if (!itemCounts[key]) itemCounts[key] = { name: item.name, emoji: item.emoji, rarity: item.rarity, newCount: 0, dupCount: 0 };
+        if (item.isDuplicate) {
+          duplicateCount++;
+          itemCounts[key].dupCount++;
+        } else {
+          itemCounts[key].newCount++;
+        }
+      }
+      const sorted = Object.values(itemCounts).sort((a, b) => {
+        const ra = RARITY_ORDER.indexOf(a.rarity), rb = RARITY_ORDER.indexOf(b.rarity);
+        if (ra !== rb) return rb - ra;
+        return a.name.localeCompare(b.name);
+      });
+      let lines = [`**💎 Opened x${quantity} (Premium):**`];
+      for (const entry of sorted) {
+        const total = entry.newCount + entry.dupCount;
+        const countStr = total > 1 ? ` x${total}` : '';
+        if (entry.dupCount === 0) {
+          lines.push(`> ${entry.emoji} **${entry.name}**${countStr} *(${entry.rarity})*`);
+        } else if (entry.newCount === 0) {
+          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}**${countStr} *(duplicate)*`);
+        } else {
+          lines.push(`> ⚠️ ${entry.emoji} **${entry.name}**${countStr} *(${entry.newCount} new, ${entry.dupCount} dupe)*`);
         }
       }
       if (duplicateCount > 0) {
