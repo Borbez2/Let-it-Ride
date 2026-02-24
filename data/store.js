@@ -22,9 +22,9 @@ const DEFAULT_RUNTIME_TUNING = { ...CONFIG.runtime.defaults };
 // Luck buff constants - tiered single-buff system
 const LUCK_ACTIVATION_THRESHOLD = 3;   // minimum streak to activate
 const LUCK_TIER1_CAP = 7;              // losses 3-7 give 0.5% each
-const LUCK_TIER1_RATE = 0.005;         // 0.5% per loss in tier 1
-const LUCK_TIER2_CAP = 12;             // losses 8-12 give 1% each
-const LUCK_TIER2_RATE = 0.01;          // 1% per loss in tier 2
+const LUCK_TIER1_RATE = 0.0025;         // 0.25% per loss in tier 1
+const LUCK_TIER2_CAP = 12;             // losses 8-12 give 0.5% each
+const LUCK_TIER2_RATE = 0.005;          // 0.5% per loss in tier 2
 const LUCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 function calculateLuckBoost(streak) {
@@ -40,7 +40,7 @@ const LUCK_MAX_BOOST = calculateLuckBoost(LUCK_TIER2_CAP);
 // Potion system constants
 const LUCKY_POT_DURATION_MS = 30 * 60 * 1000;
 const LUCKY_POT_COST = 100000;
-const LUCKY_POT_BOOST = 0.05;
+const LUCKY_POT_BOOST = 0.005;
 const UNLUCKY_POT_DURATION_MS = 30 * 60 * 1000;
 const UNLUCKY_POT_COST = 200000;
 const UNLUCKY_POT_PENALTY = 0.25;
@@ -742,15 +742,7 @@ function computeTieredTax(amount, baseRate) {
 }
 
 function addToUniversalPool(amount, userId) {
-  // Win tax only applies when player has more than 1M net worth
-  if (userId) {
-    const w = wallets[userId];
-    if (w) {
-      const netWorth = (w.balance || 0) + (w.bank || 0);
-      if (netWorth <= (CONFIG.economy.pools.universalTaxMinNetWorth || 1000000)) return 0;
-    }
-  }
-  // Player always pays the full flat 5% tax
+  // Win tax always applies (flat rate)
   const flatTax = Math.floor(amount * POOL_TAX_RATE);
   // But only a tiered portion actually enters the pool (rest is burned)
   const poolContribution = computeTieredTax(amount, POOL_TAX_RATE);
@@ -834,6 +826,39 @@ function getWallet(userId) {
 function deleteWallet(userId) {
   delete wallets[userId];
   stmts.deleteWallet.run(userId);
+}
+
+// Reset only the purse (balance) to starting coins, keeping inventory, upgrades, bank, stats.
+function resetPurse(userId) {
+  const w = getWallet(userId);
+  w.balance = STARTING_COINS;
+  saveWallet(userId);
+}
+
+// Clear the hourly (universal) pool.
+function clearHourlyPool() {
+  poolData.universalPool = 0;
+  savePool();
+}
+
+// Clear the daily spin (loss) pool.
+function clearDailySpinPool() {
+  poolData.lossPool = 0;
+  savePool();
+}
+
+// Reset all players' purse and bank, preserving inventory/upgrades/stats.
+// Purse is set to STARTING_COINS; bank is set to 0.
+function resetAllPursesAndBanks() {
+  let count = 0;
+  for (const userId of Object.keys(wallets)) {
+    const w = wallets[userId];
+    w.balance = STARTING_COINS;
+    w.bank = 0;
+    count++;
+  }
+  if (count > 0) saveWallets();
+  return count;
 }
 
 function getBalance(userId) { return normalizeCoins(getWallet(userId).balance, 0); }
@@ -1655,8 +1680,8 @@ function getCollectionStats(userId) {
 
 module.exports = {
   getPoolData, savePool,
-  addToUniversalPool, addToLossPool,
-  getAllWallets, getWallet, hasWallet, deleteWallet,
+  addToUniversalPool, addToLossPool, clearHourlyPool, clearDailySpinPool,
+  getAllWallets, getWallet, hasWallet, deleteWallet, resetPurse, resetAllPursesAndBanks,
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback, applyLuckCashback,
   getSpinWeight, getUniversalIncomeDoubleChance, processBank,

@@ -41,21 +41,21 @@ const CONFIG = {
       },
     },
     pools: {
-      universalTaxRate: 0.05,
-      universalTaxMinNetWorth: 1000000, // Win tax only applies when net worth > 1M
-      lossTaxRate: 0.05,
+      universalTaxRate: 0.005,
+      universalTaxMinNetWorth: 0, // Win tax always applies
+      lossTaxRate: 0.005,
       hourlyPayoutMs: 60 * 60 * 1000,
       giveawayExpiryCheckMs: 30 * 1000,
       // Tiered contribution tax: larger wins are taxed at progressively lower
       // rates (mirrors bank interest slab design). Base rate = universalTaxRate.
       contributionSlabs: [
-        { threshold: 100000,      scale: 1 },      // Slab 1: 0 → 100K, full 5%
-        { threshold: 1000000,     scale: 0.5 },    // Slab 2: 100K → 1M, 2.5%
-        { threshold: 10000000,    scale: 0.1 },    // Slab 3: 1M → 10M, 0.5%
-        { threshold: 100000000,   scale: 0.05 },   // Slab 4: 10M → 100M, 0.25%
-        { threshold: 1000000000,  scale: 0.01 },   // Slab 5: 100M → 1B, 0.05%
+        { threshold: 100000,      scale: 1 },      // Slab 1: 0 → 100K, full 0.5%
+        { threshold: 1000000,     scale: 0.5 },    // Slab 2: 100K → 1M, 0.25%
+        { threshold: 10000000,    scale: 0.1 },    // Slab 3: 1M → 10M, 0.05%
+        { threshold: 100000000,   scale: 0.05 },   // Slab 4: 10M → 100M, 0.025%
+        { threshold: 1000000000,  scale: 0.01 },   // Slab 5: 100M → 1B, 0.005%
       ],
-      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.025%
+      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.0025%
     },
     upgrades: {
       maxLevel: 10,

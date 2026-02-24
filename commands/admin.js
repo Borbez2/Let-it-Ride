@@ -248,11 +248,16 @@ function renderSystemPage(adminId, statusMsg) {
     new ButtonBuilder().setCustomId(`adm_resetpity_${adminId}`).setLabel('🍀 Reset All Pity').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`adm_testannounce_${adminId}`).setLabel('📢 Test Announce').setStyle(ButtonStyle.Secondary),
   );
+  const row2sys = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`adm_clearhourlypool_${adminId}`).setLabel('🗑️ Clear Hourly Pool').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`adm_cleardailyspinpool_${adminId}`).setLabel('🗑️ Clear Spin Pool').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`adm_resetallpurses_${adminId}`).setLabel('💸 Reset All Purses').setStyle(ButtonStyle.Danger),
+  );
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`adm_page_dashboard_${adminId}`).setLabel('◂ Back').setStyle(ButtonStyle.Secondary),
   );
 
-  return { embeds: [embed], components: [row1, navRow] };
+  return { embeds: [embed], components: [row1, row2sys, navRow] };
 }
 
 // ── Modals ──
@@ -435,6 +440,18 @@ async function handleAdminButton(interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, 
     const result = store.resetAllActivePity();
     return interaction.update(renderSystemPage(adminId, `✅ Pity reset: ${result.usersCleared} users, ${result.stacksCleared} stacks`));
   }
+  if (action === 'clearhourlypool') {
+    store.clearHourlyPool();
+    return interaction.update(renderSystemPage(adminId, '✅ Hourly (universal) pool cleared.'));
+  }
+  if (action === 'cleardailyspinpool') {
+    store.clearDailySpinPool();
+    return interaction.update(renderSystemPage(adminId, '✅ Daily spin (loss) pool cleared.'));
+  }
+  if (action === 'resetallpurses') {
+    const count = store.resetAllPursesAndBanks();
+    return interaction.update(renderSystemPage(adminId, `✅ Reset purse & bank for ${count} players.`));
+  }
   if (action === 'testannounce') {
     await interaction.deferUpdate();
     const targets = [];
@@ -465,8 +482,8 @@ async function handleAdminButton(interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, 
   if (action === 'resetwallet') {
     const session = getSession(adminId);
     if (!session.selectedUserId) return interaction.reply({ content: 'Select a user first.', ephemeral: true });
-    store.deleteWallet(session.selectedUserId);
-    return interaction.update(renderUsersPage(adminId, `✅ Wallet reset for ${session.selectedUserName}`));
+    store.resetPurse(session.selectedUserId);
+    return interaction.update(renderUsersPage(adminId, `✅ Purse reset for ${session.selectedUserName}`));
   }
   if (action === 'resetupgrades') {
     const session = getSession(adminId);
