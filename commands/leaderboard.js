@@ -53,7 +53,12 @@ function seriesForRange(history, startTs, slotCount, slotSeconds) {
   return data;
 }
 
-async function buildAllPlayersGraphBuffer(client, wallets) {
+async function buildAllPlayersGraphBuffer(client, wallets, options = {}) {
+  // options: { historyKey = 'netWorthHistory', title = 'Player Networth', color }
+  const historyKey = options.historyKey || 'netWorthHistory';
+  const title = options.title || 'Player Networth';
+  const color = options.color || '#36a2eb';
+
   const palette = [
     '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#8dd17e', '#ff7aa2', '#00bcd4', '#cddc39',
     '#f06292', '#64b5f6', '#ffd54f', '#4db6ac', '#9575cd', '#ffb74d', '#81c784', '#ba68c8', '#90a4ae', '#ef5350',
@@ -61,7 +66,7 @@ async function buildAllPlayersGraphBuffer(client, wallets) {
 
   const candidates = Object.entries(wallets)
     .map(([id, w]) => {
-      const history = Array.isArray(w?.stats?.netWorthHistory) ? w.stats.netWorthHistory : [];
+      const history = Array.isArray(w?.stats?.[historyKey]) ? w.stats[historyKey] : [];
       const last = history.length ? history[history.length - 1].v || 0 : 0;
       return { id, history, last };
     })
@@ -107,7 +112,7 @@ async function buildAllPlayersGraphBuffer(client, wallets) {
     options: {
       plugins: {
         legend: { display: true, position: 'bottom', labels: { color: '#ffffff', boxWidth: 10 } },
-        title: { display: true, text: 'Player Networth', color: '#ffffff' },
+        title: { display: true, text: title, color: '#ffffff' },
       },
       scales: {
         x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } },
@@ -191,7 +196,67 @@ async function handleCollection(interaction, client) {
     description: tableText,
   };
 
-  return interaction.reply({ embeds: [tableEmbed] });
+  // attach graph if available
+  const graphBuffer = await buildAllPlayersGraphBuffer(client, wallets, {
+    historyKey: 'collectibleHistory',
+    title: 'Player Collections',
+    color: '#9b59b6',
+  });
+  const replyPayload = { embeds: [tableEmbed] };
+  if (graphBuffer) {
+    tableEmbed.image = { url: 'attachment://collection.png' };
+    replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'collection.png' })];
+  }
+
+  return interaction.reply(replyPayload);
 }
 
-module.exports = { handleLeaderboard, handleCollection };
+async function handleXpLeaderboard(interaction, client) {
+  const entries = store.getXpLeaderboard();
+  if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No XP earned yet!' }] });
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const rows = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const u = await client.users.fetch(e.userId).catch(() => null);
+    rows.push({
+      rank: i < 3 ? medals[i] : `${i + 1}`,
+      player: (u ? u.username : 'Unknown').slice(0, 24),
+      level: String(e.level),
+      title: e.title,
+      xp: store.formatNumber(e.totalXp),
+      games: String(e.gamesPlayed),
+    });
+  }
+
+  const columns = [
+    { key: 'rank', header: 'Rank' },
+    { key: 'player', header: 'Player' },
+    { key: 'level', header: 'Lv' },
+    { key: 'title', header: 'Title' },
+    { key: 'games', header: 'Games' },
+  ];
+
+  const tableEmbed = {
+    title: '⭐ XP Leaderboard',
+    color: 0x2b2d31,
+    description: buildMonospaceTable(columns, rows),
+    footer: { text: `${CONFIG.xp.perGame} XP per game played • Levels grow exponentially` },
+  };
+
+  const graphBuffer = await buildAllPlayersGraphBuffer(client, store.getAllWallets(), {
+    historyKey: 'xpHistory',
+    title: 'Player XP',
+    color: '#ffd700',
+  });
+  const replyPayload = { embeds: [tableEmbed] };
+  if (graphBuffer) {
+    tableEmbed.image = { url: 'attachment://xp.png' };
+    replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'xp.png' })];
+  }
+
+  return interaction.reply(replyPayload);
+}
+
+module.exports = { handleLeaderboard, handleCollection, handleXpLeaderboard };

@@ -278,6 +278,14 @@ async function handleTradeButton(interaction, parts) {
       for (const item of tgtItemsToGive) iw.inventory.push(item);
       for (const item of initItemsToGive) tw.inventory.push(item);
 
+      // Track collectible history after trade
+      store.ensureWalletStatsShape(iw);
+      store.ensureWalletStatsShape(tw);
+      if (typeof store.maybeTrackCollectibleSnapshot === 'function') {
+        store.maybeTrackCollectibleSnapshot(iw, Date.now(), 'trade');
+        store.maybeTrackCollectibleSnapshot(tw, Date.now(), 'trade');
+      }
+
       store.saveWallets(); activeTrades.delete(tradeKey); persistTradeSessions();
       const initGave = [
         trade.initiatorOffer.coins ? `💰 ${store.formatNumber(trade.initiatorOffer.coins)} coins` : null,

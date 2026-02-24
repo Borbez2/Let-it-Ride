@@ -252,6 +252,7 @@ function renderSystemPage(adminId, statusMsg) {
     new ButtonBuilder().setCustomId(`adm_clearhourlypool_${adminId}`).setLabel('🗑️ Clear Hourly Pool').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`adm_cleardailyspinpool_${adminId}`).setLabel('🗑️ Clear Spin Pool').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`adm_resetallpurses_${adminId}`).setLabel('💸 Reset All Purses').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`adm_wipeallstats_${adminId}`).setLabel('📊 Wipe All Stats').setStyle(ButtonStyle.Danger),
   );
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`adm_page_dashboard_${adminId}`).setLabel('◂ Back').setStyle(ButtonStyle.Secondary),
@@ -451,6 +452,10 @@ async function handleAdminButton(interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, 
   if (action === 'resetallpurses') {
     const count = store.resetAllPursesAndBanks();
     return interaction.update(renderSystemPage(adminId, `✅ Reset purse & bank for ${count} players.`));
+  }
+  if (action === 'wipeallstats') {
+    const count = store.clearAllGameStats();
+    return interaction.update(renderSystemPage(adminId, `✅ Wiped all game stats & graphs for ${count} players. Inventory & upgrades kept.`));
   }
   if (action === 'testannounce') {
     await interaction.deferUpdate();

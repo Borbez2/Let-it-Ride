@@ -50,6 +50,7 @@ function renderGameplayPage(username, userId) {
   const bonuses = store.getUserBonuses(userId);
   const base = bonuses.base;
   const items = bonuses.items;
+  const xpBonuses = store.getXpInfo(userId).xpBonuses;
 
   // Win Chance modifier block
   const { luckyStacks, luckyPotBoost, unluckyPotPenalty, streakBoost, totalBoost, potions, pityStatus } = buildWinChanceSummary(userId);
@@ -97,10 +98,11 @@ function renderGameplayPage(username, userId) {
   const luckFooter = `\n> Current loss streak: **${pityStatus.lossStreak}** · Best: **${pityStatus.bestLossStreak}** · Total triggers: **${pityStatus.triggers}**`;
 
   // Cashback
-  const cashTotal = (base.cashbackRate + items.cashbackRate) * 100;
+  const cashTotal = (base.cashbackRate + items.cashbackRate + (xpBonuses.cashbackRate || 0)) * 100;
   let cbText = `> **${cashTotal.toFixed(2)}%** of losses returned as coins\n`;
   if (base.cashbackRate > 0) cbText += `> Upgrades: **${(base.cashbackRate * 100).toFixed(2)}%**\n`;
   if (items.cashbackRate > 0) cbText += `> 🎒 Items: **+${(items.cashbackRate * 100).toFixed(2)}%**\n`;
+  if (xpBonuses.cashbackRate) cbText += `> ⭐ XP Level: **+${(xpBonuses.cashbackRate * 100).toFixed(2)}%**\n`;
   if (cashTotal === 0) cbText += `> *No cashback active*`;
 
   // Mines Save
@@ -129,10 +131,12 @@ function renderPassivePage(username, userId) {
   // Bank Interest
   const baseIntPct = base.interestRate * 100;
   const itemIntPct = items.interestRate * 100;
-  const totalIntPct = baseIntPct + itemIntPct;
+  const xpIntPct = (xpBonuses.interestRate || 0) * 100;
+  const totalIntPct = baseIntPct + itemIntPct + xpIntPct;
   let intText = `> **${totalIntPct.toFixed(3)}%/day** applied to your bank balance\n`;
   intText += `> Upgrades: **${baseIntPct.toFixed(3)}%/day**\n`;
   if (itemIntPct > 0) intText += `> 🎒 Items: **+${itemIntPct.toFixed(3)}%/day**\n`;
+  if (xpIntPct) intText += `> ⭐ XP Level: **+${xpIntPct.toFixed(3)}%/day**\n`;
   intText += `> *(Tiered slabs: full rate on first 1 M, ×0.5 on 1-10 M, ×0.1 above 10 M)*`;
 
   // Daily Spin Multiplier
@@ -145,10 +149,12 @@ function renderPassivePage(username, userId) {
   // Hourly Universal Income Double Chance
   const baseDoublePct = base.universalDoubleChance * 100;
   const itemDoublePct = items.universalDoubleChance * 100;
-  const totalDoublePct = baseDoublePct + itemDoublePct;
+  const xpDoublePct = (xpBonuses.universalDoubleChance || 0) * 100;
+  const totalDoublePct = baseDoublePct + itemDoublePct + xpDoublePct;
   let incomeText = `> **${totalDoublePct.toFixed(1)}%** chance each hourly payout is ×2\n`;
   incomeText += `> Upgrades: **${baseDoublePct.toFixed(1)}%** (each upgrade level adds +${(CONFIG.economy.upgrades.universalIncomePerLevelChance * 100).toFixed(1)}%)\n`;
   if (itemDoublePct > 0) incomeText += `> 🎒 Items: **+${itemDoublePct.toFixed(1)}%**\n`;
+  if (xpDoublePct) incomeText += `> ⭐ XP Level: **+${xpDoublePct.toFixed(1)}%**\n`;
   incomeText += `> *(If triggered, your share of the hourly universal pool is doubled for that payout.)*`;
 
   return {
@@ -158,7 +164,7 @@ function renderPassivePage(username, userId) {
       { name: '∑ Bank Interest', value: intText, inline: false },
       { name: '⟳× Daily Spin Multiplier', value: spinText, inline: false },
       { name: '∀× Hourly Income Double Chance', value: incomeText, inline: false },
-      { name: 'Legend', value: '> Base (upgrades) · 🎒 Collection items · 🔥 Temporary effect', inline: false },
+      { name: 'Legend', value: '> Base (upgrades) · 🎒 Collection items · ⭐ XP level · 🔥 Temporary effect', inline: false },
     ],
   };
 }

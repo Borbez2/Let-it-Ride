@@ -7,7 +7,7 @@ const RARITY_ORDER = CONFIG.ui.rarityOrder;
 // ── Page Navigation ──
 
 function getPageNavRow(userId, activePage) {
-  return new ActionRowBuilder().addComponents(
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`shop_upgrades_${userId}`)
       .setLabel('⬆️ Upgrades')
@@ -21,6 +21,15 @@ function getPageNavRow(userId, activePage) {
       .setLabel('🎁 Mystery Box')
       .setStyle(activePage === 'mysterybox' ? ButtonStyle.Primary : ButtonStyle.Secondary),
   );
+  if (activePage === 'upgrades') {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`upgrade_refresh_${userId}`)
+        .setLabel('🔄')
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+  return row;
 }
 
 // ── Upgrades Page ──
@@ -41,11 +50,13 @@ function renderUpgradesEmbed(userId, successMessage) {
   const cCost = cLvl < maxLevel ? cashbackCosts[cLvl] : null;
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
   const uCost = uLvl < maxLevel ? universalIncomeCosts[uLvl] : null;
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
 
+  // 10 parallelograms; one fills every 10 levels
   const bar = (lvl, max) => {
-    const barLen = 20;
-    const filled = Math.round((lvl / max) * barLen);
-    return '▰'.repeat(filled) + '▱'.repeat(barLen - filled);
+    const segments = Math.floor(max / 10);
+    const filled = Math.floor(lvl / 10);
+    return '▰'.repeat(filled) + '▱'.repeat(segments - filled);
   };
 
   const sMultFull = sMult + bonuses.spinWeightBonus;
@@ -81,7 +92,7 @@ function renderUpgradesEmbed(userId, successMessage) {
   const embed = {
     title: '⬆️ Upgrades',
     color: 0x2b2d31,
-    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins`,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins\n> 🏦 Bank: **${store.formatNumber(w.bank)}** coins\n> 💳 Total Available: **${store.formatNumber(totalFunds)}** coins`,
     fields,
   };
 
@@ -105,26 +116,22 @@ function buildUpgradeButtons(userId) {
   const cCost = cLvl < maxLevel ? cashbackCosts[cLvl] : null;
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
   const uCost = uLvl < maxLevel ? universalIncomeCosts[uLvl] : null;
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
 
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`upgrade_interest_${userId}`)
-      .setLabel(iCost ? `∑ Interest (${store.formatNumberShort(iCost)})` : '∑ Interest MAXED')
-      .setStyle(iCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!iCost || w.balance < iCost),
+      .setLabel(iCost ? `∑ Interest (${store.formatNumberShort(iCost)})` : '∑ MAXED')
+      .setStyle(iCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!iCost || totalFunds < iCost),
     new ButtonBuilder().setCustomId(`upgrade_cashback_${userId}`)
-      .setLabel(cCost ? `↩ Cashback (${store.formatNumberShort(cCost)})` : '↩ Cashback MAXED')
-      .setStyle(cCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!cCost || w.balance < cCost),
-  ));
-  rows.push(new ActionRowBuilder().addComponents(
+      .setLabel(cCost ? `↩ Cashback (${store.formatNumberShort(cCost)})` : '↩ MAXED')
+      .setStyle(cCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!cCost || totalFunds < cCost),
     new ButtonBuilder().setCustomId(`upgrade_spinmult_${userId}`)
-      .setLabel(sCost ? `⟳× Spin Mult (${store.formatNumberShort(sCost)})` : '⟳× Spin Mult MAXED')
-      .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || w.balance < sCost),
+      .setLabel(sCost ? `⟳ Spin (${store.formatNumberShort(sCost)})` : '⟳ MAXED')
+      .setStyle(sCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!sCost || totalFunds < sCost),
     new ButtonBuilder().setCustomId(`upgrade_universalmult_${userId}`)
-      .setLabel(uCost ? `∀× Income Chance (${store.formatNumberShort(uCost)})` : '∀× Income Chance MAXED')
-      .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || w.balance < uCost),
-  ));
-  rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`upgrade_refresh_${userId}`).setLabel('Refresh').setStyle(ButtonStyle.Primary),
+      .setLabel(uCost ? `∀ Income (${store.formatNumberShort(uCost)})` : '∀ MAXED')
+      .setStyle(uCost ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!uCost || totalFunds < uCost),
   ));
   return rows;
 }
@@ -135,6 +142,7 @@ function renderPotionsEmbed(userId, successMessage) {
   const w = store.getWallet(userId);
   const potions = store.getActivePotions(userId);
   const potionCfg = store.getPotionConfig();
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
 
   const fields = [];
 
@@ -162,7 +170,7 @@ function renderPotionsEmbed(userId, successMessage) {
   const embed = {
     title: '🧪 Potions Shop',
     color: 0x2b2d31,
-    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins`,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins\n> 🏦 Bank: **${store.formatNumber(w.bank)}** coins\n> 💳 Total Available: **${store.formatNumber(totalFunds)}** coins`,
     fields,
   };
 
@@ -177,6 +185,7 @@ function buildPotionButtons(userId) {
   const potions = store.getActivePotions(userId);
   const w = store.getWallet(userId);
   const potionCfg = store.getPotionConfig();
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
 
   const rows = [];
 
@@ -185,12 +194,12 @@ function buildPotionButtons(userId) {
       .setCustomId(`shop_buylucky_${userId}`)
       .setLabel(potions.lucky ? '☘⚱ Lucky Pot (Active)' : `☘⚱ Buy Lucky Pot (${store.formatNumberShort(potionCfg.luckyPotCost)})`)
       .setStyle(potions.lucky ? ButtonStyle.Secondary : ButtonStyle.Success)
-      .setDisabled(!!potions.lucky || w.balance < potionCfg.luckyPotCost),
+      .setDisabled(!!potions.lucky || totalFunds < potionCfg.luckyPotCost),
     new ButtonBuilder()
       .setCustomId(`shop_unluckymenu_${userId}`)
       .setLabel(`✕⚱ Unlucky Pot (${store.formatNumberShort(potionCfg.unluckyPotCost)})`)
       .setStyle(ButtonStyle.Danger)
-      .setDisabled(w.balance < potionCfg.unluckyPotCost),
+      .setDisabled(totalFunds < potionCfg.unluckyPotCost),
   ));
 
   return rows;
@@ -203,26 +212,42 @@ function renderMysteryBoxEmbed(userId, successMessage) {
   const cost = CONFIG.collectibles.mysteryBox.cost;
   const premiumCost = CONFIG.collectibles.premiumMysteryBox.cost;
   const maxQty = CONFIG.commands.limits.mysteryBoxQuantity.max;
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
 
   const fields = [
     {
       name: '🎁 Mystery Box',
-      value: `> Price: **${store.formatNumber(cost)}** coins each\n> Contains a random collectible item\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
+      value: `> **${store.formatNumber(cost)}** coins each • Random collectible item • Up to **${maxQty}** at once\n> Duplicates give coin compensation. 7 rarity tiers.`,
       inline: false,
     },
     {
       name: '💎 Premium Mystery Box',
-      value: `> Price: **${store.formatNumber(premiumCost)}** coins each\n> No common items - starts at **uncommon**\n> Proportionally improved odds for rare+ tiers\n> Duplicates give coin compensation\n> Buy up to **${maxQty}** at once`,
+      value: `> **${store.formatNumber(premiumCost)}** coins each • No common tier • Starts at **uncommon**\n> Improved odds for rare+ tiers • Up to **${maxQty}** at once`,
       inline: false,
     },
   ];
+
+  // show duplicate summary if any
+  const dupeSummary = store.getDuplicateSummary(userId);
+  if (dupeSummary.total > 0) {
+    const parts = [];
+    for (const [rarity, cnt] of Object.entries(dupeSummary.byRarity)) {
+      parts.push(`${RARITIES[rarity].emoji} ${cnt}`);
+    }
+    const breakdown = parts.join(', ');
+    fields.push({
+      name: '📦 Duplicates',
+      value: `You have **${dupeSummary.total}** duplicate item(s) in inventory (${breakdown}).\nSell them with the button below or via \`/inventory\`.`,
+      inline: false,
+    });
+  }
 
   const boxesOpened = (w.stats && w.stats.mysteryBox && w.stats.mysteryBox.opened) || 0;
 
   const embed = {
     title: '🎁 Mystery Box Shop',
     color: 0x2b2d31,
-    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** coins\n> 📦 Boxes Opened: **${store.formatNumber(boxesOpened)}**`,
+    description: `> 💰 Purse: **${store.formatNumber(w.balance)}** | 🏦 Bank: **${store.formatNumber(w.bank)}** | 💳 Total: **${store.formatNumber(totalFunds)}**\n> 📦 Boxes Opened: **${store.formatNumber(boxesOpened)}**`,
     fields,
   };
 
@@ -241,29 +266,47 @@ function buildMysteryBoxButtons(userId) {
   const w = store.getWallet(userId);
   const cost = CONFIG.collectibles.mysteryBox.cost;
   const premiumCost = CONFIG.collectibles.premiumMysteryBox.cost;
+  const totalFunds = (w.balance || 0) + (w.bank || 0);
   const rows = [];
 
+  // Normal box row: x1, x5, x10, x25 on one row
   const quantities = [1, 5, 10, 25];
-  const buttons = quantities.map(qty => {
+  const normalButtons = quantities.map(qty => {
     const totalCost = cost * qty;
     return new ButtonBuilder()
       .setCustomId(`shop_buybox_${userId}_${qty}`)
-      .setLabel(`x${qty} (${store.formatNumberShort(totalCost)})`)
+      .setLabel(`🎁 x${qty} (${store.formatNumberShort(totalCost)})`)
       .setStyle(ButtonStyle.Success)
-      .setDisabled(w.balance < totalCost);
+      .setDisabled(totalFunds < totalCost);
   });
 
-  const premiumButtons = quantities.map(qty => {
+  // Premium box row: x1, x5, x10 on one row (x25 would be very expensive, skip)
+  const premiumQtys = [1, 5, 10];
+  const premiumButtons = premiumQtys.map(qty => {
     const totalCost = premiumCost * qty;
     return new ButtonBuilder()
       .setCustomId(`shop_buyboxp_${userId}_${qty}`)
       .setLabel(`💎 x${qty} (${store.formatNumberShort(totalCost)})`)
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(w.balance < totalCost);
+      .setDisabled(totalFunds < totalCost);
   });
 
-  rows.push(new ActionRowBuilder().addComponents(buttons.slice(0, 5)));
-  rows.push(new ActionRowBuilder().addComponents(premiumButtons.slice(0, 5)));
+  rows.push(new ActionRowBuilder().addComponents(normalButtons));
+  rows.push(new ActionRowBuilder().addComponents(premiumButtons));
+
+  // Show sell duplicates button if user has any
+  const dupeCount = store.countDuplicates(userId);
+  if (dupeCount > 0) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`shop_selldups_${userId}`)
+          .setLabel(`💰 Sell Duplicates (${dupeCount})`)
+          .setStyle(ButtonStyle.Danger)
+      )
+    );
+  }
+
   return rows;
 }
 
@@ -284,6 +327,21 @@ function renderShopPage(userId, page, successMessage) {
   return { embed, components };
 }
 
+// Helper: deduct coins from wallet, falling back to bank if wallet is short.
+// Returns true if the payment succeeded, false if total funds are insufficient.
+function deductWithBankFallback(w, cost) {
+  if (w.balance >= cost) {
+    w.balance -= cost;
+    return true;
+  }
+  const total = (w.balance || 0) + (w.bank || 0);
+  if (total < cost) return false;
+  const needed = cost - w.balance;
+  w.bank -= needed;
+  w.balance = 0;
+  return true;
+}
+
 // ── Slash Command Handler ──
 
 async function handleShop(interaction) {
@@ -298,15 +356,24 @@ async function handleShopButton(interaction, parts) {
   const uid = parts[2];
 
   if (action === 'upgrades' || action === 'potions' || action === 'mysterybox') {
-    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    // page navigation is viewable by anyone; show the shop belonging to uid but do not enforce ownership
     const { embed, components } = renderShopPage(uid, action);
     return interaction.update({ content: '', embeds: [embed], components });
   }
 
   if (action === 'buylucky') {
     if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
-    const potionCfg = store.getPotionConfig();
-    const result = store.buyLuckyPot(uid);
+    const potionCfg = store.getPotionConfig();    const w = store.getWallet(uid);
+    const totalFunds = (w.balance || 0) + (w.bank || 0);
+    if (totalFunds < potionCfg.luckyPotCost) {
+      return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.luckyPotCost)}** coins! (Wallet + Bank combined)`, ephemeral: true });
+    }
+    // Ensure wallet has enough (withdraw from bank if needed)
+    if (w.balance < potionCfg.luckyPotCost) {
+      const needed = potionCfg.luckyPotCost - w.balance;
+      w.bank -= needed;
+      w.balance = potionCfg.luckyPotCost;
+    }    const result = store.buyLuckyPot(uid);
     if (!result.success) {
       if (result.reason === 'insufficient_funds') return interaction.reply({ content: `Need **${store.formatNumber(potionCfg.luckyPotCost)}** coins!`, ephemeral: true });
       if (result.reason === 'already_active') return interaction.reply({ content: '\u2618\u26b1 You already have an active Lucky Pot!', ephemeral: true });
@@ -371,18 +438,35 @@ async function handleShopButton(interaction, parts) {
     return interaction.update({ content: '', embeds: [embed], components });
   }
 
+  if (action === 'selldups') {
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    const result = store.sellAllDuplicates(uid);
+    if (result.totalItemsSold === 0) {
+      return interaction.reply({ content: 'No duplicates to sell!', ephemeral: true });
+    }
+    const lines = [`**Sold ${result.totalItemsSold} duplicate(s) for ${store.formatNumber(result.totalCoins)} coins:**`];
+    for (const entry of result.breakdown) {
+      lines.push(`> ${entry.emoji} ${entry.name} x${entry.sold} → +${store.formatNumber(entry.sold * entry.refundEach)}`);
+    }
+    const { embed, components } = renderShopPage(uid, 'mysterybox', lines.join('\n'));
+    return interaction.update({ content: '', embeds: [embed], components });
+  }
+
   if (action === 'buybox') {
     const quantity = parseInt(parts[3], 10) || 1;
     if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
     const w = store.getWallet(uid);
     const cost = CONFIG.collectibles.mysteryBox.cost;
     const totalCost = quantity * cost;
+    const totalFunds = (w.balance || 0) + (w.bank || 0);
 
-    if (w.balance < totalCost) {
-      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`, ephemeral: true });
+    if (totalFunds < totalCost) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins — you have **${store.formatNumber(totalFunds)}** (wallet + bank)`, ephemeral: true });
     }
-
-    w.balance -= totalCost;
+    // Auto-draw from bank if wallet alone is short
+    if (!deductWithBankFallback(w, totalCost)) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins!`, ephemeral: true });
+    }
     store.ensureWalletStatsShape(w);
     const items = [];
 
@@ -459,12 +543,14 @@ async function handleShopButton(interaction, parts) {
     const w = store.getWallet(uid);
     const cost = CONFIG.collectibles.premiumMysteryBox.cost;
     const totalCost = quantity * cost;
+    const totalFunds = (w.balance || 0) + (w.bank || 0);
 
-    if (w.balance < totalCost) {
-      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins (you have ${store.formatNumber(w.balance)})`, ephemeral: true });
+    if (totalFunds < totalCost) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins — you have **${store.formatNumber(totalFunds)}** (wallet + bank)`, ephemeral: true });
     }
-
-    w.balance -= totalCost;
+    if (!deductWithBankFallback(w, totalCost)) {
+      return interaction.reply({ content: `Need **${store.formatNumber(totalCost)}** coins!`, ephemeral: true });
+    }
     store.ensureWalletStatsShape(w);
     const items = [];
 
@@ -548,8 +634,8 @@ async function handleUpgradeButton(interaction, parts) {
     const lvl = w.interestLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.interest[lvl];
-    if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
-    w.balance -= cost; w.interestLevel = lvl + 1; store.saveWallets();
+    if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
+    w.interestLevel = lvl + 1; store.saveWallets();
     const { embed, components } = renderShopPage(uid, 'upgrades', `Interest → Lv ${w.interestLevel}`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -557,8 +643,8 @@ async function handleUpgradeButton(interaction, parts) {
     const lvl = w.cashbackLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.cashback[lvl];
-    if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
-    w.balance -= cost; w.cashbackLevel = lvl + 1; store.saveWallets();
+    if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
+    w.cashbackLevel = lvl + 1; store.saveWallets();
     const { embed, components } = renderShopPage(uid, 'upgrades', `Cashback → Lv ${w.cashbackLevel}`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -566,8 +652,8 @@ async function handleUpgradeButton(interaction, parts) {
     const lvl = w.spinMultLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.spinMult[lvl];
-    if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
-    w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
+    if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
+    w.spinMultLevel = lvl + 1; store.saveWallets();
     const { embed, components } = renderShopPage(uid, 'upgrades', `Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * CONFIG.economy.upgrades.spinMultPerLevel).toFixed(2)}x)`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -575,8 +661,8 @@ async function handleUpgradeButton(interaction, parts) {
     const lvl = w.universalIncomeMultLevel || 0;
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.universalIncome[lvl];
-    if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
-    w.balance -= cost; w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
+    if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
+    w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
     const newChancePct = ((w.universalIncomeMultLevel * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0);
     const { embed, components } = renderShopPage(uid, 'upgrades', `Income Double → Lv ${w.universalIncomeMultLevel} (${newChancePct}% chance)`);
     return interaction.update({ content: '', embeds: [embed], components });

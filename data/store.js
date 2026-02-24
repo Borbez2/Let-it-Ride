@@ -158,6 +158,8 @@ const DEFAULT_STATS = () => ({
     },
   },
   netWorthHistory: [],
+  xpHistory: [],
+  collectibleHistory: [],
   topWins: [],
   topLosses: [],
   lifetimeEarnings: 0,
@@ -274,10 +276,18 @@ function ensureWalletStatsShape(w) {
   if (w.stats.bonuses.luck.totalCashback === undefined) w.stats.bonuses.luck.totalCashback = 0;
   if (!w.stats.potions) w.stats.potions = { lucky: null, unlucky: null };
   if (!Array.isArray(w.stats.netWorthHistory)) w.stats.netWorthHistory = [];
+  if (!Array.isArray(w.stats.xpHistory)) w.stats.xpHistory = [];
+  if (!Array.isArray(w.stats.collectibleHistory)) w.stats.collectibleHistory = [];
   if (!Array.isArray(w.stats.topWins)) w.stats.topWins = [];
   if (!Array.isArray(w.stats.topLosses)) w.stats.topLosses = [];
   if (w.stats.lifetimeEarnings === undefined) w.stats.lifetimeEarnings = 0;
   if (w.stats.lifetimeLosses === undefined) w.stats.lifetimeLosses = 0;
+  // XP fields
+  if (w.stats.xp === undefined) w.stats.xp = 0;
+  if (w.stats.totalGamesPlayed === undefined) w.stats.totalGamesPlayed = 0;
+  // XP & collectible history
+  if (!Array.isArray(w.stats.xpHistory)) w.stats.xpHistory = [];
+  if (!Array.isArray(w.stats.collectibleHistory)) w.stats.collectibleHistory = [];
 }
 
 // Refresh luck: check if the single buff has expired.
@@ -449,12 +459,46 @@ function maybeTrackNetWorthSnapshotForWallet(w, now = Date.now(), reason = 'auto
   return true;
 }
 
+// XP history snapshot – similar to networth but tracks total XP.
+function maybeTrackXpSnapshot(w, now = Date.now(), reason = 'auto') {
+  ensureWalletStatsShape(w);
+  const history = w.stats.xpHistory;
+  const value = w.stats.xp || 0;
+  const last = history.length ? history[history.length - 1] : null;
+  // Write if first point, 15 min gap, or XP changed by at least 50
+  if (last && (now - last.t < 15 * 60 * 1000) && Math.abs(value - last.v) < 50) return false;
+  history.push({ t: now, v: value, r: reason });
+  const compacted = compactNetworthHistory(history, now);
+  if (compacted.length !== history.length) { history.length = 0; history.push(...compacted); }
+  return true;
+}
+
+// Collectible history snapshot – tracks unique collectible count.
+function maybeTrackCollectibleSnapshot(w, now = Date.now(), reason = 'auto') {
+  ensureWalletStatsShape(w);
+  const history = w.stats.collectibleHistory;
+  const uniqueCount = new Set((w.inventory || []).map(i => i.id)).size;
+  const last = history.length ? history[history.length - 1] : null;
+  // Write if first point, 15 min gap, or count changed
+  if (last && (now - last.t < 15 * 60 * 1000) && uniqueCount === last.v) return false;
+  history.push({ t: now, v: uniqueCount, r: reason });
+  const compacted = compactNetworthHistory(history, now);
+  if (compacted.length !== history.length) { history.length = 0; history.push(...compacted); }
+  return true;
+}
+
 function trackLifeStatsHeartbeat(now = Date.now()) {
   const changedIds = [];
   for (const [userId, wallet] of Object.entries(wallets)) {
-    const wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', {
+    let wrote = false;
+    // Net worth history
+    wrote = maybeTrackNetWorthSnapshotForWallet(wallet, now, 'heartbeat', {
       minMs: CONFIG.runtime.networthHistory.heartbeatMinWriteMs,
-    });
+    }) || wrote;
+    // XP history
+    wrote = maybeTrackXpSnapshot(wallet, now, 'heartbeat') || wrote;
+    // Collectible history
+    wrote = maybeTrackCollectibleSnapshot(wallet, now, 'heartbeat') || wrote;
     if (wrote) changedIds.push(userId);
   }
   if (changedIds.length > 0) {
@@ -741,13 +785,56 @@ function computeTieredTax(amount, baseRate) {
   return Math.floor(total);
 }
 
+function computeTieredTaxWithSlabs(amount, baseRate) {
+  const cfg = CONFIG.economy.pools;
+  const slabs = cfg.contributionSlabs;
+  const finalScale = cfg.contributionFinalScale ?? 0.005;
+  const result = { total: 0, slabAmounts: [] };
+  let remaining = amount;
+  let prevThreshold = 0;
+  if (slabs && slabs.length) {
+    for (let i = 0; i < slabs.length; i++) {
+      const slab = slabs[i];
+      const slabSize = slab.threshold - prevThreshold;
+      const applicable = Math.min(remaining, slabSize);
+      const contrib = applicable > 0 ? applicable * baseRate * slab.scale : 0;
+      result.slabAmounts.push(Math.floor(contrib));
+      result.total += contrib;
+      remaining -= applicable;
+      if (applicable <= 0) { result.slabAmounts.push(0); }
+      prevThreshold = slab.threshold;
+    }
+  }
+  if (remaining > 0) {
+    result.slabAmounts.push(Math.floor(remaining * baseRate * finalScale));
+    result.total += remaining * baseRate * finalScale;
+  }
+  result.total = Math.floor(result.total);
+  return result;
+}
+
 function addToUniversalPool(amount, userId) {
   // Win tax always applies (flat rate)
   const flatTax = Math.floor(amount * POOL_TAX_RATE);
   // But only a tiered portion actually enters the pool (rest is burned)
-  const poolContribution = computeTieredTax(amount, POOL_TAX_RATE);
-  if (poolContribution > 0) { poolData.universalPool += poolContribution; savePool(); }
+  const slabResult = computeTieredTaxWithSlabs(amount, POOL_TAX_RATE);
+  if (slabResult.total > 0) {
+    poolData.universalPool += slabResult.total;
+    // Track cumulative contributions per slab for the breakdown page
+    const slabStats = getRuntimeState('poolSlabStats', {}) || {};
+    for (let i = 0; i < slabResult.slabAmounts.length; i++) {
+      const key = `slab_${i}`;
+      slabStats[key] = (slabStats[key] || 0) + slabResult.slabAmounts[i];
+    }
+    slabStats._totalContributed = (slabStats._totalContributed || 0) + slabResult.total;
+    setRuntimeState('poolSlabStats', slabStats);
+    savePool();
+  }
   return flatTax;
+}
+
+function getPoolSlabStats() {
+  return getRuntimeState('poolSlabStats', {}) || {};
 }
 
 function addToLossPool(amount) {
@@ -873,13 +960,15 @@ function setBalance(userId, amount) {
 function getInterestRate(userId) {
   const w = getWallet(userId);
   const bonuses = getInventoryBonuses(w.inventory);
-  return BASE_INVEST_RATE + (w.interestLevel * CONFIG.economy.upgrades.interestPerLevel) + bonuses.interestRateBonus;
+  const xpInfo = getXpInfo(userId);
+  return BASE_INVEST_RATE + (w.interestLevel * CONFIG.economy.upgrades.interestPerLevel) + bonuses.interestRateBonus + xpInfo.xpBonuses.interestRate;
 }
 
 function getCashbackRate(userId) {
   const w = getWallet(userId);
   const bonuses = getInventoryBonuses(w.inventory);
-  return (w.cashbackLevel * CONFIG.economy.upgrades.cashbackPerLevel) + bonuses.cashbackRateBonus;
+  const xpInfo = getXpInfo(userId);
+  return (w.cashbackLevel * CONFIG.economy.upgrades.cashbackPerLevel) + bonuses.cashbackRateBonus + xpInfo.xpBonuses.cashbackRate;
 }
 
 function applyCashback(userId, lossAmount) {
@@ -914,7 +1003,8 @@ function getUniversalIncomeDoubleChance(userId) {
   const w = getWallet(userId);
   const level = w.universalIncomeMultLevel || 0;
   const bonuses = getInventoryBonuses(w.inventory);
-  const chance = (Math.max(0, Math.min(CONFIG.economy.upgrades.maxLevel, level)) * CONFIG.economy.upgrades.universalIncomePerLevelChance) + bonuses.universalDoubleChanceBonus;
+  const xpInfo = getXpInfo(userId);
+  const chance = (Math.max(0, Math.min(CONFIG.economy.upgrades.maxLevel, level)) * CONFIG.economy.upgrades.universalIncomePerLevelChance) + bonuses.universalDoubleChanceBonus + xpInfo.xpBonuses.universalDoubleChance;
   return Math.max(0, Math.min(CONFIG.economy.upgrades.universalIncomeChanceCap, chance));
 }
 
@@ -995,7 +1085,53 @@ function getUserBonuses(userId) {
       durationMs: LUCK_DURATION_MS,
     },
     runtimeTuning: tuning,
+    // XP level bonuses applied on top of everything else
+    xpBonuses: (() => {
+      const xpInfo = getXpInfo(userId);
+      return xpInfo.xpBonuses;
+    })(),
   };
+}
+
+function getXpLeaderboard() {
+  // return the top 10 players by total XP, useful for public leaderboards
+  return Object.entries(wallets).map(([userId, w]) => {
+    const xpInfo = getXpInfo(userId);
+    return { userId, totalXp: xpInfo.totalXp, level: xpInfo.level, title: xpInfo.title, gamesPlayed: xpInfo.totalGamesPlayed };
+  }).sort((a, b) => b.totalXp - a.totalXp).slice(0, 10);
+}
+
+// full sorted list for internal ranking calculations (not sliced)
+function getXpLeaderboardAll() {
+  return Object.entries(wallets).map(([userId, w]) => {
+    const xpInfo = getXpInfo(userId);
+    return { userId, totalXp: xpInfo.totalXp };
+  }).sort((a, b) => b.totalXp - a.totalXp);
+}
+
+function getXpRank(userId) {
+  const list = getXpLeaderboardAll();
+  const idx = list.findIndex(e => e.userId === userId);
+  return idx === -1 ? null : idx + 1;
+}
+
+function getCollectibleLeaderboard() {
+  // sort primarily by unique count then by total items owned
+  return Object.entries(wallets).map(([userId, w]) => {
+    const total = (w.inventory || []).length;
+    const unique = new Set((w.inventory || []).map(i => i.id)).size;
+    return { userId, unique, total };
+  }).filter(e => e.total > 0)
+    .sort((a, b) => {
+      if (b.unique !== a.unique) return b.unique - a.unique;
+      return b.total - a.total;
+    });
+}
+
+function getCollectibleRank(userId) {
+  const list = getCollectibleLeaderboard();
+  const idx = list.findIndex(e => e.userId === userId);
+  return idx === -1 ? null : idx + 1;
 }
 
 function getUserPityStatus(userId, now = Date.now()) {
@@ -1374,6 +1510,7 @@ function applyMysteryBoxStats(userId, items) {
       }
     }
   }
+  maybeTrackCollectibleSnapshot(w, Date.now(), 'mysteryBox');
 }
 
 // Calculate duplicate compensation by rarity.
@@ -1528,6 +1665,47 @@ function insertTopResult(arr, entry, limit = 5) {
 // letitride is excluded because users can abuse it with tiny bets to build streaks.
 const LUCK_ELIGIBLE_GAMES = new Set(['flip', 'duel']);
 
+// ── XP System ──
+
+// Compute and return xp info for a user (level, title, progress to next level).
+function getXpInfo(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const totalXp = w.stats.xp || 0;
+  const thresholds = CONFIG.xp.levelThresholds;
+  const maxLevel = CONFIG.xp.maxLevel;
+  let level = 0;
+  let xpUsed = 0;
+  for (let i = 0; i < thresholds.length; i++) {
+    if (totalXp >= xpUsed + thresholds[i]) {
+      xpUsed += thresholds[i];
+      level = i + 1;
+    } else {
+      break;
+    }
+  }
+  const currentLevelXp = totalXp - xpUsed;
+  const xpToNext = level < maxLevel ? thresholds[level] - currentLevelXp : 0;
+  const nextLevelTotal = level < maxLevel ? thresholds[level] : 0;
+  const titles = CONFIG.xp.titles;
+  const title = [...titles].reverse().find(t => level >= t.minLevel)?.title || 'Newcomer';
+  const tenLevelMilestones = Math.floor(level / 10);
+  const bonusPer10 = CONFIG.xp.bonusPerTenLevels;
+  const xpBonuses = {
+    interestRate: tenLevelMilestones * bonusPer10.interestRate,
+    cashbackRate: tenLevelMilestones * bonusPer10.cashbackRate,
+    universalDoubleChance: tenLevelMilestones * bonusPer10.universalDoubleChance,
+  };
+  return { totalXp, level, currentLevelXp, xpToNext, nextLevelTotal, title, xpBonuses, totalGamesPlayed: w.stats.totalGamesPlayed || 0 };
+}
+
+function awardGameXp(w) {
+  const xpPerGame = CONFIG.xp.perGame;
+  w.stats.xp = (w.stats.xp || 0) + xpPerGame;
+  w.stats.totalGamesPlayed = (w.stats.totalGamesPlayed || 0) + 1;
+  maybeTrackXpSnapshot(w, Date.now(), 'game');
+}
+
 function recordWin(userId, gameName, amount) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
@@ -1537,6 +1715,7 @@ function recordWin(userId, gameName, amount) {
   w.stats.lifetimeEarnings += amount;
   insertTopResult(w.stats.topWins, { game: gameName, amount, t: Date.now() });
   if (LUCK_ELIGIBLE_GAMES.has(gameName)) evaluateLuckOnWin(w);
+  awardGameXp(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `win:${gameName}`);
   saveWallet(userId);
   return { triggered: false };
@@ -1551,6 +1730,7 @@ function recordLoss(userId, gameName, amount) {
   w.stats.lifetimeLosses += amount;
   insertTopResult(w.stats.topLosses, { game: gameName, amount, t: Date.now() });
   const luckResult = LUCK_ELIGIBLE_GAMES.has(gameName) ? evaluateLuckOnLoss(w) : { triggered: false };
+  awardGameXp(w);
   maybeTrackNetWorthSnapshotForWallet(w, Date.now(), `loss:${gameName}`);
   saveWallet(userId);
   return luckResult;
@@ -1568,6 +1748,49 @@ function resetStats(userId) {
   w.stats.lifetimeEarnings = totalBalance;
   w.stats.lifetimeLosses = 0;
   saveWallet(userId);
+}
+
+// Clear game stats for ALL wallets, but keep inventory, upgrades, XP, and balances.
+// Resets: per-game W/L, earnings, losses, topWins, topLosses, netWorthHistory,
+//         xpHistory, collectibleHistory, giveaway, mysteryBox, dailySpin, interest earned, universal earned.
+// Keeps: balance, bank, upgrade levels, inventory, XP total, totalGamesPlayed, active buffs.
+function clearAllGameStats() {
+  const now = Date.now();
+  let count = 0;
+  for (const [userId, w] of Object.entries(wallets)) {
+    ensureWalletStatsShape(w);
+    const currentBalance = (w.balance || 0) + (w.bank || 0);
+
+    // Reset per-game stats
+    for (const g of GAME_KEYS) {
+      w.stats[g] = { wins: 0, losses: 0 };
+    }
+
+    // Reset lifetime tracking
+    w.stats.lifetimeEarnings = currentBalance;
+    w.stats.lifetimeLosses = 0;
+    w.stats.topWins = [];
+    w.stats.topLosses = [];
+
+    // Reset all history graphs - fresh start with a single current point
+    w.stats.netWorthHistory = [{ t: now, v: currentBalance, r: 'reset' }];
+    w.stats.xpHistory = [{ t: now, v: w.stats.xp || 0, r: 'reset' }];
+    const uniqueCollectibles = new Set((w.inventory || []).map(i => i.id)).size;
+    w.stats.collectibleHistory = [{ t: now, v: uniqueCollectibles, r: 'reset' }];
+
+    // Reset tracking counters
+    w.stats.giveaway = { created: 0, amountGiven: 0, won: 0, amountWon: 0 };
+    w.stats.mysteryBox = { duplicateCompEarned: 0, opened: 0, spent: 0, luckyHighRarity: 0, pityStreak: 0, bestPityStreak: 0 };
+    w.stats.dailySpin = { won: 0, amountWon: 0 };
+    w.stats.interest.totalEarned = 0;
+    w.stats.universalIncome = { totalEarned: 0 };
+    w.stats.bonuses.minesSaves = 0;
+    w.stats.bonuses.evBoostProfit = 0;
+
+    count++;
+  }
+  if (count > 0) saveWallets();
+  return count;
 }
 
 function resetAllActivePity() {
@@ -1680,6 +1903,8 @@ function getCollectionStats(userId) {
 
 // Sell all duplicate items (count > 1) at the refund price per extra copy.
 // Returns { totalCoins, totalItemsSold, breakdown: [{name, rarity, emoji, sold, refundEach}] }
+// Sell all duplicate items (count > 1) at the refund price per extra copy.
+// Returns { totalCoins, totalItemsSold, breakdown: [{name, rarity, emoji, sold, refundEach}] }
 function sellAllDuplicates(userId) {
   const w = getWallet(userId);
   ensureWalletStatsShape(w);
@@ -1709,6 +1934,24 @@ function sellAllDuplicates(userId) {
   return { totalCoins, totalItemsSold, breakdown };
 }
 
+// Get a summary of duplicates in the user's inventory.  The result has
+// { total: <number of extra copies>, byRarity: { rarity: count } } and does
+// not modify any state.
+function getDuplicateSummary(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const summary = { total: 0, byRarity: {} };
+  for (const item of w.inventory) {
+    const count = item.count || 1;
+    if (count > 1) {
+      const extras = count - 1;
+      summary.total += extras;
+      summary.byRarity[item.rarity] = (summary.byRarity[item.rarity] || 0) + extras;
+    }
+  }
+  return summary;
+}
+
 // Count total duplicate items across all inventory slots.
 function countDuplicates(userId) {
   const w = getWallet(userId);
@@ -1734,7 +1977,7 @@ module.exports = {
   checkDaily, claimDaily,
   rollMysteryBox, rollPremiumMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,
   formatNumber, formatNumberShort, parseAmount,
-  recordWin, recordLoss, resetStats, resetAllActivePity,
+  recordWin, recordLoss, resetStats, clearAllGameStats, resetAllActivePity,
   saveWallets, saveWallet,
   createGiveaway, getGiveaway, getAllGiveaways, joinGiveaway, removeGiveaway,
   setGiveawayMessageRef,
@@ -1749,4 +1992,15 @@ module.exports = {
   getDbFilePaths,
   sellAllDuplicates,
   countDuplicates,
+  getDuplicateSummary,
+  getXpInfo,
+  getXpLeaderboard,
+  getXpLeaderboardAll,
+  getXpRank,
+  getCollectibleLeaderboard,
+  getCollectibleRank,
+  getXpLeaderboard,
+  getPoolSlabStats,
+  maybeTrackXpSnapshot,
+  maybeTrackCollectibleSnapshot,
 };

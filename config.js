@@ -66,10 +66,11 @@ const CONFIG = {
       universalIncomeChanceCap: 20,
       // Cost generation parameters (exponential curve, shared for all upgrades).
       // Cost formula: floor(baseCost * growthRate^level)
-      // Modify baseCost and growthRate here to tune ALL upgrade costs at once.
+      // Tuned so level 100 costs approximately 1 Trillion coins.
+      // baseCost=1000 (level 1 start), growthRate=1.233: 1000*1.233^99 ≈ 1T
       costParams: {
-        baseCost: 500,        // cost of level 1
-        growthRate: 1.25,     // exponential growth factor per level
+        baseCost: 1000,       // cost of level 1
+        growthRate: 1.233,    // exponential growth; level 100 ≈ 1T
       },
     },
   },
@@ -203,8 +204,8 @@ const CONFIG = {
   // Mystery box / collectibles
   // -------------------------------
   collectibles: {
-    totalPlaceholders: 350,
-    perRarity: 50,
+    totalPlaceholders: 700,
+    perRarity: 100,
     mysteryBox: {
       cost: 5000,
       duplicateCompensationByRarity: {
@@ -252,24 +253,26 @@ const CONFIG = {
       },
       // Displayed buff per individual item (purely informational - unlocked only when full set is complete).
       // Each item shows ONE buff type cycling: interest → cashback → mines → income → spin.
+      // Nerfed: cashback/interest kept tight; payout mult and income chance slightly more generous.
       perItemDisplayBuff: {
-        common:    { interestRate: 0.00001, cashbackRate: 0.0000025, minesRevealChance: 0.00001, universalDoubleChance: 0.00002, spinWeight: 0.0001  },
-        uncommon:  { interestRate: 0.00003, cashbackRate: 0.0000075, minesRevealChance: 0.00003, universalDoubleChance: 0.00005, spinWeight: 0.0003  },
-        rare:      { interestRate: 0.0001,  cashbackRate: 0.000025,  minesRevealChance: 0.0001,  universalDoubleChance: 0.0002,  spinWeight: 0.001   },
-        epic:      { interestRate: 0.0003,  cashbackRate: 0.000075,  minesRevealChance: 0.0003,  universalDoubleChance: 0.0006,  spinWeight: 0.003   },
-        legendary: { interestRate: 0.001,   cashbackRate: 0.00025,   minesRevealChance: 0.001,   universalDoubleChance: 0.002,   spinWeight: 0.01    },
-        mythic:    { interestRate: 0.005,   cashbackRate: 0.00125,   minesRevealChance: 0.005,   universalDoubleChance: 0.01,    spinWeight: 0.05    },
-        divine:    { interestRate: 0.02,    cashbackRate: 0.005,     minesRevealChance: 0.02,    universalDoubleChance: 0.04,    spinWeight: 0.2     },
+        common:    { interestRate: 0.000003, cashbackRate: 0.0000005, minesRevealChance: 0.000005, universalDoubleChance: 0.000013, spinWeight: 0.000065 },
+        uncommon:  { interestRate: 0.000009, cashbackRate: 0.0000015, minesRevealChance: 0.000015, universalDoubleChance: 0.000033, spinWeight: 0.0002   },
+        rare:      { interestRate: 0.00003,  cashbackRate: 0.000005,  minesRevealChance: 0.00005,  universalDoubleChance: 0.00013,  spinWeight: 0.00065  },
+        epic:      { interestRate: 0.00009,  cashbackRate: 0.000015,  minesRevealChance: 0.00015,  universalDoubleChance: 0.0004,   spinWeight: 0.0019   },
+        legendary: { interestRate: 0.0003,   cashbackRate: 0.00005,   minesRevealChance: 0.0005,   universalDoubleChance: 0.0013,   spinWeight: 0.0065   },
+        mythic:    { interestRate: 0.0015,   cashbackRate: 0.00025,   minesRevealChance: 0.0025,   universalDoubleChance: 0.0065,   spinWeight: 0.032    },
+        divine:    { interestRate: 0.006,    cashbackRate: 0.001,     minesRevealChance: 0.01,     universalDoubleChance: 0.026,    spinWeight: 0.13     },
       },
       // Bonus granted when ALL items of a rarity are collected (the only real economy effect).
+      // Nerfed: cashback/interest kept in check; payout mult and income chance more generous.
       collectionCompleteBonus: {
-        common:    { interestRate: 0.0005,  cashbackRate: 0.000125, minesRevealChance: 0.0005,  universalDoubleChance: 0.001,  spinWeight: 0.005  },
-        uncommon:  { interestRate: 0.001,   cashbackRate: 0.00025,  minesRevealChance: 0.001,   universalDoubleChance: 0.002,  spinWeight: 0.01   },
-        rare:      { interestRate: 0.002,   cashbackRate: 0.0005,   minesRevealChance: 0.002,   universalDoubleChance: 0.005,  spinWeight: 0.02   },
-        epic:      { interestRate: 0.005,   cashbackRate: 0.00125,  minesRevealChance: 0.005,   universalDoubleChance: 0.01,   spinWeight: 0.05   },
-        legendary: { interestRate: 0.01,    cashbackRate: 0.0025,   minesRevealChance: 0.01,    universalDoubleChance: 0.02,   spinWeight: 0.1    },
-        mythic:    { interestRate: 0.02,    cashbackRate: 0.005,    minesRevealChance: 0.02,    universalDoubleChance: 0.05,   spinWeight: 0.25   },
-        divine:    { interestRate: 0.05,    cashbackRate: 0.0125,   minesRevealChance: 0.05,    universalDoubleChance: 0.1,    spinWeight: 0.5    },
+        common:    { interestRate: 0.00015,  cashbackRate: 0.00002,  minesRevealChance: 0.00025, universalDoubleChance: 0.0006,  spinWeight: 0.003  },
+        uncommon:  { interestRate: 0.0003,   cashbackRate: 0.00005,  minesRevealChance: 0.0005,  universalDoubleChance: 0.0013,  spinWeight: 0.007  },
+        rare:      { interestRate: 0.0006,   cashbackRate: 0.0001,   minesRevealChance: 0.001,   universalDoubleChance: 0.003,   spinWeight: 0.013  },
+        epic:      { interestRate: 0.0015,   cashbackRate: 0.0003,   minesRevealChance: 0.002,   universalDoubleChance: 0.006,   spinWeight: 0.03   },
+        legendary: { interestRate: 0.004,    cashbackRate: 0.0008,   minesRevealChance: 0.005,   universalDoubleChance: 0.013,   spinWeight: 0.065  },
+        mythic:    { interestRate: 0.009,    cashbackRate: 0.0018,   minesRevealChance: 0.012,   universalDoubleChance: 0.032,   spinWeight: 0.16   },
+        divine:    { interestRate: 0.015,    cashbackRate: 0.003,    minesRevealChance: 0.025,   universalDoubleChance: 0.065,   spinWeight: 0.32   },
       },
     },
 
@@ -386,6 +389,43 @@ const CONFIG = {
   },
 
   // -------------------------------
+  // XP system
+  // -------------------------------
+  xp: {
+    perGame: 25,           // flat XP per completed game, not scaled by bet
+    levelCostParams: {
+      baseCost: 100,       // XP required to go from level 0→1
+      growthRate: 1.08,    // exponential growth; creates an exponential curve
+    },
+    maxLevel: 500,
+    // Ranks unlocked at milestone levels; later entries override earlier ones.
+    // Added more steps and more evocative titles for long-term progression.
+    titles: [
+      { minLevel: 0,   title: 'Newbie' },
+      { minLevel: 5,   title: 'Trainee' },
+      { minLevel: 10,  title: 'Novice Gambler' },
+      { minLevel: 25,  title: 'Regular' },
+      { minLevel: 50,  title: 'High Roller' },
+      { minLevel: 75,  title: 'Maverick' },
+      { minLevel: 100, title: 'Veteran' },
+      { minLevel: 150, title: 'Pro' },
+      { minLevel: 200, title: 'Sharpshooter' },
+      { minLevel: 250, title: 'Ace' },
+      { minLevel: 300, title: 'Legend' },
+      { minLevel: 350, title: 'Mythic' },
+      { minLevel: 400, title: 'Divine' },
+      { minLevel: 450, title: 'Transcendent' },
+      { minLevel: 500, title: 'Immortal' },
+    ],
+    // Tiny cumulative stat bonuses awarded every 10 XP levels
+    bonusPerTenLevels: {
+      interestRate: 0.0002,         // +0.02% bank interest per 10 levels
+      cashbackRate: 0.00003,        // +0.003% loss cashback per 10 levels
+      universalDoubleChance: 0.002, // +0.2% income double chance per 10 levels
+    },
+  },
+
+  // -------------------------------
   // Help / docs content knobs
   // -------------------------------
   help: {
@@ -396,6 +436,7 @@ const CONFIG = {
       { name: 'Games and EV', value: 'games' },
       { name: 'Luck, Pity, and Modifiers', value: 'modifiers' },
       { name: 'Mystery Boxes', value: 'mysteryboxes' },
+      { name: 'XP, Ranks & Boosts', value: 'xpranks' },
       { name: 'Command Reference', value: 'commands' },
     ],
   },
@@ -419,6 +460,19 @@ CONFIG.games.mines.total = CONFIG.games.mines.rows * CONFIG.games.mines.cols;
     spinMult: [...costs],
     universalIncome: [...costs],
   };
+})();
+
+// ── Generate XP level thresholds array from XP levelCostParams ──
+// xpLevelThresholds[i] = XP required to advance FROM level i TO level i+1.
+// Grows exponentially so each level step demands more XP than the previous.
+(() => {
+  const { baseCost, growthRate } = CONFIG.xp.levelCostParams;
+  const maxLevel = CONFIG.xp.maxLevel;
+  const thresholds = [];
+  for (let i = 0; i < maxLevel; i++) {
+    thresholds.push(Math.floor(baseCost * Math.pow(growthRate, i)));
+  }
+  CONFIG.xp.levelThresholds = thresholds;
 })();
 
 const COLLECTIBLES = [];

@@ -7,6 +7,7 @@ const PAGE_TITLES = [
   'Games & Commands',
   'Effects & Modifiers',
   'Collectibles & Boxes',
+  'XP, Ranks & Boosts',
   'Number Shorthands',
 ];
 
@@ -29,6 +30,27 @@ function buildEconomyPage() {
       {
         name: '📈 How to Earn',
         value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15 AM.`,
+        inline: false,
+      },
+      {
+        name: '🏦 Pool Contribution Slabs',
+        value: (() => {
+          const contSlabs = CONFIG.economy.pools.contributionSlabs || [];
+          const contFinal = CONFIG.economy.pools.contributionFinalScale ?? 0.005;
+          let lines = `> Your **${taxPct}%** win tax always applies, but **how much of it** reaches the pool depends on the size of your win:\n`;
+          let prev = 0;
+          for (let i = 0; i < contSlabs.length; i++) {
+            const s = contSlabs[i];
+            const pct = (s.scale * 100).toFixed(0);
+            lines += `> • ${store.formatNumber(prev)} – ${store.formatNumber(s.threshold)}: **${pct}%** of tax added to pool\n`;
+            prev = s.threshold;
+          }
+          const finalPct = contFinal * 100;
+          const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
+          lines += `> • ${store.formatNumber(prev)}+: **${finalFmt}%** of tax added to pool\n`;
+          lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab.`;
+          return lines;
+        })(),
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
@@ -174,9 +196,49 @@ function buildCollectiblesPage() {
   };
 }
 
-function buildNumberShorthandsPage() {
+function buildXpRanksPage() {
+  const xpCfg = CONFIG.xp;
+  const titles = xpCfg.titles;
+  const bonusPer10 = xpCfg.bonusPerTenLevels;
+
+  let ranksText = '';
+  for (const entry of titles) {
+    ranksText += `> **Lv ${entry.minLevel}** — ${entry.title}\n`;
+  }
+
   return {
     title: PAGE_TITLES[4],
+    color: 0x2b2d31,
+    description: '> Level up by playing games. Every game gives XP, and higher levels unlock titles and permanent stat boosts.',
+    fields: [
+      {
+        name: '⭐ How XP Works',
+        value: `> You earn **${xpCfg.perGame} XP** for every game you complete (win or lose).\n> XP requirements grow exponentially — early levels are fast, later levels take more games.\n> Max level: **${xpCfg.maxLevel}**. Use **/stats** → XP tab to see your progress and chart.`,
+        inline: false,
+      },
+      {
+        name: '🏅 Ranks & Titles',
+        value: ranksText,
+        inline: true,
+      },
+      {
+        name: '📈 Level Bonuses',
+        value: `> Every **10 levels**, you earn permanent stat boosts:\n> \n> ∑ **Bank Interest**: **+${(bonusPer10.interestRate * 100).toFixed(2)}%** per 10 levels\n> ↩ **Loss Cashback**: **+${(bonusPer10.cashbackRate * 100).toFixed(3)}%** per 10 levels\n> ∀× **Income Double Chance**: **+${(bonusPer10.universalDoubleChance * 100).toFixed(1)}%** per 10 levels\n> \n> These bonuses stack with upgrades and collectible bonuses.`,
+        inline: true,
+      },
+      { name: '\u200b', value: '\u200b', inline: false },
+      {
+        name: '🔄 How Stats & Boosts Stack',
+        value: '> Your **effective rate** for each stat = base + upgrade levels + XP bonuses + collectible bonuses + set completion bonuses.\n> \n> **Example — Bank Interest:**\n> Base rate + (upgrade level × per-level rate) + (XP milestone bonuses) + (collectible per-item bonuses) + (set completion bonus)\n> \n> All sources add together. Nothing multiplies — it\'s purely additive stacking.\n> \n> View your full breakdown: **/effects** for active buffs, **/bank** for interest breakdown, **/stats** → XP for level bonuses.',
+        inline: false,
+      },
+    ],
+  };
+}
+
+function buildNumberShorthandsPage() {
+  return {
+    title: PAGE_TITLES[5],
     color: 0x2b2d31,
     description: '> Large numbers get shortened automatically. The full value is always shown in parentheses when space allows.',
     fields: [
@@ -209,7 +271,7 @@ function buildNumberShorthandsPage() {
   };
 }
 
-const PAGE_BUILDERS = [buildEconomyPage, buildGamesCommandsPage, buildModifiersPage, buildCollectiblesPage, buildNumberShorthandsPage];
+const PAGE_BUILDERS = [buildEconomyPage, buildGamesCommandsPage, buildModifiersPage, buildCollectiblesPage, buildXpRanksPage, buildNumberShorthandsPage];
 
 function getNavRow(pageIndex) {
   const row = new ActionRowBuilder();

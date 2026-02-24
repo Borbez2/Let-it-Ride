@@ -5,6 +5,11 @@ const store = require('../data/store');
 const RARITY_ORDER = CONFIG.ui.rarityOrder;
 const INVENTORY_TABS = ['overview', ...RARITY_ORDER];
 
+// how many items to show per rarity page; chosen to stay well below Discord's
+// 4096 character limit for an embed description.  The UI already included
+// placeholders for paging (`page`/`totalPages`) so we finally make use of them.
+const ITEMS_PER_PAGE = CONFIG.ui.inventoryItemsPerPage || 15;
+
 // ── Buff helpers ──
 
 const ITEM_BUFF_TYPES = ['interestRate', 'cashbackRate', 'minesRevealChance', 'universalDoubleChance', 'spinWeight'];
@@ -53,11 +58,17 @@ function renderCollectionBar(owned, total, filledChar = '▰', emptyChar = '▱'
 function parseInventoryCustomId(customId) {
   const parts = customId.split('_');
   if (parts.length < 4) return null;
-  return { tab: parts[1], page: parseInt(parts[2], 10) || 0, userId: parts[3] };
+  // everything after the third underscore is the user id (ids are numeric but
+  // we guard against potential underscores in future).
+  const userId = parts.slice(3).join('_');
+  let page = Number(parts[2]);
+  if (Number.isNaN(page) || page < 0) page = 0;
+  // ensure an integer
+  page = Math.trunc(page);
+  return { tab: parts[1], page, userId };
 }
 
 function buildInventoryNavRow(userId, activeTab) {
-  const row = new ActionRowBuilder();
   const tabsToShow = [
     { key: 'overview', label: '◈ Overview' },
     { key: 'common', label: `${RARITIES.common.emoji} Common` },
@@ -65,24 +76,29 @@ function buildInventoryNavRow(userId, activeTab) {
     { key: 'rare', label: `${RARITIES.rare.emoji} Rare` },
     { key: 'legendary', label: `${RARITIES.legendary.emoji} Legendary` },
   ];
-  for (const tab of tabsToShow) {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`inv_${tab.key}_0_${userId}`)
-        .setLabel(tab.label)
-        .setStyle(tab.key === activeTab ? ButtonStyle.Primary : ButtonStyle.Secondary)
-    );
+  const rows = [];
+  for (let i = 0; i < tabsToShow.length; i += 5) {
+    const row = new ActionRowBuilder();
+    for (const tab of tabsToShow.slice(i, i + 5)) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`inv_${tab.key}_0_${userId}`)
+          .setLabel(tab.label)
+          .setStyle(tab.key === activeTab ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      );
+    }
+    rows.push(row);
   }
-  return row;
+  return rows;
 }
 
 function buildInventoryNavRow2(userId, activeTab) {
-  const row = new ActionRowBuilder();
   const tabsToShow = [
     { key: 'epic', label: `${RARITIES.epic.emoji} Epic` },
     { key: 'mythic', label: `${RARITIES.mythic.emoji} Mythic` },
     { key: 'divine', label: `${RARITIES.divine.emoji} Divine` },
   ];
+  const row = new ActionRowBuilder();
   for (const tab of tabsToShow) {
     row.addComponents(
       new ButtonBuilder()
@@ -99,12 +115,12 @@ function buildInventoryPageRow(userId, tab, page, totalPages) {
   const row = new ActionRowBuilder();
   row.addComponents(
     new ButtonBuilder()
-      .setCustomId(`inv_${tab}_${page - 1}_${userId}`)
+      .setCustomId(`inv_${tab}_prev_${page}_${userId}`)
       .setLabel('Prev')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page <= 0),
     new ButtonBuilder()
-      .setCustomId(`inv_${tab}_${page + 1}_${userId}`)
+      .setCustomId(`inv_${tab}_next_${page}_${userId}`)
       .setLabel('Next')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page >= totalPages - 1),
@@ -167,7 +183,7 @@ function calcRarityBoosts(items, ownedIds, rarity) {
   return { owned, full };
 }
 
-function renderInventoryRarityPage(userId, username, rarity, page) {
+function renderInventoryRarityPage(userId, username, rarity, page = 0) {
   const cs = store.getCollectionStats(userId);
   const info = cs.byRarity[rarity];
   if (!info) return { embeds: [{ title: '🎒 Inventory', color: 0x2b2d31, description: 'Unknown rarity.' }] };
@@ -177,7 +193,15 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
   const bar = renderCollectionBar(info.owned, info.total, '▰', '▱', 15);
   const completeTag = info.complete ? ' ✨ **COMPLETE** - set bonus active!' : '';
 
-  let description = `> ${RARITIES[rarity].emoji} **${rarityLabel} Collection** ${bar} **${info.owned}/${info.total}**${completeTag}\n\n`;
+  // paging calculations
+  const totalItems = allItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+  const currentPage = Math.min(Math.max(0, page || 0), totalPages - 1);
+  const pageItems = allItems.slice(currentPage * ITEMS_PER_PAGE, (currentPage + 1) * ITEMS_PER_PAGE);
+
+  let description = `> ${RARITIES[rarity].emoji} **${rarityLabel} Collection** ${bar} **${info.owned}/${info.total}**${completeTag}`;
+  if (totalPages > 1) description += ` (page ${currentPage + 1}/${totalPages})`;
+  description += '\n\n';
 
   const cb = CONFIG.collectibles.mysteryBox.collectionCompleteBonus[rarity];
   if (cb) {
@@ -232,7 +256,7 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
     invCountMap[inv.id] = inv.count || 1;
   }
 
-  for (const item of allItems) {
+  for (const item of pageItems) {
     const owned = cs.ownedIds.has(item.id);
     const buffStr = formatItemBuffDisplay(getItemDisplayBuff(item, allItems));
     const count = invCountMap[item.id] || 0;
@@ -250,16 +274,17 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
       color: 0x2b2d31,
       description,
     }],
-    page: 0,
-    totalPages: 1,
+    page: currentPage,
+    totalPages,
   };
 }
 
 function buildInventoryComponents(userId, tab, page, totalPages) {
-  const rows = [
-    buildInventoryNavRow(userId, tab),
-    buildInventoryNavRow2(userId, tab),
-  ];
+  let rows = [];
+  const navRows = buildInventoryNavRow(userId, tab);
+  if (Array.isArray(navRows)) rows = rows.concat(navRows);
+  else rows.push(navRows);
+  rows.push(buildInventoryNavRow2(userId, tab));
   const pageRow = buildInventoryPageRow(userId, tab, page, totalPages || 1);
   if (pageRow) rows.push(pageRow);
 
@@ -294,34 +319,70 @@ function renderInventoryPage(userId, username, tab, page) {
 
 async function handleInventory(interaction) {
   const userId = interaction.user.id, username = interaction.user.username;
-  const result = renderInventoryPage(userId, username, 'overview', 0);
+  // allow callers to jump to a specific page when opening (1-based input)
+  const requestedPage = interaction.options?.getInteger('page') || 1;
+  const pageIndex = Math.max(0, requestedPage - 1);
+  const result = renderInventoryPage(userId, username, 'overview', pageIndex);
   return interaction.reply({ content: '', embeds: result.embeds, components: result.components });
 }
 
 async function handleInventoryButton(interaction, parts) {
-  const parsed = parseInventoryCustomId(interaction.customId);
-  if (!parsed) return;
-  if (interaction.user.id !== parsed.userId) return interaction.reply({ content: 'Not your inventory!', ephemeral: true });
+  console.log('inventory button clicked', interaction.customId, parts);
+  try {
+    const parsed = parseInventoryCustomId(interaction.customId);
+    console.log('parsed inventory id', parsed);
+    if (!parsed) {
+      // respond so Discord doesn't show a "This interaction failed" message
+      return interaction.reply({ content: 'Unknown inventory action.', ephemeral: true });
+    }
+    if (interaction.user.id !== parsed.userId) {
+      // only the user who opened the inventory can navigate it
+      return interaction.reply({ content: 'Not your inventory!', ephemeral: true });
+    }
 
-  // Handle sell duplicates
-  if (parsed.tab === 'selldups') {
-    const result = store.sellAllDuplicates(parsed.userId);
-    if (result.totalItemsSold === 0) {
-      return interaction.reply({ content: 'No duplicates to sell!', ephemeral: true });
+    // Handle sell duplicates
+    if (parsed.tab === 'selldups') {
+      const result = store.sellAllDuplicates(parsed.userId);
+      if (result.totalItemsSold === 0) {
+        return interaction.reply({ content: 'No duplicates to sell!', ephemeral: true });
+      }
+      const lines = [`**Sold ${result.totalItemsSold} duplicate(s) for ${store.formatNumber(result.totalCoins)} coins:**`];
+      for (const entry of result.breakdown) {
+        lines.push(`> ${entry.emoji} ${entry.name} x${entry.sold} → +${store.formatNumber(entry.sold * entry.refundEach)}`);
+      }
+      const username = interaction.user.username;
+      const overviewResult = renderInventoryPage(parsed.userId, username, 'overview', 0);
+      overviewResult.embeds[0].footer = { text: lines.join('\n').slice(0, 2048) };
+      return interaction.update({ content: '', embeds: overviewResult.embeds, components: overviewResult.components });
     }
-    const lines = [`**Sold ${result.totalItemsSold} duplicate(s) for ${store.formatNumber(result.totalCoins)} coins:**`];
-    for (const entry of result.breakdown) {
-      lines.push(`> ${entry.emoji} ${entry.name} x${entry.sold} → +${store.formatNumber(entry.sold * entry.refundEach)}`);
-    }
+
     const username = interaction.user.username;
-    const overviewResult = renderInventoryPage(parsed.userId, username, 'overview', 0);
-    overviewResult.embeds[0].footer = { text: lines.join('\n').slice(0, 2048) };
-    return interaction.update({ content: '', embeds: overviewResult.embeds, components: overviewResult.components });
-  }
 
-  const username = interaction.user.username;
-  const result = renderInventoryPage(parsed.userId, username, parsed.tab, parsed.page);
-  return interaction.update({ content: '', embeds: result.embeds, components: result.components });
+    // sanity check page bounds so we can catch weird state early
+    if (parsed.tab !== 'overview') {
+      const cs = store.getCollectionStats(parsed.userId);
+      const totalItems = cs.byRarity[parsed.tab]?.items.length || 0;
+      const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+      if (parsed.page < 0 || parsed.page >= totalPages) {
+        console.warn('inventory page out of bounds', parsed); // useful when debugging
+        return interaction.reply({ content: `Page ${parsed.page + 1} does not exist for ${parsed.tab}.`, ephemeral: true });
+      }
+    }
+
+    const result = renderInventoryPage(parsed.userId, username, parsed.tab, parsed.page);
+    return interaction.update({ content: '', embeds: result.embeds, components: result.components });
+  } catch (err) {
+    console.error('Inventory button handler error:', err);
+    console.error('Interaction context:', {
+      customId: interaction.customId,
+      userId: interaction.user.id,
+      parsed: parsed,
+      stack: err && err.stack
+    });
+    if (!interaction.replied && !interaction.deferred) {
+      return interaction.reply({ content: `Something went wrong with your inventory.\nError: ${err && err.message}`, ephemeral: true });
+    }
+  }
 }
 
 module.exports = { handleInventory, handleInventoryButton };

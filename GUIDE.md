@@ -30,9 +30,9 @@ Every player starts with **1,000 coins**. Coins live in two places:
 | Method | How it works |
 |--------|-------------|
 | `/daily` | Claim 500 base + 50 per streak day. Must claim within 48h to keep streak. |
-| Winning games | Play any game and win. 5% of profit is taxed into the Universal Pool. |
+| Winning games | Play any game and win. 0.5% of profit is taxed into the Universal Pool. |
 | Universal Pool payout | Every hour, the pool is split equally among all registered players (deposited to bank). |
-| Daily Spin | Each day at 11:15 PM, 5% of all losses go to one lucky winner. |
+| Daily Spin | Each day at 11:15 PM, 0.5% of all losses go to one lucky winner. |
 | Cashback | Lose a game and get a small % back based on your cashback rate. |
 | Trading | Swap collectibles with other players via `/trade`. |
 
@@ -190,8 +190,8 @@ Use `/bank` to view your current balance, rate, and detailed breakdown.
 
 ### Universal Pool
 
-- **5%** of every game win (profit portion) goes into the pool.
-- Tax only applies when your net worth exceeds **1M coins**.
+- **0.5%** of every game win (profit portion) goes into the pool.
+- Tax always applies (no minimum net worth threshold).
 - Larger wins are taxed at progressively lower rates (tiered contribution slabs).
 - Every **hour**, the entire pool is split equally among all registered players and deposited to their banks.
 
@@ -199,16 +199,16 @@ Contribution slabs:
 
 | Profit Range | Tax Rate |
 |-------------|----------|
-| 0 to 100k | 5% |
-| 100k to 1M | 2.5% |
-| 1M to 10M | 0.5% |
-| 10M to 100M | 0.25% |
-| 100M to 1B | 0.05% |
-| Above 1B | 0.025% |
+| 0 to 100k | 0.5% |
+| 100k to 1M | 0.25% |
+| 1M to 10M | 0.05% |
+| 10M to 100M | 0.025% |
+| 100M to 1B | 0.005% |
+| Above 1B | 0.0025% |
 
 ### Spin Pool (Daily Spin)
 
-- **5%** of every game loss goes into the Spin Pool.
+- **0.5%** of every game loss goes into the Spin Pool.
 - Each day at **11:15 PM** (local server time), one random player wins the entire pool.
 - Your Spin Multiplier upgrade scales the payout.
 
@@ -221,6 +221,7 @@ View both pools with `/pool`.
 ### Mystery Boxes
 
 Buy mystery boxes through `/shop` for **5,000 coins** each (standard) or **500,000 coins** (premium, no common items).
+On the shop's **Mystery Box** page you can now see how many duplicate items you have and sell all of them directly with a button (or still use `/inventory`).
 
 There are **120 collectibles** across 7 rarity tiers:
 
@@ -277,7 +278,7 @@ Opening boxes without getting a high-rarity item (Epic+) builds a pity counter. 
 | `/bank` | View bank details, rate, and breakdown |
 | `/pool` | View Universal Pool and Spin Pool info |
 | `/give <user> <amount>` | Send coins to another player |
-| `/shop` | Browse upgrades, potions, and mystery boxes |
+| `/shop` | Browse upgrades, potions, and mystery boxes (navigate between pages freely) |
 
 ### Games
 
@@ -388,6 +389,9 @@ All tunable values are in `config.js` under the `CONFIG` object. Key sections:
 | `collectibles` | Box costs, drop weights, dupe compensation, set bonuses |
 | `runtime` | Pity system tuning, networth history retention |
 | `bot.channels` | Discord channel IDs for announcements |
+| `xp` | Player experience, level thresholds, titles, and per-10-level stat bonuses (max 500, exponential growth) |
+
+Experience points (XP) are awarded for every completed game; levels unlock titles and small permanent bonuses. Requirements increase exponentially, and the system now tops out at level 500.
 
 Environment variables (`.env`):
 

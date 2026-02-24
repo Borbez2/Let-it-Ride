@@ -91,6 +91,14 @@ function formatTimeframe(seconds) {
   return `${seconds}s`;
 }
 
+function historyKeyForType(type) {
+  switch (type) {
+    case 'xp': return 'xpHistory';
+    case 'collectibles': return 'collectibleHistory';
+    default: return 'netWorthHistory';
+  }
+}
+
 function roundUpToStep(value, step) {
   return Math.ceil(value / step) * step;
 }
@@ -119,10 +127,10 @@ function buildAdaptiveLabels(slotCount, startTs, slotSeconds, mode = 'relative')
   });
 }
 
-function getGraphCandidateIds(wallets) {
+function getGraphCandidateIds(wallets, historyKey = 'netWorthHistory') {
   return Object.entries(wallets)
     .map(([id, wallet]) => {
-      const history = Array.isArray(wallet?.stats?.netWorthHistory) ? wallet.stats.netWorthHistory : [];
+      const history = Array.isArray(wallet?.stats?.[historyKey]) ? wallet.stats[historyKey] : [];
       const last = history.length ? history[history.length - 1] : null;
       return { id, points: history.length, lastValue: last?.v || 0 };
     })
@@ -210,7 +218,7 @@ function resolveGraphWindow({ wallets, selectedIds, timeframeSec = DEFAULT_GRAPH
   return { startTs: rangeStart, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'relative' };
 }
 
-async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, includeAvatars, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
+async function buildPlayerHistoryGraph({ wallets, selectedIds, timeframeSec, historyKey = 'netWorthHistory', labelPrefix = 'Player', color = '#36a2eb', includeAvatars, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
   const window = resolveGraphWindow({ wallets, selectedIds, timeframeSec, startTs, endTs, maxPoints });
   const labels = buildAdaptiveLabels(window.slotCount, window.startTs, window.slotSeconds, window.labelMode);
   const ids = (selectedIds || []).slice(0, LIVE_GRAPH_MAX_USERS);
@@ -220,13 +228,13 @@ async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, in
   const datasets = [];
   for (let index = 0; index < ids.length; index++) {
     const id = ids[index];
-    const history = Array.isArray(wallets[id]?.stats?.netWorthHistory) ? wallets[id].stats.netWorthHistory : [];
+    const history = Array.isArray(wallets[id]?.stats?.[historyKey]) ? wallets[id].stats[historyKey] : [];
     const series = buildSeriesByRange(history, window.startTs, window.slotCount, window.slotSeconds);
     const points = series.filter((v) => v !== null).length;
     if (points < 2) continue;
 
     const user = usersById.get(id) || client.users.cache.get(id);
-    const color = palette[index % palette.length];
+    const colorVal = palette[index % palette.length];
     const name = (user?.username || `User ${id.slice(-4)}`).slice(0, 16);
     const lastNonNull = series.reduce((acc, val, idx) => (val !== null ? idx : acc), -1);
     const pointRadius = series.map((value, pointIndex) => {
@@ -237,8 +245,8 @@ async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, in
     datasets.push({
       label: name,
       data: series,
-      borderColor: color,
-      backgroundColor: color,
+      borderColor: colorVal,
+      backgroundColor: colorVal,
       borderWidth: 2,
       pointRadius,
       pointHoverRadius: pointRadius,
@@ -252,9 +260,14 @@ async function buildPlayerNetworthGraph({ wallets, selectedIds, timeframeSec, in
   return { labels, datasets, usersById, slotSeconds: window.slotSeconds, startTs: window.startTs, endTs: window.endTs };
 }
 
-function getOrCreateLiveGraphSession(viewerId, candidateIds) {
+async function buildPlayerNetworthGraph(opts) {
+  return buildPlayerHistoryGraph({ ...opts, historyKey: 'netWorthHistory', labelPrefix: 'Player Networth', color: '#36a2eb' });
+}
+
+function getOrCreateLiveGraphSession(viewerId, candidateIds, graphType = 'networth') {
   const now = Date.now();
-  const existing = liveGraphSessions.get(viewerId);
+  const key = `${viewerId}:${graphType}`;
+  const existing = liveGraphSessions.get(key);
   if (existing && existing.expiresAt > now) {
     existing.candidateIds = candidateIds;
     existing.selectedIds = existing.selectedIds.filter((id) => candidateIds.includes(id));
@@ -265,13 +278,14 @@ function getOrCreateLiveGraphSession(viewerId, candidateIds) {
 
   const next = {
     viewerId,
+    graphType,
     timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
     candidateIds,
     selectedIds: candidateIds.slice(0, LIVE_GRAPH_MAX_USERS),
     lastChartBuffer: null,
     expiresAt: now + LIVE_GRAPH_SESSION_TTL_MS,
   };
-  liveGraphSessions.set(viewerId, next);
+  liveGraphSessions.set(key, next);
   return next;
 }
 
@@ -280,7 +294,7 @@ function buildLiveGraphControlRows(session, usersById) {
 
   // Timeframe dropdown
   const tfMenu = new StringSelectMenuBuilder()
-    .setCustomId(`livestats_tf_${session.viewerId}`)
+    .setCustomId(`livestats_tf_${session.viewerId}_${session.graphType || 'networth'}`)
     .setPlaceholder('Select timeframe')
     .addOptions(LIVE_GRAPH_TIMEFRAMES.map(tf => ({
       label: tf.label || tf.key,
@@ -303,7 +317,7 @@ function buildLiveGraphControlRows(session, usersById) {
     });
 
     const playerMenu = new StringSelectMenuBuilder()
-      .setCustomId(`livestats_players_${session.viewerId}`)
+      .setCustomId(`livestats_players_${session.viewerId}_${session.graphType || 'networth'}`)
       .setPlaceholder('Select players to display')
       .setMinValues(1)
       .setMaxValues(playerOptions.length)
@@ -329,7 +343,14 @@ const commands = [
   new SlashCommandBuilder().setName('mines').setDescription('Navigate a minefield for multiplied rewards')
     .addStringOption(o => o.setName('amount').setDescription(`Bet amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true))
     .addIntegerOption(o => o.setName('mines').setDescription(`Number of mines (${CONFIG.commands.limits.minesCount.min}-${CONFIG.commands.limits.minesCount.max})`).setRequired(true).setMinValue(CONFIG.commands.limits.minesCount.min).setMaxValue(CONFIG.commands.limits.minesCount.max)),
-  new SlashCommandBuilder().setName('leaderboard').setDescription('See the richest players'),
+  new SlashCommandBuilder().setName('leaderboard').setDescription('View leaderboards')
+    .addStringOption(o => o.setName('type').setDescription('Which leaderboard to view').setRequired(false)
+      .addChoices(
+        { name: 'Net Worth', value: 'networth' },
+        { name: 'Collection', value: 'collection' },
+        { name: 'XP', value: 'xp' },
+      )),
+
   new SlashCommandBuilder().setName('give').setDescription('Give coins to someone')
     .addUserOption(o => o.setName('user').setDescription('Who to give to').setRequired(true))
     .addStringOption(o => o.setName('amount').setDescription(`Amount (e.g. ${CONFIG.commands.amountExamples})`).setRequired(true)),
@@ -469,20 +490,22 @@ async function postLifeStatistics() {
   const poolData = store.getPoolData();
   const share = ids.length > 0 ? Math.floor((poolData.universalPool || 0) / ids.length) : 0;
 
-  const candidateIds = getGraphCandidateIds(wallets);
+  // Networth graph & leaderboard
+  const candidateIds = getGraphCandidateIds(wallets, 'netWorthHistory');
   let datasets = [];
   let labels = [];
   let chartBuffer = publicGraphState.chartBuffer;
   const shouldRefreshGraph = !publicGraphState.generatedAt || (now - publicGraphState.generatedAt >= PUBLIC_GRAPH_REFRESH_MS) || !publicGraphState.chartBuffer;
 
   if (shouldRefreshGraph) {
-    const graph = await buildPlayerNetworthGraph({
+    const graph = await buildPlayerHistoryGraph({
       wallets,
       selectedIds: candidateIds,
       timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
       includeAvatars: false,
       endTs: now,
       maxPoints: 220,
+      historyKey: 'netWorthHistory',
     });
     labels = graph.labels;
     datasets = graph.datasets;
@@ -501,7 +524,7 @@ async function postLifeStatistics() {
         },
         scales: {
           x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } },
-          y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          y: { ticks: { color: '#d9d9d9', grid: { color: 'rgba(255,255,255,0.08)' } } },
         },
         layout: { padding: 8 },
       },
@@ -521,6 +544,7 @@ async function postLifeStatistics() {
   }
 
   const lbWallets = store.getAllWallets();
+  // networth leaderboard
   const lbEntries = Object.entries(lbWallets)
     .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
@@ -537,6 +561,80 @@ async function postLifeStatistics() {
     ? { title: 'Leaderboard', color: 0x2b2d31, description: lbLines.join('\n') }
     : null;
 
+  // xp leaderboard & graph
+  const xpEntries = store.getXpLeaderboard();
+  const xpLines = [];
+  for (let i = 0; i < xpEntries.length; i++) {
+    const e = xpEntries[i];
+    const u = await client.users.fetch(e.userId).catch(() => null);
+    const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
+    const name = u ? u.username : 'Unknown';
+    xpLines.push(`${rank} **${name}**`);
+    xpLines.push(`Lv ${e.level} (${store.formatNumber(e.totalXp)} XP)`);
+  }
+  const xpEmbed = xpLines.length > 0
+    ? { title: 'XP Leaderboard', color: 0x2b2d31, description: xpLines.join('\n') }
+    : null;
+  const xpGraph = await buildPlayerHistoryGraph({
+    wallets,
+    selectedIds: getGraphCandidateIds(wallets, 'xpHistory'),
+    timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
+    includeAvatars: false,
+    endTs: now,
+    maxPoints: 220,
+    historyKey: 'xpHistory',
+  });
+  let xpChartBuffer = null;
+  if (xpGraph && xpGraph.datasets.length > 0) {
+    const cfg = {
+      type: 'line',
+      data: { labels: xpGraph.labels, datasets: xpGraph.datasets },
+      options: {
+        plugins: { title: { display: true, text: 'Player XP', color: '#ffffff' }, legend: { display: true, position: 'bottom', labels: { color: '#ffffff', boxWidth: 10, usePointStyle: true, pointStyleWidth: 14 } } },
+        scales: { x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } }, y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } } },
+        layout: { padding: 8 },
+      },
+    };
+    xpChartBuffer = await renderChartToBuffer(cfg, 980, 420).catch(() => null);
+  }
+
+  // collectibles leaderboard & graph
+  const collectEntries = store.getCollectibleLeaderboard().slice(0, 10);
+  const collectLines = [];
+  for (let i = 0; i < collectEntries.length; i++) {
+    const e = collectEntries[i];
+    const u = await client.users.fetch(e.userId).catch(() => null);
+    const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
+    const name = u ? u.username : 'Unknown';
+    collectLines.push(`${rank} **${name}**`);
+    collectLines.push(`Unique: ${e.unique} / Total: ${e.total}`);
+  }
+  const collectEmbed = collectLines.length > 0
+    ? { title: 'Collectible Leaderboard', color: 0x2b2d31, description: collectLines.join('\n') }
+    : null;
+  const collectGraph = await buildPlayerHistoryGraph({
+    wallets,
+    selectedIds: getGraphCandidateIds(wallets, 'collectibleHistory'),
+    timeframeSec: DEFAULT_GRAPH_TIMEFRAME_SEC,
+    includeAvatars: false,
+    endTs: now,
+    maxPoints: 220,
+    historyKey: 'collectibleHistory',
+  });
+  let collectChartBuffer = null;
+  if (collectGraph && collectGraph.datasets.length > 0) {
+    const cfg = {
+      type: 'line',
+      data: { labels: collectGraph.labels, datasets: collectGraph.datasets },
+      options: {
+        plugins: { title: { display: true, text: 'Player Collections', color: '#ffffff' }, legend: { display: true, position: 'bottom', labels: { color: '#ffffff', boxWidth: 10, usePointStyle: true, pointStyleWidth: 14 } } },
+        scales: { x: { ticks: { color: '#d9d9d9', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.08)' } }, y: { ticks: { color: '#d9d9d9' }, grid: { color: 'rgba(255,255,255,0.08)' } } },
+        layout: { padding: 8 },
+      },
+    };
+    collectChartBuffer = await renderChartToBuffer(cfg, 980, 420).catch(() => null);
+  }
+
   const text =
     `**Live Economy Snapshot**\n` +
     `• Universal Pool: **${store.formatNumber(poolData.universalPool || 0)}**\n` +
@@ -549,24 +647,39 @@ async function postLifeStatistics() {
   const controls = [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('livestats_open')
-        .setLabel('Open Big Graph')
+        .setCustomId('livestats_open_networth')
+        .setLabel('Open Networth Graph')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('livestats_open_xp')
+        .setLabel('Open XP Graph')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('livestats_open_collectibles')
+        .setLabel('Open Collection Graph')
         .setStyle(ButtonStyle.Primary)
     ),
   ];
 
   const embeds = [];
   if (chartBuffer) embeds.push({ title: 'Player Networth', image: { url: 'attachment://networth.png' } });
+  if (xpChartBuffer) embeds.push({ title: 'Player XP', image: { url: 'attachment://xp.png' } });
+  if (collectChartBuffer) embeds.push({ title: 'Player Collections', image: { url: 'attachment://collection.png' } });
   if (leaderboardEmbed) embeds.push(leaderboardEmbed);
+  if (xpEmbed) embeds.push(xpEmbed);
+  if (collectEmbed) embeds.push(collectEmbed);
 
-  const payload = chartBuffer
-    ? {
-        content: text,
-        embeds,
-        files: [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })],
-        components: controls,
-      }
-    : { content: text, embeds, files: [], components: controls };
+  const files = [];
+  if (chartBuffer) files.push(new AttachmentBuilder(chartBuffer, { name: 'networth.png' }));
+  if (xpChartBuffer) files.push(new AttachmentBuilder(xpChartBuffer, { name: 'xp.png' }));
+  if (collectChartBuffer) files.push(new AttachmentBuilder(collectChartBuffer, { name: 'collection.png' }));
+
+  const payload = {
+    content: text,
+    embeds,
+    files,
+    components: controls,
+  };
 
   const state = store.getRuntimeState('lifeStatsMessageRef', null);
   if (state && state.messageId) {
@@ -592,18 +705,29 @@ async function postLifeStatistics() {
   }
 }
 
-async function buildLiveBigGraphPayload(viewerId) {
+async function buildLiveBigGraphPayload(viewerId, graphType = 'networth') {
   const wallets = store.getAllWallets();
-  const candidateIds = getGraphCandidateIds(wallets);
-  const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+  // choose history key and display options per graphType
+  const mapping = {
+    networth: { historyKey: 'netWorthHistory', title: 'Player Networth', color: '#36a2eb', filename: 'networth.png' },
+    xp: { historyKey: 'xpHistory', title: 'Player XP', color: '#ffd700', filename: 'xp.png' },
+    collectibles: { historyKey: 'collectibleHistory', title: 'Player Collections', color: '#9b59b6', filename: 'collection.png' },
+  };
+  const opts = mapping[graphType] || mapping.networth;
+
+  const candidateIds = getGraphCandidateIds(wallets, opts.historyKey);
+  const session = getOrCreateLiveGraphSession(viewerId, candidateIds, graphType);
   const selectedIds = session.selectedIds.filter((id) => session.candidateIds.includes(id));
 
-  const { labels, datasets, usersById } = await buildPlayerNetworthGraph({
+  const { labels, datasets, usersById } = await buildPlayerHistoryGraph({
     wallets,
     selectedIds,
     timeframeSec: session.timeframeSec,
     includeAvatars: true,
     maxPoints: 260,
+    historyKey: opts.historyKey,
+    labelPrefix: opts.title,
+    color: opts.color,
   });
 
   const chartConfig = {
@@ -616,7 +740,7 @@ async function buildLiveBigGraphPayload(viewerId) {
           position: 'bottom',
           labels: { color: '#ffffff', boxWidth: 10, usePointStyle: true, pointStyleWidth: 14 },
         },
-        title: { display: true, text: 'Player Networth', color: '#ffffff' },
+        title: { display: true, text: opts.title, color: '#ffffff' },
       },
       scales: {
         x: { ticks: { color: '#d9d9d9', maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.08)' } },
@@ -631,7 +755,7 @@ async function buildLiveBigGraphPayload(viewerId) {
   if (chartBuffer) session.lastChartBuffer = chartBuffer;
 
   const content =
-    `**Player Networth (Big Picture)**\n` +
+    `**${opts.title} (Big Picture)**\n` +
     `• Timeframe: ${formatTimeframe(session.timeframeSec)}\n` +
     `• Players in Graph: ${datasets.length}\n` +
     `• Last Updated: <t:${Math.floor(Date.now() / 1000)}:R>`;
@@ -639,16 +763,19 @@ async function buildLiveBigGraphPayload(viewerId) {
   const components = buildLiveGraphControlRows(session, usersById);
   return {
     content,
-    embeds: chartBuffer ? [{ title: 'Player Networth', image: { url: 'attachment://networth.png' } }] : [],
-    files: chartBuffer ? [new AttachmentBuilder(chartBuffer, { name: 'networth.png' })] : [],
+    embeds: chartBuffer ? [{ title: opts.title, image: { url: `attachment://${opts.filename}` } }] : [],
+    files: chartBuffer ? [new AttachmentBuilder(chartBuffer, { name: opts.filename })] : [],
     components,
     ephemeral: true,
   };
 }
 
 async function handleLiveStatsButton(interaction) {
-  if (interaction.customId === 'livestats_open') {
-    const payload = await buildLiveBigGraphPayload(interaction.user.id);
+  if (interaction.customId.startsWith('livestats_open')) {
+    const parts = interaction.customId.split('_');
+    // expected: livestsats_open[_<type>]
+    const graphType = parts[2] || 'networth';
+    const payload = await buildLiveBigGraphPayload(interaction.user.id, graphType);
     return interaction.reply(payload);
   }
 }
@@ -657,6 +784,7 @@ async function handleLiveStatsSelectMenu(interaction) {
   if (interaction.customId.startsWith('livestats_tf_')) {
     const parts = interaction.customId.split('_');
     const viewerId = parts[2];
+    const graphType = parts[3] || 'networth';
     if (interaction.user.id !== viewerId) {
       return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
     }
@@ -667,30 +795,31 @@ async function handleLiveStatsSelectMenu(interaction) {
       return interaction.reply({ content: 'Invalid timeframe selection.', ephemeral: true });
     }
 
-    const candidateIds = getGraphCandidateIds(store.getAllWallets());
-    const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+    const candidateIds = getGraphCandidateIds(store.getAllWallets(), historyKeyForType(graphType));
+    const session = getOrCreateLiveGraphSession(viewerId, candidateIds, graphType);
     session.timeframeSec = timeframe.seconds;
     session.expiresAt = Date.now() + LIVE_GRAPH_SESSION_TTL_MS;
-    liveGraphSessions.set(viewerId, session);
-    const payload = await buildLiveBigGraphPayload(viewerId);
+    liveGraphSessions.set(`${viewerId}:${graphType}`, session);
+    const payload = await buildLiveBigGraphPayload(viewerId, graphType);
     return interaction.update(payload);
   }
 
   if (interaction.customId.startsWith('livestats_players_')) {
     const parts = interaction.customId.split('_');
     const viewerId = parts[2];
+    const graphType = parts[3] || 'networth';
     if (interaction.user.id !== viewerId) {
       return interaction.reply({ content: 'Open your own graph panel to use these controls.', ephemeral: true });
     }
 
     const selectedIds = interaction.values;
-    const candidateIds = getGraphCandidateIds(store.getAllWallets());
-    const session = getOrCreateLiveGraphSession(viewerId, candidateIds);
+    const candidateIds = getGraphCandidateIds(store.getAllWallets(), historyKeyForType(graphType));
+    const session = getOrCreateLiveGraphSession(viewerId, candidateIds, graphType);
     session.selectedIds = selectedIds.filter(id => session.candidateIds.includes(id));
     if (session.selectedIds.length === 0) session.selectedIds = candidateIds.slice(0, 1);
     session.expiresAt = Date.now() + LIVE_GRAPH_SESSION_TTL_MS;
-    liveGraphSessions.set(viewerId, session);
-    const payload = await buildLiveBigGraphPayload(viewerId);
+    liveGraphSessions.set(`${viewerId}:${graphType}`, session);
+    const payload = await buildLiveBigGraphPayload(viewerId, graphType);
     return interaction.update(payload);
   }
 }
@@ -1079,7 +1208,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     try {
-      if (interaction.customId === 'livestats_open') return await handleLiveStatsButton(interaction);
+      if (interaction.customId.startsWith('livestats_open')) return await handleLiveStatsButton(interaction);
       if (interaction.customId.startsWith('adm_'))      return await adminCmd.handleAdminButton(
         interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, client, runDailySpin, distributeUniversalPool,
         ANNOUNCE_CHANNEL_ID, HOURLY_PAYOUT_CHANNEL_ID, () => isBotActive, (s) => { isBotActive = !!s; }, onRuntimeConfigUpdated,
@@ -1099,6 +1228,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId.startsWith('allin17_'))  return await roulette.handleAllIn17Button(interaction, parts);
       if (interaction.customId.startsWith('roulette_')) return await roulette.handleRouletteButton(interaction, parts);
 
+      if (interaction.customId.startsWith('pool_'))       return await poolCmd.handlePoolButton(interaction);
       if (interaction.customId.startsWith('giveaway_join_')) {
         const giveawayId = interaction.customId.slice('giveaway_join_'.length);
         return await giveawayCmd.handleGiveawayJoin(interaction, giveawayId);
@@ -1130,7 +1260,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'roulette':     return await roulette.handleRoulette(interaction);
       case 'allin17black': return await roulette.handleAllIn17(interaction);
       case 'mines':        return await mines.handleCommand(interaction);
-      case 'leaderboard':  return await leaderboardCmd.handleLeaderboard(interaction, client);
+      case 'leaderboard': {
+        const lbType = interaction.options.getString('type') || 'networth';
+        if (lbType === 'collection') return await leaderboardCmd.handleCollection(interaction, client);
+        if (lbType === 'xp') return await leaderboardCmd.handleXpLeaderboard(interaction, client);
+        return await leaderboardCmd.handleLeaderboard(interaction, client);
+      }
       case 'give':         return await giveCmd.handleGive(interaction);
       case 'trade':        return await tradeCmd.handleTrade(interaction);
       case 'duel':         return await duel.handleDuel(interaction);
