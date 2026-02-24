@@ -34,7 +34,7 @@ function renderUpgradesEmbed(userId, successMessage) {
   const universalIncomeCosts = CONFIG.economy.upgrades.costs.universalIncome;
   const iLvl = w.interestLevel || 0, cLvl = w.cashbackLevel || 0, sLvl = w.spinMultLevel || 0, uLvl = w.universalIncomeMultLevel || 0;
   const bonuses = store.getUserBonuses(userId);
-  const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sMult = (1 + sLvl * 0.1), uChance = bonuses.universalIncomeDoubleChance * 100;
+  const iRate = store.getInterestRate(userId), cRatePct = store.getCashbackRate(userId) * 100, sMult = (1 + sLvl * CONFIG.economy.upgrades.spinMultPerLevel), uChance = bonuses.universalIncomeDoubleChance * 100;
   const iBaseRate = CONFIG.economy.bank.baseInvestRate + (iLvl * CONFIG.economy.upgrades.interestPerLevel);
   const cBaseRatePct = cLvl * CONFIG.economy.upgrades.cashbackPerLevel * 100;
   const iCost = iLvl < maxLevel ? interestCosts[iLvl] : null;
@@ -42,32 +42,37 @@ function renderUpgradesEmbed(userId, successMessage) {
   const sCost = sLvl < maxLevel ? spinCosts[sLvl] : null;
   const uCost = uLvl < maxLevel ? universalIncomeCosts[uLvl] : null;
 
-  const bar = (lvl, max) => '▰'.repeat(lvl) + '▱'.repeat(max - lvl);
+  const bar = (lvl, max) => {
+    const barLen = 20;
+    const filled = Math.round((lvl / max) * barLen);
+    return '▰'.repeat(filled) + '▱'.repeat(barLen - filled);
+  };
 
   const sMultFull = sMult + bonuses.spinWeightBonus;
   const iGain = CONFIG.economy.upgrades.interestPerLevel * 100;
   const uGain = CONFIG.economy.upgrades.universalIncomePerLevelChance * 100;
+  const spinGain = CONFIG.economy.upgrades.spinMultPerLevel;
 
   const fields = [
     {
       name: '∑ Bank Interest',
-      value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(2)}%**/day (hourly)\n> ${iCost ? `Next: **${((iRate + CONFIG.economy.upgrades.interestPerLevel) * 100).toFixed(2)}%** (+${iGain.toFixed(2)}%) for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(iLvl, maxLevel)} **Lv ${iLvl}/${maxLevel}**\n> Rate: **${(iRate * 100).toFixed(3)}%**/day (hourly)\n> ${iCost ? `Next: **${((iRate + CONFIG.economy.upgrades.interestPerLevel) * 100).toFixed(3)}%** (+${iGain.toFixed(3)}%) for **${store.formatNumber(iCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
       name: '↩ Loss Cashback',
-      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(2)}%** back\n> ${cCost ? `Next: **${(cRatePct + CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(2)}%** (+${(CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(2)}%) for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(cLvl, maxLevel)} **Lv ${cLvl}/${maxLevel}**\n> Rate: **${cRatePct.toFixed(3)}%** back\n> ${cCost ? `Next: **${(cRatePct + CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(3)}%** (+${(CONFIG.economy.upgrades.cashbackPerLevel * 100).toFixed(3)}%) for **${store.formatNumber(cCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
     {
       name: '⟳× Spin Payout Mult',
-      value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMultFull.toFixed(2)}x** payout\n> ${sCost ? `Next: **${(sMultFull + 0.1).toFixed(2)}x** (+0.10x) for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(sLvl, maxLevel)} **Lv ${sLvl}/${maxLevel}**\n> Multiplier: **${sMultFull.toFixed(2)}x** payout\n> ${sCost ? `Next: **${(sMultFull + spinGain).toFixed(2)}x** (+${spinGain.toFixed(2)}x) for **${store.formatNumber(sCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     {
       name: '∀× Universal Income Chance',
-      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(uChance + uGain).toFixed(2)}%** (+${uGain.toFixed(0)}%) for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
+      value: `> ${bar(uLvl, maxLevel)} **Lv ${uLvl}/${maxLevel}**\n> Chance: **${uChance.toFixed(2)}%** to double\n> ${uCost ? `Next: **${(uChance + uGain).toFixed(2)}%** (+${uGain.toFixed(1)}%) for **${store.formatNumber(uCost)}**` : '✨ **MAXED**'}`,
       inline: true,
     },
     { name: '\u200b', value: '\u200b', inline: false },
@@ -143,13 +148,13 @@ function renderPotionsEmbed(userId, successMessage) {
   }
   fields.push({
     name: '☘⚱ Lucky Pot',
-    value: `${luckyStatus}\n> Boosts your win chance by **+5%** for **30 mins**\n> Affects: Flip, Duel, Let It Ride`,
+    value: `${luckyStatus}\n> Boosts your win chance by **+0.5%** for **30 mins**\n> Affects: Flip, Duel, Let It Ride`,
     inline: false,
   });
 
   // Unlucky Pot
   fields.push({
-    name: '⚱✕ Unlucky Pot',
+    name: '✕⚱ Unlucky Pot',
     value: `> Price: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Reduces another player's win chance by **-25%** for **30 mins**\n> Select a target below to apply this curse`,
     inline: false,
   });
@@ -181,15 +186,12 @@ function buildPotionButtons(userId) {
       .setLabel(potions.lucky ? '☘⚱ Lucky Pot (Active)' : `☘⚱ Buy Lucky Pot (${store.formatNumberShort(potionCfg.luckyPotCost)})`)
       .setStyle(potions.lucky ? ButtonStyle.Secondary : ButtonStyle.Success)
       .setDisabled(!!potions.lucky || w.balance < potionCfg.luckyPotCost),
+    new ButtonBuilder()
+      .setCustomId(`shop_unluckymenu_${userId}`)
+      .setLabel(`✕⚱ Unlucky Pot (${store.formatNumberShort(potionCfg.unluckyPotCost)})`)
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(w.balance < potionCfg.unluckyPotCost),
   ));
-
-  // User select for unlucky pot target
-  const userSelect = new UserSelectMenuBuilder()
-    .setCustomId(`shop_unluckytarget_${userId}`)
-    .setPlaceholder(`⚱✕ Select target for Unlucky Pot (${store.formatNumberShort(potionCfg.unluckyPotCost)})`)
-    .setMinValues(1)
-    .setMaxValues(1);
-  rows.push(new ActionRowBuilder().addComponents(userSelect));
 
   return rows;
 }
@@ -310,8 +312,35 @@ async function handleShopButton(interaction, parts) {
       if (result.reason === 'already_active') return interaction.reply({ content: '\u2618\u26b1 You already have an active Lucky Pot!', ephemeral: true });
     }
     const stackCount = result.stacks || 1;
-    const { embed, components } = renderShopPage(uid, 'potions', `\u2618\u26b1 Lucky Pot activated! (+5% win chance for 1 hour)`);
+    const { embed, components } = renderShopPage(uid, 'potions', `\u2618\u26b1 Lucky Pot activated! (+0.5% win chance for 30 mins)`);
     return interaction.update({ content: '', embeds: [embed], components });
+  }
+
+  if (action === 'unluckymenu') {
+    if (interaction.user.id !== uid) return interaction.reply({ content: 'Not your shop!', ephemeral: true });
+    const potionCfg = store.getPotionConfig();
+    const menuEmbed = {
+      title: '✕⚱ Unlucky Pot',
+      color: 0x2b2d31,
+      description: `> Select a player to curse with **-25%** win chance for **30 mins**\n> Cost: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins`,
+    };
+    const userSelect = new UserSelectMenuBuilder()
+      .setCustomId(`shop_unluckytarget_${uid}`)
+      .setPlaceholder('Select target player...')
+      .setMinValues(1)
+      .setMaxValues(1);
+    const backBtn = new ButtonBuilder()
+      .setCustomId(`shop_potions_${uid}`)
+      .setLabel('← Back')
+      .setStyle(ButtonStyle.Secondary);
+    return interaction.update({
+      content: '',
+      embeds: [menuEmbed],
+      components: [
+        new ActionRowBuilder().addComponents(userSelect),
+        new ActionRowBuilder().addComponents(backBtn),
+      ],
+    });
   }
 
   if (action === 'unluckyconfirm') {
@@ -330,9 +359,9 @@ async function handleShopButton(interaction, parts) {
 
     const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
     const targetName = targetUser ? targetUser.username : 'Unknown';
-    const { embed, components } = renderShopPage(uid, 'potions', `⚱✕ Unlucky Pot applied to ${targetName} for 30 mins!`);
+    const { embed, components } = renderShopPage(uid, 'potions', `✕⚱ Unlucky Pot applied to ${targetName} for 30 mins!`);
     await interaction.update({ content: '', embeds: [embed], components });
-    await interaction.channel.send({ content: `<@${targetId}> ⚱✕ you've been hit with an **Unlucky Pot** by <@${uid}>! Your win chance is reduced by **-25%** for **30 mins**.` });
+    await interaction.channel.send({ content: `<@${targetId}> ✕⚱ you've been hit with an **Unlucky Pot** by <@${uid}>! Your win chance is reduced by **-25%** for **30 mins**.` });
     return;
   }
 
@@ -356,25 +385,18 @@ async function handleShopButton(interaction, parts) {
     w.balance -= totalCost;
     store.ensureWalletStatsShape(w);
     const items = [];
-    let totalCompensation = 0;
 
     for (let i = 0; i < quantity; i++) {
       const item = store.rollMysteryBox(uid);
 
-      if (item.id && item.id.startsWith('placeholder_')) {
-        const isDuplicate = w.inventory.some(inv => inv.id === item.id);
-        if (isDuplicate) {
-          const compensation = store.getDuplicateCompensation(item.id, item._rarity);
-          w.balance += compensation;
-          store.trackMysteryBoxDuplicateComp(uid, compensation);
-          totalCompensation += compensation;
-          items.push({ ...item, isDuplicate: true, compensation });
-          continue;
-        }
+      const existing = w.inventory.find(inv => inv.id === item.id);
+      if (existing) {
+        existing.count = (existing.count || 1) + 1;
+        items.push({ ...item, isDuplicate: true, count: existing.count });
+      } else {
+        w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now(), count: 1 });
+        items.push(item);
       }
-
-      w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
-      items.push(item);
     }
 
     w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
@@ -385,7 +407,7 @@ async function handleShopButton(interaction, parts) {
     if (quantity === 1) {
       const item = items[0];
       if (item.isDuplicate) {
-        resultMsg = `**Opened x1:**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate)*\n> 💰 Duplicate compensation: **+${store.formatNumber(item.compensation)}** coins`;
+        resultMsg = `**Opened x1:**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate - now x${item.count})*`;
       } else {
         resultMsg = `**Opened x1:**\n> ${item.emoji} **${item.name}** *(${item.rarity})*`;
       }
@@ -422,7 +444,7 @@ async function handleShopButton(interaction, parts) {
         }
       }
       if (duplicateCount > 0) {
-        lines.push(`> 💰 Duplicate compensation: **+${store.formatNumber(totalCompensation)}** coins`);
+        lines.push(`> � ${duplicateCount} duplicate(s) stacked in inventory - sell via /inventory`);
       }
       resultMsg = lines.join('\n');
     }
@@ -445,25 +467,18 @@ async function handleShopButton(interaction, parts) {
     w.balance -= totalCost;
     store.ensureWalletStatsShape(w);
     const items = [];
-    let totalCompensation = 0;
 
     for (let i = 0; i < quantity; i++) {
       const item = store.rollPremiumMysteryBox(uid);
 
-      if (item.id && item.id.startsWith('placeholder_')) {
-        const isDuplicate = w.inventory.some(inv => inv.id === item.id);
-        if (isDuplicate) {
-          const compensation = store.getDuplicateCompensation(item.id, item._rarity);
-          w.balance += compensation;
-          store.trackMysteryBoxDuplicateComp(uid, compensation);
-          totalCompensation += compensation;
-          items.push({ ...item, isDuplicate: true, compensation });
-          continue;
-        }
+      const existing = w.inventory.find(inv => inv.id === item.id);
+      if (existing) {
+        existing.count = (existing.count || 1) + 1;
+        items.push({ ...item, isDuplicate: true, count: existing.count });
+      } else {
+        w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now(), count: 1 });
+        items.push(item);
       }
-
-      w.inventory.push({ id: item.id, name: item.name, rarity: item.rarity, emoji: item.emoji, obtainedAt: Date.now() });
-      items.push(item);
     }
 
     w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
@@ -474,7 +489,7 @@ async function handleShopButton(interaction, parts) {
     if (quantity === 1) {
       const item = items[0];
       if (item.isDuplicate) {
-        resultMsg = `**💎 Opened x1 (Premium):**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate)*\n> 💰 Duplicate compensation: **+${store.formatNumber(item.compensation)}** coins`;
+        resultMsg = `**💎 Opened x1 (Premium):**\n> ⚠️ ${item.emoji} **${item.name}** *(duplicate - now x${item.count})*`;
       } else {
         resultMsg = `**💎 Opened x1 (Premium):**\n> ${item.emoji} **${item.name}** *(${item.rarity})*`;
       }
@@ -509,7 +524,7 @@ async function handleShopButton(interaction, parts) {
         }
       }
       if (duplicateCount > 0) {
-        lines.push(`> 💰 Duplicate compensation: **+${store.formatNumber(totalCompensation)}** coins`);
+        lines.push(`> 📦 ${duplicateCount} duplicate(s) stacked in inventory - sell via /inventory`);
       }
       resultMsg = lines.join('\n');
     }
@@ -553,7 +568,7 @@ async function handleUpgradeButton(interaction, parts) {
     const cost = CONFIG.economy.upgrades.costs.spinMult[lvl];
     if (w.balance < cost) return interaction.reply({ content: `Need ${store.formatNumber(cost)}`, ephemeral: true });
     w.balance -= cost; w.spinMultLevel = lvl + 1; store.saveWallets();
-    const { embed, components } = renderShopPage(uid, 'upgrades', `Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * 0.1).toFixed(1)}x)`);
+    const { embed, components } = renderShopPage(uid, 'upgrades', `Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * CONFIG.economy.upgrades.spinMultPerLevel).toFixed(2)}x)`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
   if (action === 'universalmult') {
@@ -583,7 +598,7 @@ async function handleShopSelectMenu(interaction) {
     const targetName = targetUser ? targetUser.username : 'Unknown';
 
     const confirmEmbed = {
-      title: '⚱✕ Confirm Unlucky Pot',
+      title: '✕⚱ Confirm Unlucky Pot',
       color: 0x2b2d31,
       description: `Are you sure you want to curse <@${targetId}>?\n\n> Cost: **${store.formatNumber(potionCfg.unluckyPotCost)}** coins\n> Effect: **-25%** win chance for **30 mins**`,
     };

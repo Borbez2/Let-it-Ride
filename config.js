@@ -58,28 +58,18 @@ const CONFIG = {
       contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.0025%
     },
     upgrades: {
-      maxLevel: 10,
-      interestPerLevel: 0.01,
-      cashbackPerLevel: 0.0005,
-      universalIncomePerLevelChance: 0.1,
+      maxLevel: 100,
+      interestPerLevel: 0.001,        // 1/10th of old: 100 levels × 0.001 = 0.10 total (same as old 10 × 0.01)
+      cashbackPerLevel: 0.00005,      // 1/10th of old: 100 levels × 0.00005 = 0.005 total
+      spinMultPerLevel: 0.01,         // 1/10th of old: 100 levels × 0.01 = 1.0 total (spin = 1 + lvl*0.01, max 2.0)
+      universalIncomePerLevelChance: 0.01,  // 1/10th of old: 100 levels × 0.01 = 1.0 total
       universalIncomeChanceCap: 20,
-      costs: {
-        interest: [
-          1000, 5000, 10000, 25000, 50000,
-          100000, 250000, 500000, 750000, 1000000,
-        ],
-        cashback: [
-          1000, 5000, 10000, 25000, 50000,
-          100000, 250000, 500000, 750000, 1000000,
-        ],
-        spinMult: [
-          1000, 5000, 10000, 25000, 50000,
-          100000, 250000, 500000, 750000, 1000000,
-        ],
-        universalIncome: [
-          1000, 5000, 10000, 25000, 50000,
-          100000, 250000, 500000, 750000, 1000000,
-        ],
+      // Cost generation parameters (exponential curve, shared for all upgrades).
+      // Cost formula: floor(baseCost * growthRate^level)
+      // Modify baseCost and growthRate here to tune ALL upgrade costs at once.
+      costParams: {
+        baseCost: 500,        // cost of level 1
+        growthRate: 1.25,     // exponential growth factor per level
       },
     },
   },
@@ -213,7 +203,8 @@ const CONFIG = {
   // Mystery box / collectibles
   // -------------------------------
   collectibles: {
-    totalPlaceholders: 120,
+    totalPlaceholders: 350,
+    perRarity: 50,
     mysteryBox: {
       cost: 5000,
       duplicateCompensationByRarity: {
@@ -412,23 +403,38 @@ const CONFIG = {
 
 CONFIG.games.mines.total = CONFIG.games.mines.rows * CONFIG.games.mines.cols;
 
-const COLLECTIBLES = [];
-for (let i = 1; i <= CONFIG.collectibles.totalPlaceholders; i++) {
-  let rarity;
-  if (i <= 40) rarity = 'common';
-  else if (i <= 65) rarity = 'uncommon';
-  else if (i <= 85) rarity = 'rare';
-  else if (i <= 100) rarity = 'epic';
-  else if (i <= 110) rarity = 'legendary';
-  else if (i <= 115) rarity = 'mythic';
-  else rarity = 'divine';
+// ── Generate upgrade cost arrays from costParams ──
+// All 4 upgrades share the same exponential cost curve.
+// To tune costs, only modify costParams.baseCost and costParams.growthRate above.
+(() => {
+  const { baseCost, growthRate } = CONFIG.economy.upgrades.costParams;
+  const maxLevel = CONFIG.economy.upgrades.maxLevel;
+  const costs = [];
+  for (let i = 0; i < maxLevel; i++) {
+    costs.push(Math.floor(baseCost * Math.pow(growthRate, i)));
+  }
+  CONFIG.economy.upgrades.costs = {
+    interest: [...costs],
+    cashback: [...costs],
+    spinMult: [...costs],
+    universalIncome: [...costs],
+  };
+})();
 
-  COLLECTIBLES.push({
-    id: `placeholder_${i}`,
-    name: `Placeholder ${i}/${CONFIG.collectibles.totalPlaceholders}`,
-    rarity,
-    emoji: CONFIG.ui.rarities[rarity].emoji,
-  });
+const COLLECTIBLES = [];
+const RARITY_ORDER_KEYS = CONFIG.ui.rarityOrder;
+const PER_RARITY = CONFIG.collectibles.perRarity;
+let collectibleIdx = 0;
+for (const rarity of RARITY_ORDER_KEYS) {
+  for (let j = 1; j <= PER_RARITY; j++) {
+    collectibleIdx++;
+    COLLECTIBLES.push({
+      id: `placeholder_${collectibleIdx}`,
+      name: `Placeholder ${collectibleIdx}/${CONFIG.collectibles.totalPlaceholders}`,
+      rarity,
+      emoji: CONFIG.ui.rarities[rarity].emoji,
+    });
+  }
 }
 
 const MYSTERY_BOX_POOLS = Object.fromEntries(

@@ -907,7 +907,7 @@ function applyLuckCashback(userId, lossAmount, now = Date.now()) {
 }
 
 function getSpinWeight(userId) {
-  return 1 + (getWallet(userId).spinMultLevel || 0) * 0.1;
+  return 1 + (getWallet(userId).spinMultLevel || 0) * CONFIG.economy.upgrades.spinMultPerLevel;
 }
 
 function getUniversalIncomeDoubleChance(userId) {
@@ -947,7 +947,7 @@ function getUserBonuses(userId) {
   // Base values (upgrades only, no items)
   const baseInterestRate = BASE_INVEST_RATE + (w.interestLevel * CONFIG.economy.upgrades.interestPerLevel);
   const baseCashbackRate = w.cashbackLevel * CONFIG.economy.upgrades.cashbackPerLevel;
-  const baseSpinWeight = 1 + (w.spinMultLevel || 0) * 0.1;
+  const baseSpinWeight = 1 + (w.spinMultLevel || 0) * CONFIG.economy.upgrades.spinMultPerLevel;
   const baseUniversalDoubleChance = Math.max(0, Math.min(CONFIG.economy.upgrades.maxLevel, w.universalIncomeMultLevel || 0)) * CONFIG.economy.upgrades.universalIncomePerLevelChance;
   const baseMinesRevealChance = 0;
 
@@ -1678,6 +1678,48 @@ function getCollectionStats(userId) {
   return { byRarity, totals, totalOwned, totalItems, ownedIds };
 }
 
+// Sell all duplicate items (count > 1) at the refund price per extra copy.
+// Returns { totalCoins, totalItemsSold, breakdown: [{name, rarity, emoji, sold, refundEach}] }
+function sellAllDuplicates(userId) {
+  const w = getWallet(userId);
+  ensureWalletStatsShape(w);
+  const COMP_BY_RARITY = CONFIG.collectibles.mysteryBox.duplicateCompensationByRarity;
+  let totalCoins = 0;
+  let totalItemsSold = 0;
+  const breakdown = [];
+
+  for (const item of w.inventory) {
+    const count = item.count || 1;
+    if (count <= 1) continue;
+    const extras = count - 1;
+    const refund = COMP_BY_RARITY[item.rarity] || 0;
+    const earned = extras * refund;
+    totalCoins += earned;
+    totalItemsSold += extras;
+    item.count = 1;
+    breakdown.push({ name: item.name, rarity: item.rarity, emoji: item.emoji, sold: extras, refundEach: refund });
+  }
+
+  if (totalCoins > 0) {
+    w.balance += totalCoins;
+    trackMysteryBoxDuplicateComp(userId, totalCoins);
+    saveWallet(userId);
+  }
+
+  return { totalCoins, totalItemsSold, breakdown };
+}
+
+// Count total duplicate items across all inventory slots.
+function countDuplicates(userId) {
+  const w = getWallet(userId);
+  let total = 0;
+  for (const item of (w.inventory || [])) {
+    const count = item.count || 1;
+    if (count > 1) total += count - 1;
+  }
+  return total;
+}
+
 module.exports = {
   getPoolData, savePool,
   addToUniversalPool, addToLossPool, clearHourlyPool, clearDailySpinPool,
@@ -1705,4 +1747,6 @@ module.exports = {
   checkpointWal,
   backupDatabaseToFile,
   getDbFilePaths,
+  sellAllDuplicates,
+  countDuplicates,
 };

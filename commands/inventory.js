@@ -116,8 +116,11 @@ function buildInventoryPageRow(userId, tab, page, totalPages) {
 
 function renderInventoryOverview(userId, username) {
   const cs = store.getCollectionStats(userId);
+  const dupeCount = store.countDuplicates(userId);
   const globalBar = renderCollectionBar(cs.totalOwned, cs.totalItems, '▰', '▱', 20);
-  let description = `> **${username}'s Collection**\n> ${globalBar} **${cs.totalOwned}/${cs.totalItems}**\n\n`;
+  let description = `> **${username}'s Collection**\n> ${globalBar} **${cs.totalOwned}/${cs.totalItems}**\n`;
+  if (dupeCount > 0) description += `> 📦 **${dupeCount}** duplicate(s) available to sell\n`;
+  description += '\n';
 
   for (const rarity of RARITY_ORDER) {
     const info = cs.byRarity[rarity];
@@ -222,11 +225,20 @@ function renderInventoryRarityPage(userId, username, rarity, page) {
     description += '\n';
   }
 
+  // Build a map of item id -> count from user's inventory
+  const w = store.getWallet(userId);
+  const invCountMap = {};
+  for (const inv of (w.inventory || [])) {
+    invCountMap[inv.id] = inv.count || 1;
+  }
+
   for (const item of allItems) {
     const owned = cs.ownedIds.has(item.id);
     const buffStr = formatItemBuffDisplay(getItemDisplayBuff(item, allItems));
+    const count = invCountMap[item.id] || 0;
+    const countTag = count > 1 ? ` **(x${count})**` : '';
     if (owned) {
-      description += `${item.emoji} **${item.name}** - *${buffStr}*\n`;
+      description += `${item.emoji} **${item.name}**${countTag} - *${buffStr}*\n`;
     } else {
       description += `⬛ ~~${item.name}~~ - *${buffStr}*\n`;
     }
@@ -250,6 +262,19 @@ function buildInventoryComponents(userId, tab, page, totalPages) {
   ];
   const pageRow = buildInventoryPageRow(userId, tab, page, totalPages || 1);
   if (pageRow) rows.push(pageRow);
+
+  // Sell duplicates button (only if user has duplicates)
+  const dupeCount = store.countDuplicates(userId);
+  if (dupeCount > 0) {
+    const sellRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`inv_selldups_0_${userId}`)
+        .setLabel(`💰 Sell All Duplicates (${dupeCount})`)
+        .setStyle(ButtonStyle.Danger),
+    );
+    rows.push(sellRow);
+  }
+
   return rows;
 }
 
@@ -277,6 +302,22 @@ async function handleInventoryButton(interaction, parts) {
   const parsed = parseInventoryCustomId(interaction.customId);
   if (!parsed) return;
   if (interaction.user.id !== parsed.userId) return interaction.reply({ content: 'Not your inventory!', ephemeral: true });
+
+  // Handle sell duplicates
+  if (parsed.tab === 'selldups') {
+    const result = store.sellAllDuplicates(parsed.userId);
+    if (result.totalItemsSold === 0) {
+      return interaction.reply({ content: 'No duplicates to sell!', ephemeral: true });
+    }
+    const lines = [`**Sold ${result.totalItemsSold} duplicate(s) for ${store.formatNumber(result.totalCoins)} coins:**`];
+    for (const entry of result.breakdown) {
+      lines.push(`> ${entry.emoji} ${entry.name} x${entry.sold} → +${store.formatNumber(entry.sold * entry.refundEach)}`);
+    }
+    const username = interaction.user.username;
+    const overviewResult = renderInventoryPage(parsed.userId, username, 'overview', 0);
+    overviewResult.embeds[0].footer = { text: lines.join('\n').slice(0, 2048) };
+    return interaction.update({ content: '', embeds: overviewResult.embeds, components: overviewResult.components });
+  }
 
   const username = interaction.user.username;
   const result = renderInventoryPage(parsed.userId, username, parsed.tab, parsed.page);

@@ -61,7 +61,7 @@ function renderGameplayPage(username, userId) {
   }
   if (unluckyPotPenalty > 0) {
     const mins = Math.max(0, Math.ceil((potions.unlucky.expiresAt - Date.now()) / 60000));
-    winText += `> ⚱✕ Unlucky Pot (${mins}m left): **-${(unluckyPotPenalty * 100).toFixed(1)}%**\n`;
+    winText += `> ✕⚱ Unlucky Pot (${mins}m left): **-${(unluckyPotPenalty * 100).toFixed(1)}%**\n`;
   }
   if (streakBoost > 0) {
     const mins = Math.max(0, Math.ceil(pityStatus.expiresInMs / 60000));
@@ -138,7 +138,7 @@ function renderPassivePage(username, userId) {
   // Daily Spin Multiplier
   const totalSpin = base.spinWeight + items.spinWeight;
   let spinText = `> **${totalSpin.toFixed(2)}x** spin weight\n`;
-  spinText += `> Upgrades: **${base.spinWeight.toFixed(2)}x** (each upgrade level adds +0.1x)\n`;
+  spinText += `> Upgrades: **${base.spinWeight.toFixed(2)}x** (each upgrade level adds +${CONFIG.economy.upgrades.spinMultPerLevel.toFixed(2)}x)\n`;
   if (items.spinWeight > 0) spinText += `> 🎒 Items: **+${items.spinWeight.toFixed(2)}x**\n`;
   spinText += `> *(Your weight relative to other players  - a 2.0x weight doubles your lottery odds vs a 1.0x player.)*`;
 
@@ -147,7 +147,7 @@ function renderPassivePage(username, userId) {
   const itemDoublePct = items.universalDoubleChance * 100;
   const totalDoublePct = baseDoublePct + itemDoublePct;
   let incomeText = `> **${totalDoublePct.toFixed(1)}%** chance each hourly payout is ×2\n`;
-  incomeText += `> Upgrades: **${baseDoublePct.toFixed(1)}%** (each upgrade level adds +10%)\n`;
+  incomeText += `> Upgrades: **${baseDoublePct.toFixed(1)}%** (each upgrade level adds +${(CONFIG.economy.upgrades.universalIncomePerLevelChance * 100).toFixed(1)}%)\n`;
   if (itemDoublePct > 0) incomeText += `> 🎒 Items: **+${itemDoublePct.toFixed(1)}%**\n`;
   incomeText += `> *(If triggered, your share of the hourly universal pool is doubled for that payout.)*`;
 

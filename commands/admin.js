@@ -186,7 +186,7 @@ function renderUsersPage(adminId, statusMsg) {
     new ButtonBuilder().setCustomId(`adm_resetstats_${adminId}`).setLabel('📊 Reset Stats').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
   );
   const actionRow2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`adm_removecurse_${adminId}`).setLabel('⚱✕ Remove Unlucky Pot').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
+    new ButtonBuilder().setCustomId(`adm_removecurse_${adminId}`).setLabel('✕⚱ Remove Unlucky Pot').setStyle(ButtonStyle.Danger).setDisabled(!hasUser),
   );
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`adm_page_dashboard_${adminId}`).setLabel('◂ Back').setStyle(ButtonStyle.Secondary),

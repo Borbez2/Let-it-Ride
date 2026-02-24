@@ -13,8 +13,8 @@ const PAGE_TITLES = [
 const TOTAL_PAGES = PAGE_TITLES.length;
 
 function buildEconomyPage() {
-  const taxPct = (CONFIG.economy.pools.universalTaxRate * 100).toFixed(0);
-  const lossPct = (CONFIG.economy.pools.lossTaxRate * 100).toFixed(0);
+  const taxPct = (CONFIG.economy.pools.universalTaxRate * 100).toFixed(1);
+  const lossPct = (CONFIG.economy.pools.lossTaxRate * 100).toFixed(1);
 
   return {
     title: PAGE_TITLES[0],
@@ -28,13 +28,13 @@ function buildEconomyPage() {
       },
       {
         name: '📈 How to Earn',
-        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15pm.`,
+        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15 AM.`,
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '🛒 Shop - /shop',
-        value: '> **/shop** has three sections:\n> \n> **Upgrades** - Permanently boost your passive stats:\n> ∑ Bank Interest, ↩ Cashback, ⟳× Spin Mult, ∀× Universal Income Mult\n> \n> **Potions** - Temporary effects lasting 1 hour:\n> ☘⚱ Lucky Pot (100k) - boosts your win chance by +5% (1 at a time)\n> ⚱✕ Unlucky Pot (200k) - reduces another player\'s win chance by -25%\n> \n> **🎁 Mystery Boxes** - Buy boxes to get collectible items that passively boost your stats. Use **/shop** to buy, **/inventory** to view your collection.',
+        value: '> **/shop** has three sections:\n> \n> **Upgrades** - Permanently boost your passive stats:\n> ∑ Bank Interest, ↩ Cashback, ⟳× Spin Mult, ∀× Universal Income Mult\n> \n> **Potions** - Temporary effects lasting 30 min:\n> ☘⚱ Lucky Pot (100k) - boosts your win chance by +0.5% (1 at a time)\n> ✕⚱ Unlucky Pot (200k) - reduces another player\'s win chance by -25%\n> \n> **🎁 Mystery Boxes** - Buy boxes to get collectible items that passively boost your stats. Use **/shop** to buy, **/inventory** to view your collection.',
         inline: false,
       },
       {
@@ -104,7 +104,7 @@ function buildModifiersPage() {
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '☘ How Luck Works',
-        value: '> Lose **3 games in a row** (Flip or Duel) to trigger a luck buff. More losses make it stronger:\n> \n> **Streak 3-7:** +0.5% win chance per loss (3 losses = 0.5%, 7 losses = 2.5%)\n> **Streak 8-12:** +1% win chance per loss (8 losses = 3.5%, 12 losses = 7.5%)\n> \n> The buff **boosts your win chance** and stacks with Lucky Pot. Lasts **5 minutes**. A higher streak replaces a lower one. Winning resets your streak, but any active buff keeps running until it expires.\n> \n> **Note:** Let It Ride doesn\'t count toward the streak to prevent abuse.',
+        value: '> Lose **3 games in a row** (Flip or Duel) to trigger a luck buff. More losses make it stronger:\n> \n> **Streak 3-7:** +0.25% win chance per loss (3 losses = 0.25%, 7 losses = 1.25%)\n> **Streak 8-12:** +0.5% win chance per loss (8 losses = 1.75%, 12 losses = 4.25%)\n> \n> The buff **boosts your win chance** and stacks with Lucky Pot. Lasts **5 minutes**. A higher streak replaces a lower one. Winning resets your streak, but any active buff keeps running until it expires.\n> \n> **Note:** Let It Ride doesn\'t count toward the streak to prevent abuse.',
         inline: false,
       },
       {
@@ -151,7 +151,7 @@ function buildCollectiblesPage() {
     fields: [
       {
         name: '🎁 Mystery Boxes',
-        value: `> Buy mystery boxes through **/shop** (Mystery Boxes section). Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are 120 collectibles across 7 rarity tiers.`,
+        value: `> Buy mystery boxes through **/shop** (Mystery Boxes section). Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are ${CONFIG.collectibles.totalPlaceholders} collectibles across 7 rarity tiers (${CONFIG.collectibles.perRarity} per rarity).`,
         inline: false,
       },
       {
