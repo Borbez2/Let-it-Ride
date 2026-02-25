@@ -1,37 +1,75 @@
 #!/usr/bin/env node
 /**
- * One-time script to:
- * 1. Wipe all graph data (netWorthHistory, xpHistory, collectibleHistory)
- * 2. Clear game stats (W/L, earnings, losses, top bets)
- * 3. Backfill XP from historical total games played (from backup)
+ * One-time script to wipe player statistics and experience.
  *
- * Run with bot STOPPED: sudo systemctl stop lets-go-gambling && node scripts/wipe-stats.js
+ * By default the script will also attempt to backfill XP from a historical
+ * backup so that players don’t lose credit for games they already played.
+ * Supply `--zero-xp` to instead clear everyone's XP/games to zero.
+ *
+ * Usage examples (bot must be stopped first):
+ *
+ *   # backfill mode (you may need to edit BACKUP_PATH below):
+ *   node scripts/wipe-stats.js
+ *
+ *   # or specify a different backup file path:
+ *   node scripts/wipe-stats.js --backup /path/to/old/gambling.db
+ *
+ *   # clear XP entirely, no backup needed:
+ *   node scripts/wipe-stats.js --zero-xp
+ *
+ * The script will reset W/L counts, clear graph histories, and either
+ * backfill XP or zero it depending on options.
  */
 const Database = require('better-sqlite3');
 const path = require('path');
 const { CONFIG } = require('../config');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'gambling.db');
-const BACKUP_PATH = path.join(__dirname, '..', 'backups', 'hourly', '2026-02-24', '22-14-34', 'gambling.db');
+// default backup path, can be overridden by --backup flag
+let BACKUP_PATH = path.join(__dirname, '..', 'backups', 'hourly', '2026-02-24', '22-14-34', 'gambling.db');
 
 const XP_PER_GAME = CONFIG.xp.perGame; // 25
 const GAME_KEYS = CONFIG.stats.games;   // ['flip','roulette','blackjack','mines','letitride','duel']
 
-// Load historical game counts from backup
-const backupDb = new Database(BACKUP_PATH, { readonly: true });
-const historicalGames = {};
-const backupRows = backupDb.prepare('SELECT user_id, stats FROM wallets').all();
-for (const row of backupRows) {
-  const stats = JSON.parse(row.stats);
-  let total = 0;
-  for (const g of GAME_KEYS) {
-    const s = stats[g] || {};
-    total += (s.wins || 0) + (s.losses || 0);
+// parse command-line options
+let zeroXp = false;
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--zero-xp') {
+    zeroXp = true;
+  } else if (a === '--backup' && argv[i+1]) {
+    BACKUP_PATH = argv[++i];
+  } else if (a === '--help' || a === '-h') {
+    console.log('Usage: node scripts/wipe-stats.js [--zero-xp] [--backup <path>]');
+    process.exit(0);
   }
-  historicalGames[row.user_id] = total;
 }
-backupDb.close();
-console.log('Loaded historical game counts from backup:', Object.entries(historicalGames).map(([id, g]) => `${id.slice(-6)}:${g}`).join(', '));
+
+let historicalGames = {};
+if (!zeroXp) {
+  // Load historical game counts from backup
+  if (!BACKUP_PATH || !require('fs').existsSync(BACKUP_PATH)) {
+    console.error('Backup file not found:', BACKUP_PATH);
+    process.exit(1);
+  }
+  const backupDb = new Database(BACKUP_PATH, { readonly: true });
+  historicalGames = {};
+  const backupRows = backupDb.prepare('SELECT user_id, stats FROM wallets').all();
+  for (const row of backupRows) {
+    const stats = JSON.parse(row.stats);
+    let total = 0;
+    for (const g of GAME_KEYS) {
+      const s = stats[g] || {};
+      total += (s.wins || 0) + (s.losses || 0);
+    }
+    historicalGames[row.user_id] = total;
+  }
+  backupDb.close();
+  console.log('Loaded historical game counts from backup:', Object.entries(historicalGames).map(([id, g]) => `${id.slice(-6)}:${g}`).join(', '));
+} else {
+  console.log('Zero-XP mode: no backup used, all xp/games will be cleared.');
+}
 
 // Now operate on the live DB
 const db = new Database(DB_PATH);
@@ -49,16 +87,22 @@ const updateAll = db.transaction(() => {
     const inventory = JSON.parse(row.inventory || '[]');
     const uniqueCollectibles = new Set(inventory.map(i => i.id)).size;
 
-    // Backfill XP from historical game count
-    const historicalTotal = historicalGames[row.user_id] || 0;
-    // Add any games played since the backup (from current stats)
-    let currentGames = 0;
-    for (const g of GAME_KEYS) {
-      const s = stats[g] || {};
-      currentGames += (s.wins || 0) + (s.losses || 0);
+    let totalGames, totalXp;
+    if (zeroXp) {
+      totalGames = 0;
+      totalXp = 0;
+    } else {
+      // Backfill XP from historical game count
+      const historicalTotal = historicalGames[row.user_id] || 0;
+      // Add any games played since the backup (from current stats)
+      let currentGames = 0;
+      for (const g of GAME_KEYS) {
+        const s = stats[g] || {};
+        currentGames += (s.wins || 0) + (s.losses || 0);
+      }
+      totalGames = historicalTotal + currentGames;
+      totalXp = totalGames * XP_PER_GAME;
     }
-    const totalGames = historicalTotal + currentGames;
-    const totalXp = totalGames * XP_PER_GAME;
 
     // Reset per-game stats
     for (const g of GAME_KEYS) {
@@ -109,5 +153,6 @@ const updateAll = db.transaction(() => {
 
 updateAll();
 db.close();
-console.log(`\nDone. Wiped stats & backfilled XP for ${count} wallet(s).`);
+const modeMsg = zeroXp ? 'zeroed XP' : 'backfilled XP from backup';
+console.log(`\nDone. Wiped stats & ${modeMsg} for ${count} wallet(s).`);
 process.exit(0);

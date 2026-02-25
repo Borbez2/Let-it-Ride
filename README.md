@@ -189,6 +189,55 @@ If you need to restore manually:
 
 Do not mix `db` from one snapshot with `wal/shm` from another snapshot.
 
+#### Partial stat/xp restoration
+
+Sometimes you only want to recover specific pieces of player state (for
+example, win/loss counts and experience) without overwriting balances,
+inventory, or other live data. A helper script is provided for that
+purpose:
+
+```sh
+# dry-run will show what would change without touching the live DB
+node scripts/restore-stats.js --dry-run \
+  /absolute/path/to/backups/hourly/2026-02-24/23-00-00/gambling.db
+
+# and when you're happy:
+node scripts/restore-stats.js \
+  /absolute/path/to/backups/hourly/2026-02-24/23-00-00/gambling.db
+```
+
+The script will:
+
+1. open the backup and current databases side‑by‑side
+2. copy each wallet's game `wins`/`losses`, `xp` and `totalGamesPlayed`
+3. correct any XP mismatch by recalculating as `totalGamesPlayed * XP_PER_GAME`
+4. leave every other field intact
+
+Stop the bot before running the script to prevent concurrent writes.
+
+It’s safe to run repeatedly; wallets not present in the live database are
+ignored and only the targeted fields are merged.
+
+## Project layout
+
+## Resetting player statistics
+
+A helper script exists for clearing game records and experience for all
+wallets. This is typically run with the bot stopped and may be used to
+start a new season or fix corrupted stats.
+
+```sh
+# wipe everything except balances/inventory; backfill XP from an old snapshot
+node scripts/wipe-stats.js --backup /path/to/old/gambling.db
+
+# wipe stats and **zero all XP** without touching backups
+node scripts/wipe-stats.js --zero-xp
+```
+
+The script will also reset net worth/xp/collectible histories and various
+lifetime counters. See the header comment in
+`scripts/wipe-stats.js` for full details.
+
 ## Project layout
 
 ```text
