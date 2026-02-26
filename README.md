@@ -1,5 +1,7 @@
 # Let it Ride
 
+## It is still currently under development and some features may not work properly!
+
 Let it Ride is a Discord economy + gambling bot built on `discord.js` and `better-sqlite3`.
 
 It has wallets (purse + bank), daily streak rewards, multiple games, upgrades, collectibles, mystery boxes, trading, giveaways, persistent sessions, and scheduled economy events.
