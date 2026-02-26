@@ -102,7 +102,14 @@ async function handleDuelButton(interaction, parts) {
     store.setBalance(oid, oppBal - duel.bet);
 
     const duelModifier = store.getWinChanceModifier(cid);
-    const w = Math.random() < CONFIG.games.duel.winChance * duelModifier ? cid : oid;
+    // custom item effects may add an absolute win chance boost for the
+    // challenger (e.g. legendary "Scary Mask"). these do NOT stack with the
+    // modifier; they are applied additively because they represent a flat
+    // bonus rather than a multiplier.
+    const itemEffects = store.getItemEffects(cid);
+    const extraWin = itemEffects.duelWinBoost || 0;
+    const winChance = CONFIG.games.duel.winChance * duelModifier + extraWin;
+    const w = Math.random() < winChance ? cid : oid;
     const wn = w === cid ? duel.challengerName : duel.opponentName;
     const ln = w === cid ? duel.opponentName : duel.challengerName;
     const li = w === cid ? oid : cid;

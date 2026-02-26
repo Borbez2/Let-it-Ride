@@ -111,15 +111,22 @@ function renderGameplayPage(username, userId) {
   if (items.minesRevealChance > 0) minesText += `> 🎒 Items: **+${(items.minesRevealChance * 100).toFixed(2)}%**\n`;
   if (revealTotal === 0) minesText += `> *0%  - upgrades don't affect mines; items only*`;
 
+  const additionalEffects = bonuses.inventoryEffects || [];
+
+  const fields = [
+    { name: '🎯 Win Chance Modifier (Flip · Duel · Let It Ride)', value: winText.trimEnd(), inline: false },
+    { name: '☘ Losing Streak Luck', value: luckText + luckFooter, inline: false },
+    { name: '↩ Cashback', value: cbText.trimEnd(), inline: true },
+    { name: '⛁⌖ Mines Save', value: minesText.trimEnd(), inline: true },
+  ];
+  if (additionalEffects.length > 0) {
+    fields.push({ name: '🎒 Item Effects', value: additionalEffects.join('\n'), inline: false });
+  }
+
   return {
     title: `✦ ${username}'s Effects  - Gameplay`,
     color: 0x2b2d31,
-    fields: [
-      { name: '🎯 Win Chance Modifier (Flip · Duel · Let It Ride)', value: winText.trimEnd(), inline: false },
-      { name: '☘ Losing Streak Luck', value: luckText + luckFooter, inline: false },
-      { name: '↩ Cashback', value: cbText.trimEnd(), inline: true },
-      { name: '⛁⌖ Mines Save', value: minesText.trimEnd(), inline: true },
-    ],
+    fields,
   };
 }
 

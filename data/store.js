@@ -52,14 +52,32 @@ const COLLECTIBLE_EFFECTS = (() => {
   const map = {};
   for (const item of COLLECTIBLES) {
     const boosts = statBoosts[item.rarity] || {};
-    map[item.id] = {
+    const entry = {
       interestRateBonus: boosts.interestRate || 0,
       cashbackRateBonus: boosts.cashbackRate || 0,
       minesRevealChance: boosts.minesRevealChance || 0,
       universalDoubleChanceBonus: boosts.universalDoubleChance || 0,
       spinWeightBonus: boosts.spinWeight || 0,
+      flipTripleChance: boosts.flipTripleChance || 0,
+      rouletteDoubleChance: boosts.rouletteDoubleChance || 0,
+      blackjackNaturalChance: boosts.blackjackNaturalChance || 0,
+      duelDoubleChance: boosts.duelDoubleChance || 0,
+      letitrideDoubleChance: boosts.letitrideDoubleChance || 0,
+      anyGameDoubleWinChance: boosts.anyGameDoubleWinChance || 0,
       label: null,
     };
+    if (item.customEffect) {
+      entry.customEffect = item.customEffect;
+      entry.label = item.customEffect.label || entry.label;
+      // propagate into any of the pre-existing numeric slots if the type
+      // matches one of them so that the built-in bonus aggregation works
+      if (item.customEffect.type && typeof item.customEffect.value === 'number') {
+        if (entry.hasOwnProperty(item.customEffect.type)) {
+          entry[item.customEffect.type] += item.customEffect.value;
+        }
+      }
+    }
+    map[item.id] = entry;
   }
   return map;
 })();
@@ -174,6 +192,13 @@ function getInventoryBonuses(inventory) {
     minesRevealChance: 0,
     universalDoubleChanceBonus: 0,
     spinWeightBonus: 0,
+    // new game-specific chance values
+    flipTripleChance: 0,
+    rouletteDoubleChance: 0,
+    blackjackNaturalChance: 0,
+    duelDoubleChance: 0,
+    letitrideDoubleChance: 0,
+    anyGameDoubleWinChance: 0,
     effectLines: [],
   };
 
@@ -192,6 +217,13 @@ function getInventoryBonuses(inventory) {
     bonuses.minesRevealChance += effect.minesRevealChance || 0;
     bonuses.universalDoubleChanceBonus += effect.universalDoubleChanceBonus || 0;
     bonuses.spinWeightBonus += effect.spinWeightBonus || 0;
+
+    bonuses.flipTripleChance += effect.flipTripleChance || 0;
+    bonuses.rouletteDoubleChance += effect.rouletteDoubleChance || 0;
+    bonuses.blackjackNaturalChance += effect.blackjackNaturalChance || 0;
+    bonuses.duelDoubleChance += effect.duelDoubleChance || 0;
+    bonuses.letitrideDoubleChance += effect.letitrideDoubleChance || 0;
+    bonuses.anyGameDoubleWinChance += effect.anyGameDoubleWinChance || 0;
 
     if (effect.label) {
       bonuses.effectLines.push(effect.label);
@@ -214,15 +246,35 @@ function getInventoryBonuses(inventory) {
     }
   }
 
-  if (!bonuses.effectLines.length) {
-    if (bonuses.interestRateBonus > 0) bonuses.effectLines.push(`Bank interest +${(bonuses.interestRateBonus * 100).toFixed(2)}%/day`);
-    if (bonuses.cashbackRateBonus > 0) bonuses.effectLines.push(`Cashback +${(bonuses.cashbackRateBonus * 100).toFixed(2)}%`);
-    if (bonuses.mysteryBoxLuckBonus > 0) bonuses.effectLines.push(`Mystery box luck +${(bonuses.mysteryBoxLuckBonus * 100).toFixed(2)}%`);
-    if (bonuses.minesRevealChance > 0) bonuses.effectLines.push(`Mines auto-reveal save ${(bonuses.minesRevealChance * 100).toFixed(2)}%`);
-    if (bonuses.spinWeightBonus > 0) bonuses.effectLines.push(`Spin payout +${bonuses.spinWeightBonus.toFixed(2)}x`);
-  }
+  // always include base buff lines if any
+  if (bonuses.interestRateBonus > 0) bonuses.effectLines.push(`Bank interest +${(bonuses.interestRateBonus * 100).toFixed(2)}%/day`);
+  if (bonuses.cashbackRateBonus > 0) bonuses.effectLines.push(`Cashback +${(bonuses.cashbackRateBonus * 100).toFixed(2)}%`);
+  if (bonuses.mysteryBoxLuckBonus > 0) bonuses.effectLines.push(`Mystery box luck +${(bonuses.mysteryBoxLuckBonus * 100).toFixed(2)}%`);
+  if (bonuses.minesRevealChance > 0) bonuses.effectLines.push(`Mines auto-reveal save ${(bonuses.minesRevealChance * 100).toFixed(2)}%`);
+  if (bonuses.spinWeightBonus > 0) bonuses.effectLines.push(`Spin payout +${bonuses.spinWeightBonus.toFixed(2)}x`);
+
+  // game-specific lines (order doesn't matter)
+  if (bonuses.flipTripleChance > 0) bonuses.effectLines.push(`🎯 Flip Focus: ${(bonuses.flipTripleChance * 100).toFixed(2)}% chance to ×3 win`);
+  if (bonuses.rouletteDoubleChance > 0) bonuses.effectLines.push(`🎲 Roulette Rush: ${(bonuses.rouletteDoubleChance * 100).toFixed(2)}% chance to ×2 win`);
+  if (bonuses.blackjackNaturalChance > 0) bonuses.effectLines.push(`🃏 Natural Edge: ${(bonuses.blackjackNaturalChance * 100).toFixed(2)}% chance to convert a win into natural payout`);
+  if (bonuses.duelDoubleChance > 0) bonuses.effectLines.push(`⚔️ Duel Strike: ${(bonuses.duelDoubleChance * 100).toFixed(2)}% chance to ×2 duel profit`);
+  if (bonuses.letitrideDoubleChance > 0) bonuses.effectLines.push(`🏇 Riding High: ${(bonuses.letitrideDoubleChance * 100).toFixed(2)}% chance to ×2 Let-It-Ride win`);
+  if (bonuses.anyGameDoubleWinChance > 0) bonuses.effectLines.push(`🔆 Cosmic Luck: ${(bonuses.anyGameDoubleWinChance * 100).toFixed(2)}% chance to ×2 any-game win`);
 
   return bonuses;
+}
+
+
+function getItemEffects(userId) {
+  const w = getWallet(userId);
+  const results = {};
+  if (!w || !Array.isArray(w.inventory)) return results;
+  for (const item of w.inventory) {
+    const eff = COLLECTIBLE_EFFECTS[item.id]?.customEffect;
+    if (!eff) continue;
+    results[eff.type] = (results[eff.type] || 0) + (eff.value || 0);
+  }
+  return results;
 }
 
 function ensureWalletStatsShape(w) {
@@ -1063,6 +1115,15 @@ function getUserBonuses(userId) {
     minesRevealChance: invBonuses.minesRevealChance,
     spinWeightBonus: invBonuses.spinWeightBonus,
     inventoryEffects: invBonuses.effectLines,
+    // game‑specific chances derived from collectibles
+    gameBuffs: {
+      flipTripleChance: invBonuses.flipTripleChance,
+      rouletteDoubleChance: invBonuses.rouletteDoubleChance,
+      blackjackNaturalChance: invBonuses.blackjackNaturalChance,
+      duelDoubleChance: invBonuses.duelDoubleChance,
+      letitrideDoubleChance: invBonuses.letitrideDoubleChance,
+      anyGameDoubleWinChance: invBonuses.anyGameDoubleWinChance,
+    },
     // Breakdown: base (upgrades only)
     base: {
       interestRate: baseInterestRate,
@@ -1271,7 +1332,44 @@ function removeUnluckyPot(targetId) {
 
 function applyProfitBoost(userId, gameName, baseProfit) {
   const profit = normalizeCoins(baseProfit, 0);
-  return profit;
+  const w = getWallet(userId);
+  if (!w) return { profit, effects: [] };
+  ensureWalletStatsShape(w);
+  const bonuses = getInventoryBonuses(w.inventory);
+
+  let final = profit;
+  const effects = [];
+
+  // generic double chance that applies to any winning game
+  if (bonuses.anyGameDoubleWinChance > 0 && Math.random() < bonuses.anyGameDoubleWinChance) {
+    final = Math.floor(final * 2);
+    effects.push('🔆 Cosmic Luck triggered: win ×2');
+  }
+
+  // game-specific triggers
+  if (gameName === 'flip' && bonuses.flipTripleChance > 0 && Math.random() < bonuses.flipTripleChance) {
+    final = Math.floor(final * 3);
+    effects.push('🎯 Flip Focus triggered: win ×3');
+  }
+  if (gameName === 'roulette' && bonuses.rouletteDoubleChance > 0 && Math.random() < bonuses.rouletteDoubleChance) {
+    final = Math.floor(final * 2);
+    effects.push('🎲 Roulette Rush triggered: win ×2');
+  }
+  if (gameName === 'blackjack' && bonuses.blackjackNaturalChance > 0 && Math.random() < bonuses.blackjackNaturalChance) {
+    // convert win profit into natural-style payout (additional 0.5×)
+    final = Math.floor(final * (1 + CONFIG.games.blackjack.naturalBlackjackProfitMultiplier));
+    effects.push('🃏 Natural Edge triggered: extra payout');
+  }
+  if (gameName === 'duel' && bonuses.duelDoubleChance > 0 && Math.random() < bonuses.duelDoubleChance) {
+    final = Math.floor(final * 2);
+    effects.push('⚔️ Duel Strike triggered: win ×2');
+  }
+  if (gameName === 'letitride' && bonuses.letitrideDoubleChance > 0 && Math.random() < bonuses.letitrideDoubleChance) {
+    final = Math.floor(final * 2);
+    effects.push('🏇 Riding High triggered: win ×2');
+  }
+
+  return { profit: final, effects };
 }
 
 function tryTriggerMinesReveal(userId) {
@@ -1982,7 +2080,7 @@ module.exports = {
   getSpinWeight, getUniversalIncomeDoubleChance, processBank,
   getUserBonuses, getMysteryBoxLuckInfo, getUserPityStatus,
   getCollectionStats,
-  applyProfitBoost, tryTriggerMinesReveal,
+  applyProfitBoost, tryTriggerMinesReveal, getItemEffects,
   getPotionConfig, getActivePotions, getWinChanceModifier, buyLuckyPot, buyUnluckyPot, removeUnluckyPot,
   checkDaily, claimDaily,
   rollMysteryBox, rollPremiumMysteryBox, applyMysteryBoxStats, getDuplicateCompensation, getDuplicateCompensationTable,

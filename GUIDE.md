@@ -241,7 +241,22 @@ Duplicate items are automatically converted to coins based on the compensation t
 
 ### Collectible Buffs
 
-Individual items currently grant **no passive bonuses** (zeroed out). The real benefit comes from **set completion bonuses** - collect every item of a rarity tier and receive permanent stat boosts:
+Most collectibles still use the familiar "set bonus" system: individual items only provide
+very tiny passive boosts (interest, cashback, etc.) but if you own every item of a given
+rarity you unlock a larger cumulative bonus.
+
+**Higher‑tier items (legendary and above)** have been updated with small, quirky
+*game‑specific effects* instead of the boring flat stats. Examples:
+
+- 🎭 **Scary Mask** (legendary) - 1% extra chance to win duels
+- 🪙 **Quantum Coin** (legendary) - 2% chance to triple your coin‑flip payout
+
+These special abilities are listed on the `/effects` page under **Item Effects** and
+also appear in your `/inventory` view when you own them. They are purposefully
+tiny to keep EV balanced, and the pool still contains placeholders for the remaining
+thousands of items; additional unique effects will be added over time.
+
+The table below still describes the set completion bonuses that apply to all rarities:
 
 | Rarity | ∑ Interest | ↩ Cashback | ⛁⌖ Mines | ∀× Income | ⟳× Spin |
 |--------|-----------|-----------|---------|----------|---------|

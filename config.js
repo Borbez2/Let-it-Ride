@@ -270,12 +270,18 @@ const CONFIG = {
         special:   0.0005,   // extremely low drop rate
         godly:     0.0001,   // single-item godly tier
       },
-      // Per-item stat boosts: zeroed out - bonuses only come from completing a full set.
-      // perItemDisplayBuff below defines the DISPLAYED value per item (informational only).
+      // Per-item stat boosts are now active.  For the first three rarity tiers
+      // (common/uncommon/rare) each collectible provides tiny passive bonuses to
+      // the standard economy stats (interest, cashback, income, spin weight).
+      // rarities **legendary and above no longer have a uniform effect** –
+      // instead, individual collectibles may carry their own bespoke game
+      // triggers (see CUSTOM_COLLECTIBLES above for examples). this lets us
+      // give each item a little personality rather than a flat buff.
       statBoostPerItem: {
-        common:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
-        uncommon:  { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
-        rare:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        // base buffs - no mines save
+        common:    { interestRate: 0.000003, cashbackRate: 0.0000005, minesRevealChance: 0, universalDoubleChance: 0.000013, spinWeight: 0.000065 },
+        uncommon:  { interestRate: 0.000009, cashbackRate: 0.0000015, minesRevealChance: 0, universalDoubleChance: 0.000033, spinWeight: 0.0002   },
+        rare:      { interestRate: 0.00003,  cashbackRate: 0.000005,  minesRevealChance: 0, universalDoubleChance: 0.00013,  spinWeight: 0.00065  },
         legendary: { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
         epic:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
         mythic:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
@@ -287,15 +293,17 @@ const CONFIG = {
       // Each item shows ONE buff type cycling: interest → cashback → mines → income → spin.
       // Nerfed: cashback/interest kept tight; payout mult and income chance slightly more generous.
       perItemDisplayBuff: {
-        common:    { interestRate: 0.000003, cashbackRate: 0.0000005, minesRevealChance: 0.000005, universalDoubleChance: 0.000013, spinWeight: 0.000065 },
-        uncommon:  { interestRate: 0.000009, cashbackRate: 0.0000015, minesRevealChance: 0.000015, universalDoubleChance: 0.000033, spinWeight: 0.0002   },
-        rare:      { interestRate: 0.00003,  cashbackRate: 0.000005,  minesRevealChance: 0.00005,  universalDoubleChance: 0.00013,  spinWeight: 0.00065  },
-        epic:      { interestRate: 0.00009,  cashbackRate: 0.000015,  minesRevealChance: 0.00015,  universalDoubleChance: 0.0004,   spinWeight: 0.0019   },
-        legendary: { interestRate: 0.0003,   cashbackRate: 0.00005,   minesRevealChance: 0.0005,   universalDoubleChance: 0.0013,   spinWeight: 0.0065   },
-        mythic:    { interestRate: 0.0015,   cashbackRate: 0.00025,   minesRevealChance: 0.0025,   universalDoubleChance: 0.0065,   spinWeight: 0.032    },
-        divine:    { interestRate: 0.006,    cashbackRate: 0.001,     minesRevealChance: 0.01,     universalDoubleChance: 0.026,    spinWeight: 0.13     },
-        special:   { interestRate: 0.02,     cashbackRate: 0.002,     minesRevealChance: 0.03,     universalDoubleChance: 0.08,    spinWeight: 0.4      },
-        godly:     { interestRate: 0.05,     cashbackRate: 0.005,     minesRevealChance: 0.08,     universalDoubleChance: 0.2,    spinWeight: 1.0      },
+        // keep mines zero for clarity (actual buffs no longer include it for base tiers)
+        common:    { interestRate: 0.000003, cashbackRate: 0.0000005, minesRevealChance: 0, universalDoubleChance: 0.000013, spinWeight: 0.000065 },
+        uncommon:  { interestRate: 0.000009, cashbackRate: 0.0000015, minesRevealChance: 0, universalDoubleChance: 0.000033, spinWeight: 0.0002   },
+        rare:      { interestRate: 0.00003,  cashbackRate: 0.000005,  minesRevealChance: 0, universalDoubleChance: 0.00013,  spinWeight: 0.00065  },
+        // beyond rare the per-item display no longer reflects active bonuses
+        epic:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        legendary: { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        mythic:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        divine:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        special:   { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        godly:     { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
       },
       // Bonus granted when ALL items of a rarity are collected (the only real economy effect).
       // Nerfed: cashback/interest kept in check; payout mult and income chance more generous.
@@ -513,13 +521,74 @@ CONFIG.games.mines.total = CONFIG.games.mines.rows * CONFIG.games.mines.cols;
   CONFIG.xp.levelThresholds = thresholds;
 })();
 
+// ---------- Custom / unique items ----------
+// higher‑rarity collectibles can carry small, game‑specific effects instead
+// of the boring stat boosts that common/uncommon/rare items use. we only
+// define a handful here as examples; future items can be added to
+// `CUSTOM_COLLECTIBLES` and will automatically be slotted into whatever
+// rarity quota remains.
+const CUSTOM_COLLECTIBLES = [
+  {
+    id: 'legendary_scary_mask',
+    name: 'Scary Mask',
+    rarity: 'legendary',
+    emoji: '🎭',
+    description: '1% extra chance to win duels.',
+    effect: { type: 'duelWinBoost', value: 0.01, label: '🎭 Duel +1% win chance' },
+  },
+  {
+    id: 'legendary_quantum_coin',
+    name: 'Quantum Coin',
+    rarity: 'legendary',
+    emoji: '🪙',
+    description: '2% chance to triple coin flip payout.',
+    effect: { type: 'flipTripleChance', value: 0.02, label: '🪙 2% flip 3x payout' },
+  },
+  // additional examples below – no logic is wired up for them yet, but
+  // they demonstrate the structure and will show up in the UI.
+  {
+    id: 'epic_blazing_dice',
+    name: 'Blazing Dice',
+    rarity: 'epic',
+    emoji: '🎲',
+    description: 'Mildly lucky on the roulette wheel.',
+    effect: { type: 'rouletteEdge', value: 0.01, label: '🎲 Roulette edge +1%' },
+  },
+  {
+    id: 'mythic_star_amulet',
+    name: 'Star Amulet',
+    rarity: 'mythic',
+    emoji: '✨',
+    description: 'Subtle bonus on all games.',
+    effect: { type: 'genericBonus', value: 0.005, label: '✨ Generic bonus +0.5%' },
+  },
+];
+
 const COLLECTIBLES = [];
 const RARITY_ORDER_KEYS = CONFIG.ui.rarityOrder;
 const COUNT_BY_RARITY = CONFIG.collectibles.countByRarity || {};
 let collectibleIdx = 0;
+
 for (const rarity of RARITY_ORDER_KEYS) {
   const count = COUNT_BY_RARITY[rarity] || 0;
-  for (let j = 1; j <= count; j++) {
+  // first insert any custom items for this rarity, decrementing the
+  // placeholder quota so the overall totals remain consistent
+  const customs = CUSTOM_COLLECTIBLES.filter(item => item.rarity === rarity);
+  for (const item of customs) {
+    collectibleIdx++;
+    COLLECTIBLES.push({
+      id: item.id,
+      name: item.name,
+      rarity: item.rarity,
+      emoji: item.emoji,
+      description: item.description,
+      customEffect: item.effect,
+      // store the original slot index for informational purposes
+      _placeholderIndex: collectibleIdx,
+    });
+  }
+
+  for (let j = 1; j <= count - customs.length; j++) {
     collectibleIdx++;
     COLLECTIBLES.push({
       id: `placeholder_${collectibleIdx}`,

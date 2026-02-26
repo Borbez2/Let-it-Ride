@@ -245,8 +245,10 @@ function renderInventoryRarityPage(userId, username, rarity, page = 0) {
     const countTag = count > 1 ? ` **(x${count})**` : '';
     if (owned) {
       description += `${item.emoji} **${item.name}**${countTag} - *${buffStr}*\n`;
+      if (item.description) description += `> _${item.description}_\n`;
     } else {
       description += `⬛ ~~${item.name}~~ - *${buffStr}*\n`;
+      if (item.description) description += `> _${item.description}_\n`;
     }
   }
 
