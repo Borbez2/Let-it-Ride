@@ -92,11 +92,14 @@ async function handleRideButton(interaction, parts) {
     let rideTax = 0;
     if (ride.current > ride.original) {
       const baseProfit = ride.current - ride.original;
-      const boostedProfit = store.applyProfitBoost(uid, 'letitride', baseProfit);
+      const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'letitride', baseProfit);
       const pityResult = store.recordWin(uid, 'letitride', boostedProfit);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       rideTax = store.addToUniversalPool(boostedProfit, uid);
       payout = ride.original + boostedProfit - rideTax;
+      if (effects && effects.length) {
+        // show effects after payout
+      }
     }
     store.setBalance(uid, store.getBalance(uid) + payout);
     activeRides.delete(uid);

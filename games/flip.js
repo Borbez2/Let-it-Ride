@@ -29,17 +29,18 @@ async function handleFlip(interaction) {
     const flipModifier = store.getWinChanceModifier(userId);
     const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
     if (won) {
-      const profit = store.applyProfitBoost(userId, 'flip', bet);
+      const { profit, effects } = store.applyProfitBoost(userId, 'flip', bet);
       const pityResult = store.recordWin(userId, 'flip', profit);
       await maybeAnnouncePityTrigger(interaction, userId, pityResult);
       const tax = store.addToUniversalPool(profit, userId);
       store.setBalance(userId, bal + profit - tax);
       const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
       const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
+      const effectLines = effects.length ? `\n${effects.join('\n')}` : '';
       return interaction.reply({ embeds: [{
         color: 0x57f287,
         title: '🪙 Coin Flip',
-        description: `**WIN** +**${store.formatNumber(profit - tax)}**${taxLine}${allInLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+        description: `**WIN** +**${store.formatNumber(profit - tax)}**${taxLine}${allInLine}${effectLines}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
       }] });
     }
     store.setBalance(userId, bal - bet);
@@ -61,6 +62,7 @@ async function handleFlip(interaction) {
   let totalBoostedWinnings = 0;
   let totalLossAmount = 0;
   let lastTriggeredPity = null;
+  let multiEffects = [];
 
   for (let i = 0; i < qty; i++) {
     const flipModifier = store.getWinChanceModifier(userId);
@@ -68,8 +70,11 @@ async function handleFlip(interaction) {
     results.push(won ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
     if (won) {
       wins++;
-      const profit = store.applyProfitBoost(userId, 'flip', bet);
+      const { profit, effects } = store.applyProfitBoost(userId, 'flip', bet);
       totalBoostedWinnings += profit;
+      if (effects && effects.length) {
+        multiEffects.push(...effects);
+      }
       store.recordWin(userId, 'flip', profit);
     } else {
       totalLossAmount += bet;
@@ -102,11 +107,12 @@ async function handleFlip(interaction) {
 
   const taxLine = totalTax > 0 ? ` (${store.formatNumber(totalTax)} tax to pool)` : '';
   const color = wins > qty - wins ? 0x57f287 : wins < qty - wins ? 0xed4245 : 0x5865f2;
+  const effectsLine = multiEffects.length ? `\n${multiEffects.join('\n')}` : '';
 
   return interaction.reply({ embeds: [{
     color,
     title: `🪙 Coin Flip x${qty}`,
-    description: `${results.join(' ')}\n**${wins}**W **${qty - wins}**L | Net: **${displayNet >= 0 ? '+' : ''}${store.formatNumber(displayNet)}**${taxLine}${cbm}${allInLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+    description: `${results.join(' ')}\n**${wins}**W **${qty - wins}**L | Net: **${displayNet >= 0 ? '+' : ''}${store.formatNumber(displayNet)}**${taxLine}${cbm}${allInLine}${effectsLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
   }] });
 }
 

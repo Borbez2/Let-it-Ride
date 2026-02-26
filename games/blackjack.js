@@ -141,13 +141,15 @@ async function resolveSplitGame(interaction, uid, game) {
     if (hh.busted) {
       o = `BUST -${store.formatNumber(hh.bet)}`;
     } else if (dv > 21) {
-      const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', hh.bet);
       payout += hh.bet + boostedProfit;
       o = `Dealer busts +${store.formatNumber(boostedProfit)}`;
+      if (effects && effects.length) o += '\n' + effects.join('\n');
     } else if (v > dv) {
-      const boostedProfit = store.applyProfitBoost(uid, 'blackjack', hh.bet);
+      const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', hh.bet);
       payout += hh.bet + boostedProfit;
       o = `Win +${store.formatNumber(boostedProfit)}`;
+      if (effects && effects.length) o += '\n' + effects.join('\n');
     } else if (v < dv) {
       o = `Lose -${store.formatNumber(hh.bet)}`;
     } else {
@@ -225,22 +227,24 @@ async function resolveStandard(interaction, uid, game, doubled) {
   let outcome, color, detailParts = [];
 
   if (dv > 21) {
-    const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
+    const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const tax = store.addToUniversalPool(boostedProfit, uid);
     store.setBalance(uid, bal + game.bet + boostedProfit - tax);
     if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
     outcome = `Dealer busts! **+${store.formatNumber(boostedProfit - tax)}**`;
+    if (effects && effects.length) outcome += '\n' + effects.join('\n');
     color = 0x57f287;
   } else if (pv > dv) {
-    const boostedProfit = store.applyProfitBoost(uid, 'blackjack', game.bet);
+    const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const tax = store.addToUniversalPool(boostedProfit, uid);
     store.setBalance(uid, bal + game.bet + boostedProfit - tax);
     if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
     outcome = `You win! ${pv} > ${dv} - **+${store.formatNumber(boostedProfit - tax)}**`;
+    if (effects && effects.length) outcome += '\n' + effects.join('\n');
     color = 0x57f287;
   } else if (dv > pv) {
     const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
@@ -334,18 +338,19 @@ async function handleCommand(interaction) {
     }
     // Blackjack pays 2.5x total (bet back + 1.5x profit).
     const baseProfit = Math.floor(bet * CONFIG.games.blackjack.naturalBlackjackProfitMultiplier);
-    const boostedProfit = store.applyProfitBoost(userId, 'blackjack', baseProfit);
+    const { profit: boostedProfit, effects } = store.applyProfitBoost(userId, 'blackjack', baseProfit);
     const pityResult = store.recordWin(userId, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const tax = store.addToUniversalPool(boostedProfit, userId);
     store.setBalance(userId, bal + boostedProfit - tax);
     const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    const effectLine = effects && effects.length ? `\n${effects.join('\n')}` : '';
     return interaction.reply({
       embeds: [buildResultEmbed({
         title: 'Blackjack!',
         playerCards: ph, pv: 21,
         dealerCards: dh, dv: dvv,
-        outcome: `🎉 Natural Blackjack! **+${store.formatNumber(boostedProfit - tax)}**`,
+        outcome: `🎉 Natural Blackjack! **+${store.formatNumber(boostedProfit - tax)}**${effectLine}`,
         color: 0x57f287,
         details: [{ name: '\u200b', value: `${taxLine ? store.formatNumber(tax) + ' tax → pool\n' : ''}Balance: **${store.formatNumber(store.getBalance(userId))}**`, inline: false }],
       })],
