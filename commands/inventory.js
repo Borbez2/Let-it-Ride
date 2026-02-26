@@ -68,23 +68,21 @@ function parseInventoryCustomId(customId) {
   return { tab: parts[1], page, userId };
 }
 
-function buildInventoryNavRow(userId, activeTab) {
-  const tabsToShow = [
-    { key: 'overview', label: '◈ Overview' },
-    { key: 'common', label: `${RARITIES.common.emoji} Common` },
-    { key: 'uncommon', label: `${RARITIES.uncommon.emoji} Uncommon` },
-    { key: 'rare', label: `${RARITIES.rare.emoji} Rare` },
-    { key: 'legendary', label: `${RARITIES.legendary.emoji} Legendary` },
-  ];
+// build dynamic navigation rows for the inventory tabs (overview + all rarities)
+function buildInventoryNavRows(userId, activeTab) {
+  const tabs = ['overview', ...RARITY_ORDER];
   const rows = [];
-  for (let i = 0; i < tabsToShow.length; i += 5) {
+  for (let i = 0; i < tabs.length; i += 5) {
     const row = new ActionRowBuilder();
-    for (const tab of tabsToShow.slice(i, i + 5)) {
+    for (const key of tabs.slice(i, i + 5)) {
+      const label = key === 'overview'
+        ? '◈ Overview'
+        : `${RARITIES[key]?.emoji || ''} ${key.charAt(0).toUpperCase() + key.slice(1)}`;
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(`inv_${tab.key}_0_${userId}`)
-          .setLabel(tab.label)
-          .setStyle(tab.key === activeTab ? ButtonStyle.Primary : ButtonStyle.Secondary)
+          .setCustomId(`inv_${key}_0_${userId}`)
+          .setLabel(label)
+          .setStyle(key === activeTab ? ButtonStyle.Primary : ButtonStyle.Secondary)
       );
     }
     rows.push(row);
@@ -92,23 +90,7 @@ function buildInventoryNavRow(userId, activeTab) {
   return rows;
 }
 
-function buildInventoryNavRow2(userId, activeTab) {
-  const tabsToShow = [
-    { key: 'epic', label: `${RARITIES.epic.emoji} Epic` },
-    { key: 'mythic', label: `${RARITIES.mythic.emoji} Mythic` },
-    { key: 'divine', label: `${RARITIES.divine.emoji} Divine` },
-  ];
-  const row = new ActionRowBuilder();
-  for (const tab of tabsToShow) {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`inv_${tab.key}_0_${userId}`)
-        .setLabel(tab.label)
-        .setStyle(tab.key === activeTab ? ButtonStyle.Primary : ButtonStyle.Secondary)
-    );
-  }
-  return row;
-}
+// legacy helpers removed; calls below updated
 
 function buildInventoryPageRow(userId, tab, page, totalPages) {
   if (totalPages <= 1) return null;
@@ -281,10 +263,9 @@ function renderInventoryRarityPage(userId, username, rarity, page = 0) {
 
 function buildInventoryComponents(userId, tab, page, totalPages) {
   let rows = [];
-  const navRows = buildInventoryNavRow(userId, tab);
+  const navRows = buildInventoryNavRows(userId, tab);
   if (Array.isArray(navRows)) rows = rows.concat(navRows);
   else rows.push(navRows);
-  rows.push(buildInventoryNavRow2(userId, tab));
   const pageRow = buildInventoryPageRow(userId, tab, page, totalPages || 1);
   if (pageRow) rows.push(pageRow);
 

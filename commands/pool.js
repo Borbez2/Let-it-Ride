@@ -47,7 +47,7 @@ function buildMainEmbed(userId) {
       },
       {
         name: '🎰 Daily Spin Pool',
-        value: `> Total: **${store.formatNumber(poolData.lossPool)}** coins\n> 5% loss tax - spins daily at 11:15pm\n> Winnings multiplied by your Spin Payout Mult upgrade`,
+        value: `> Total: **${store.formatNumber(poolData.lossPool)}** coins\n> 5% loss tax (tiered contributions mirror win slabs) - spins daily at 11:15pm\n> Winnings multiplied by your Spin Payout Mult upgrade`,
         inline: false,
       },
     ],

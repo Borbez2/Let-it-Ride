@@ -217,7 +217,7 @@ function renderMysteryBoxEmbed(userId, successMessage) {
   const fields = [
     {
       name: '🎁 Mystery Box',
-      value: `> **${store.formatNumber(cost)}** coins each • Random collectible item • Up to **${maxQty}** at once\n> Duplicates give coin compensation. 7 rarity tiers.`,
+      value: `> **${store.formatNumber(cost)}** coins each • Random collectible item • Up to **${maxQty}** at once\n> Duplicates give coin compensation. ${CONFIG.ui.rarityOrder.length} rarity tiers (includes 🔴 special & 🟡 godly).`,
       inline: false,
     },
     {

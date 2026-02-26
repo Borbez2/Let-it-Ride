@@ -29,15 +29,15 @@ const CONFIG = {
       // then scales down progressively for higher balances.
       tieredInterest: {
         slabs: [
-          { threshold: 1000000,             scale: 1 },       // Slab 1: 0 → 1M, full rate r
-          { threshold: 10000000,            scale: 0.5 },     // Slab 2: 1M → 10M, r × 0.5
-          { threshold: 100000000,           scale: 0.05 },    // Slab 3: 10M → 100M, r × 0.05
-          { threshold: 1000000000,          scale: 0.01 },    // Slab 4: 100M → 1B, r × 0.01
-          { threshold: 1000000000000,       scale: 0.0001 },  // Slab 5: 1B → 1T, r × 0.0001
-          { threshold: 1000000000000000,    scale: 0.00005 }, // Slab 6: 1T → 1Q, r × 0.00005
-          // Slab 7: above 1Q, r × 0.00001
+          { threshold: 1000000,             scale: 1 },       // Slab 1: 0 → 1M, base rate r
+          { threshold: 10000000,            scale: 0.9 },     // Slab 2: 1M → 10M, slight drop
+          { threshold: 100000000,           scale: 0.8 },    // Slab 3: 10M → 100M, modest drop
+          { threshold: 1000000000,          scale: 0.6 },    // Slab 4: 100M → 1B, noticeable drop
+          { threshold: 1000000000000,       scale: 0.4 },  // Slab 5: 1B → 1T, steeper drop
+          { threshold: 1000000000000000,    scale: 0.2 }, // Slab 6: 1T → 1Q, much lower rate
+          // above 1Q will use finalScale
         ],
-        finalScale: 0.00001,
+        finalScale: 0.1,
       },
     },
     pools: {
@@ -48,14 +48,18 @@ const CONFIG = {
       giveawayExpiryCheckMs: 30 * 1000,
       // Tiered contribution tax: larger wins are taxed at progressively lower
       // rates (mirrors bank interest slab design). Base rate = universalTaxRate.
+      // Tiered contribution tax: larger wins are taxed at progressively lower
+      // rates (mirrors bank interest slab design). Base rate = universalTaxRate.
+      // Buffed so tiny wins funnel much more back into the pool while high-roll
+      // jackpots contribute only a sliver.
       contributionSlabs: [
-        { threshold: 100000,      scale: 1 },      // Slab 1: 0 → 100K, full 0.5%
-        { threshold: 1000000,     scale: 0.5 },    // Slab 2: 100K → 1M, 0.25%
-        { threshold: 10000000,    scale: 0.1 },    // Slab 3: 1M → 10M, 0.05%
-        { threshold: 100000000,   scale: 0.05 },   // Slab 4: 10M → 100M, 0.025%
-        { threshold: 1000000000,  scale: 0.01 },   // Slab 5: 100M → 1B, 0.005%
+        { threshold: 100000,      scale: 10 },     // Slab 1: 0 → 100K, 10× base rate
+        { threshold: 1000000,     scale: 1 },      // Slab 2: 100K → 1M, base rate
+        { threshold: 10000000,    scale: 0.5 },    // Slab 3: 1M → 10M, half rate
+        { threshold: 100000000,   scale: 0.2 },    // Slab 4: 10M → 100M, 20% rate
+        { threshold: 1000000000,  scale: 0.1 },    // Slab 5: 100M → 1B, 10% rate
       ],
-      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.0025%
+      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.5% of base
     },
     upgrades: {
       maxLevel: 100,
@@ -66,11 +70,11 @@ const CONFIG = {
       universalIncomeChanceCap: 20,
       // Cost generation parameters (exponential curve, shared for all upgrades).
       // Cost formula: floor(baseCost * growthRate^level)
-      // Tuned so level 100 costs approximately 1 Trillion coins.
-      // baseCost=1000 (level 1 start), growthRate=1.233: 1000*1.233^99 ≈ 1T
+      // Tuned so level 100 costs approximately 1 billion coins instead of 1 trillion.
+      // baseCost=1000 (level 1 start), growthRate≈1.15: 1000*1.15^99 ≈ 1e9
       costParams: {
         baseCost: 1000,       // cost of level 1
-        growthRate: 1.233,    // exponential growth; level 100 ≈ 1T
+        growthRate: 1.15,     // exponential growth; level 100 ≈ 1B
       },
     },
   },
@@ -188,15 +192,20 @@ const CONFIG = {
   // Shared emojis and rarity model
   // -------------------------------
   ui: {
-    rarityOrder: ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine'],
+    // order matters -- earlier rarities are treated as "lower" than later
+    // ones for display and sorting purposes. we append the two new exotic tiers
+    // at the very end so they appear most prominently in UIs.
+    rarityOrder: ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'divine', 'special', 'godly'],
     rarities: {
-      common: { emoji: '⬜', color: null },
-      uncommon: { emoji: '🟩', color: null },
-      rare: { emoji: '🟦', color: null },
-      legendary: { emoji: '🟨', color: null },
-      epic: { emoji: '🟪', color: null },
-      mythic: { emoji: '🩷', color: null },
-      divine: { emoji: '🩵', color: null },
+      common:     { emoji: '⬜', color: null },
+      uncommon:   { emoji: '🟩', color: null },
+      rare:       { emoji: '🟦', color: null },
+      legendary:  { emoji: '🟨', color: null },
+      epic:       { emoji: '🟪', color: null },
+      mythic:     { emoji: '🩷', color: null },
+      divine:     { emoji: '🩵', color: null },
+      special:    { emoji: '🔴', color: null },   // obscenely rare red-tier items
+      godly:      { emoji: '🟡', color: null },   // single golden item
     },
   },
 
@@ -204,18 +213,37 @@ const CONFIG = {
   // Mystery box / collectibles
   // -------------------------------
   collectibles: {
-    totalPlaceholders: 700,
-    perRarity: 100,
+    // total items across every rarity. we no longer use a flat perRarity count
+    // because rarities are highly imbalanced: commons dominate while high-end
+    // tiers are extremely scarce. totalPlaceholders MUST equal the sum of the
+    // numbers below, otherwise the generated arrays will be wrong.
+    totalPlaceholders: 1000,
+    perRarity: null,          // kept for legacy code but no longer used; see help text
+    // explicit count for each rarity (must add to totalPlaceholders).
+    // values are intentionally descending; higher rarities have fewer items.
+    countByRarity: {
+      common:    400,
+      uncommon:  300,
+      rare:      150,
+      epic:       80,
+      legendary:  40,
+      mythic:     20,
+      divine:      5,
+      special:     3,
+      godly:       2,
+    },
     mysteryBox: {
       cost: 5000,
       duplicateCompensationByRarity: {
-        common: 1600,
-        uncommon: 3500,
-        rare: 12000,
-        epic: 30000,
+        common:    1600,
+        uncommon:  3500,
+        rare:      12000,
+        epic:      30000,
         legendary: 100000,
-        mythic: 300000,
-        divine: 1250000,
+        mythic:    300000,
+        divine:    1250000,
+        special:   5000000,
+        godly:     10000000,
       },
       pity: {
         luckPerStreakStep: 0.02,
@@ -232,13 +260,15 @@ const CONFIG = {
       },
       highRarityThreshold: 'epic',
       weightsByRarity: {
-        common: 80,
-        uncommon: 18.29,
-        rare: 1,
-        epic: 0.5,
-        legendary: 0.15,
-        mythic: 0.05,
-        divine: 0.01,
+        common:    80,
+        uncommon:  18.29,
+        rare:       1,
+        epic:       0.5,
+        legendary:  0.15,
+        mythic:     0.05,
+        divine:     0.01,
+        special:   0.0005,   // extremely low drop rate
+        godly:     0.0001,   // single-item godly tier
       },
       // Per-item stat boosts: zeroed out - bonuses only come from completing a full set.
       // perItemDisplayBuff below defines the DISPLAYED value per item (informational only).
@@ -250,6 +280,8 @@ const CONFIG = {
         epic:      { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
         mythic:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
         divine:    { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        special:   { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
+        godly:     { interestRate: 0, cashbackRate: 0, minesRevealChance: 0, universalDoubleChance: 0, spinWeight: 0 },
       },
       // Displayed buff per individual item (purely informational - unlocked only when full set is complete).
       // Each item shows ONE buff type cycling: interest → cashback → mines → income → spin.
@@ -262,6 +294,8 @@ const CONFIG = {
         legendary: { interestRate: 0.0003,   cashbackRate: 0.00005,   minesRevealChance: 0.0005,   universalDoubleChance: 0.0013,   spinWeight: 0.0065   },
         mythic:    { interestRate: 0.0015,   cashbackRate: 0.00025,   minesRevealChance: 0.0025,   universalDoubleChance: 0.0065,   spinWeight: 0.032    },
         divine:    { interestRate: 0.006,    cashbackRate: 0.001,     minesRevealChance: 0.01,     universalDoubleChance: 0.026,    spinWeight: 0.13     },
+        special:   { interestRate: 0.02,     cashbackRate: 0.002,     minesRevealChance: 0.03,     universalDoubleChance: 0.08,    spinWeight: 0.4      },
+        godly:     { interestRate: 0.05,     cashbackRate: 0.005,     minesRevealChance: 0.08,     universalDoubleChance: 0.2,    spinWeight: 1.0      },
       },
       // Bonus granted when ALL items of a rarity are collected (the only real economy effect).
       // Nerfed: cashback/interest kept in check; payout mult and income chance more generous.
@@ -273,6 +307,8 @@ const CONFIG = {
         legendary: { interestRate: 0.004,    cashbackRate: 0.0008,   minesRevealChance: 0.005,   universalDoubleChance: 0.013,   spinWeight: 0.065  },
         mythic:    { interestRate: 0.009,    cashbackRate: 0.0018,   minesRevealChance: 0.012,   universalDoubleChance: 0.032,   spinWeight: 0.16   },
         divine:    { interestRate: 0.015,    cashbackRate: 0.003,    minesRevealChance: 0.025,   universalDoubleChance: 0.065,   spinWeight: 0.32   },
+        special:   { interestRate: 0.03,     cashbackRate: 0.006,    minesRevealChance: 0.05,   universalDoubleChance: 0.15,   spinWeight: 0.7    },
+        godly:     { interestRate: 0.06,     cashbackRate: 0.012,    minesRevealChance: 0.1,    universalDoubleChance: 0.3,   spinWeight: 1.5    },
       },
     },
 
@@ -302,12 +338,14 @@ const CONFIG = {
       highRarityThreshold: 'epic',
       // Proportional redistribution of non-common weights from the base box (sum ~20)
       weightsByRarity: {
-        uncommon:  18.29,
-        rare:       1,
-        epic:       0.5,
-        legendary:  0.15,
-        mythic:     0.05,
-        divine:     0.01,
+        uncommon:   18.29,
+        rare:        1,
+        epic:        0.5,
+        legendary:   0.15,
+        mythic:      0.05,
+        divine:      0.01,
+        special:     0.0005,
+        godly:       0.0001,
       },
     },
   },
@@ -477,10 +515,11 @@ CONFIG.games.mines.total = CONFIG.games.mines.rows * CONFIG.games.mines.cols;
 
 const COLLECTIBLES = [];
 const RARITY_ORDER_KEYS = CONFIG.ui.rarityOrder;
-const PER_RARITY = CONFIG.collectibles.perRarity;
+const COUNT_BY_RARITY = CONFIG.collectibles.countByRarity || {};
 let collectibleIdx = 0;
 for (const rarity of RARITY_ORDER_KEYS) {
-  for (let j = 1; j <= PER_RARITY; j++) {
+  const count = COUNT_BY_RARITY[rarity] || 0;
+  for (let j = 1; j <= count; j++) {
     collectibleIdx++;
     COLLECTIBLES.push({
       id: `placeholder_${collectibleIdx}`,

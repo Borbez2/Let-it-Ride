@@ -223,17 +223,19 @@ View both pools with `/pool`.
 Buy mystery boxes through `/shop` for **5,000 coins** each (standard) or **500,000 coins** (premium, no common items).
 On the shop's **Mystery Box** page you can now see how many duplicate items you have and sell all of them directly with a button (or still use `/inventory`).
 
-There are **120 collectibles** across 7 rarity tiers:
+There are **1,000 collectibles** spread across 9 rarity tiers:
 
 | Rarity | Items | Base Drop Weight | Dupe Compensation |
 |--------|-------|-----------------|-------------------|
-| ⬜ Common | 40 | 80 | 1,600 |
-| 🟩 Uncommon | 25 | 18.29 | 3,500 |
-| 🟦 Rare | 20 | 1 | 12,000 |
-| 🟪 Epic | 15 | 0.5 | 30,000 |
-| 🟨 Legendary | 10 | 0.15 | 100,000 |
-| 🩷 Mythic | 5 | 0.05 | 300,000 |
-| 🩵 Divine | 5 | 0.01 | 1,250,000 |
+| ⬜ Common    | 400 | 80     | 1,600    |
+| 🟩 Uncommon  | 300 | 18.29  | 3,500    |
+| 🟦 Rare      | 150 | 1      | 12,000   |
+| 🟪 Epic      | 80  | 0.5    | 30,000   |
+| 🟨 Legendary | 40  | 0.15   | 100,000  |
+| 🩷 Mythic    | 20  | 0.05   | 300,000  |
+| 🩵 Divine    | 5   | 0.01   | 1,250,000|
+| 🔴 Special   | 3   | 0.0005 | 5,000,000|
+| 🟡 Godly     | 2   | 0.0001 | 10,000,000|
 
 Duplicate items are automatically converted to coins based on the compensation table above.
 

@@ -29,7 +29,7 @@ function buildEconomyPage() {
       },
       {
         name: '📈 How to Earn',
-        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15 AM.`,
+        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15 AM (loss tax now uses the same tiered slab rules as wins).`,
         inline: false,
       },
       {
@@ -48,7 +48,7 @@ function buildEconomyPage() {
           const finalPct = contFinal * 100;
           const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
           lines += `> • ${store.formatNumber(prev)}+: **${finalFmt}%** of tax added to pool\n`;
-          lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab.`;
+          lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab (applies to both win and loss pools).`;
           return lines;
         })(),
         inline: false,
@@ -173,7 +173,7 @@ function buildCollectiblesPage() {
     fields: [
       {
         name: '🎁 Mystery Boxes',
-        value: `> Buy mystery boxes through **/shop** (Mystery Boxes section). Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are ${CONFIG.collectibles.totalPlaceholders} collectibles across 7 rarity tiers (${CONFIG.collectibles.perRarity} per rarity).`,
+        value: `> Buy mystery boxes through **/shop** (Mystery Boxes section). Each box costs **${store.formatNumber(CONFIG.collectibles.mysteryBox.cost)}** coins. There are ${CONFIG.collectibles.totalPlaceholders} collectibles split across ${CONFIG.ui.rarityOrder.length} rarity tiers (see rarity breakdown below).`,
         inline: false,
       },
       {

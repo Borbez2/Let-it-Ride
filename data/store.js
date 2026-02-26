@@ -838,8 +838,18 @@ function getPoolSlabStats() {
 }
 
 function addToLossPool(amount) {
+  // Flat loss tax is still charged on every loss (returned for bookkeeping).
   const tax = Math.floor(amount * LOSS_POOL_RATE);
-  if (tax > 0) { poolData.lossPool += tax; savePool(); }
+
+  // However, the portion that actually enters the daily spin pool is now
+  // tiered identically to win contributions; small losses feed the pool much
+  // more aggressively than huge losses.
+  const slabResult = computeTieredTaxWithSlabs(amount, LOSS_POOL_RATE);
+  if (slabResult.total > 0) {
+    poolData.lossPool += slabResult.total;
+    savePool();
+  }
+
   return tax;
 }
 
