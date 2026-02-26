@@ -58,7 +58,7 @@ When entering amounts, you can type `100`, `4.7k`, `1.2m`, `2b`, or `all`. Value
 
 ### Coin Flip (`/flip`)
 
-Bet on a coin flip. Win chance is exactly **50%**. Roughly break-even before cashback and luck buffs.
+Bet on a coin flip. Win chance is exactly **50%**. Roughly break-even before cashback and luck buffs. If you bet your entire balance, the result will include a special “‼️ **ALL IN!**” indicator to show you went all‑in.
 
 - Counts toward pity/luck streak tracking.
 - Can flip 1-10 times at once with the `quantity` parameter.

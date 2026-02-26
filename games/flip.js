@@ -22,6 +22,9 @@ async function handleFlip(interaction) {
     return interaction.reply({ embeds: [{ color: 0xed4245, description: `Not enough coins. You only have **${store.formatNumber(bal)}**` }] });
   }
 
+  // special flag for all-in bets
+  const allIn = bet * qty === bal;
+
   if (qty === 1) {
     const flipModifier = store.getWinChanceModifier(userId);
     const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
@@ -32,10 +35,11 @@ async function handleFlip(interaction) {
       const tax = store.addToUniversalPool(profit, userId);
       store.setBalance(userId, bal + profit - tax);
       const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
+      const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
       return interaction.reply({ embeds: [{
         color: 0x57f287,
         title: '🪙 Coin Flip',
-        description: `**WIN** +**${store.formatNumber(profit - tax)}**${taxLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+        description: `**WIN** +**${store.formatNumber(profit - tax)}**${taxLine}${allInLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
       }] });
     }
     store.setBalance(userId, bal - bet);
@@ -44,10 +48,11 @@ async function handleFlip(interaction) {
     const cb = store.applyCashback(userId, bet);
     store.addToLossPool(bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
+    const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
     return interaction.reply({ embeds: [{
       color: 0xed4245,
       title: '🪙 Coin Flip',
-      description: `**LOSE** -**${store.formatNumber(bet)}**${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+      description: `**LOSE** -**${store.formatNumber(bet)}**${cbm}${allInLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
     }] });
   }
 
@@ -89,6 +94,7 @@ async function handleFlip(interaction) {
   }
 
   const displayNet = boostedNet - totalTax;
+  const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
 
   if (lastTriggeredPity) {
     await maybeAnnouncePityTrigger(interaction, userId, lastTriggeredPity);
@@ -100,7 +106,7 @@ async function handleFlip(interaction) {
   return interaction.reply({ embeds: [{
     color,
     title: `🪙 Coin Flip x${qty}`,
-    description: `${results.join(' ')}\n**${wins}**W **${qty - wins}**L | Net: **${displayNet >= 0 ? '+' : ''}${store.formatNumber(displayNet)}**${taxLine}${cbm}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+    description: `${results.join(' ')}\n**${wins}**W **${qty - wins}**L | Net: **${displayNet >= 0 ? '+' : ''}${store.formatNumber(displayNet)}**${taxLine}${cbm}${allInLine}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
   }] });
 }
 
