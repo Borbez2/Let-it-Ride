@@ -53,13 +53,13 @@ const CONFIG = {
       // Buffed so tiny wins funnel much more back into the pool while high-roll
       // jackpots contribute only a sliver.
       contributionSlabs: [
-        { threshold: 100000,      scale: 10 },     // Slab 1: 0 → 100K, 10× base rate
-        { threshold: 1000000,     scale: 1 },      // Slab 2: 100K → 1M, base rate
-        { threshold: 10000000,    scale: 0.5 },    // Slab 3: 1M → 10M, half rate
-        { threshold: 100000000,   scale: 0.2 },    // Slab 4: 10M → 100M, 20% rate
-        { threshold: 1000000000,  scale: 0.1 },    // Slab 5: 100M → 1B, 10% rate
+        { threshold: 100000,      scale: 100 },     // Slab 1: 0 → 100K, 10000% of base rate
+        { threshold: 1000000,     scale: 10 },      // Slab 2: 100K → 1M, 1000% of base rate
+        { threshold: 10000000,    scale: 0.5 },     // Slab 3: 1M → 10M, 50% of base rate
+        { threshold: 100000000,   scale: 0.2 },     // Slab 4: 10M → 100M, 20% rate
+        { threshold: 1000000000,  scale: 0.1 },     // Slab 5: 100M → 1B, 10% rate
       ],
-      contributionFinalScale: 0.005,               // Slab 6: above 1B, 0.5% of base
+      contributionFinalScale: 0.01,                // Slab 6: above 1B, 1% of base
     },
     upgrades: {
       maxLevel: 100,

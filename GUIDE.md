@@ -186,31 +186,33 @@ Use `/bank` to view your current balance, rate, and detailed breakdown.
 
 ---
 
-## Universal Pool & Spin Pool
 
-### Universal Pool
+## Hourly Pool & Daily Pool
 
-- **0.5%** of every game win (profit portion) goes into the pool.
+### Hourly Pool
+
+- **0.1%** of every game win (profit portion) is taxed and split between the hourly and daily pools.
 - Tax always applies (no minimum net worth threshold).
-- Larger wins are taxed at progressively lower rates (tiered contribution slabs).
-- Every **hour**, the entire pool is split equally among all registered players and deposited to their banks.
+- Smaller wins contribute much more to the pools early on, then the rate drops for bigger wins (see slabs below).
+- Every **hour**, the hourly pool is split equally among all registered players and deposited to their banks.
 
-Contribution slabs:
+Contribution slabs (early wins are heavily buffed):
 
 | Profit Range | Tax Rate |
 |-------------|----------|
-| 0 to 100k | 0.5% |
-| 100k to 1M | 0.25% |
-| 1M to 10M | 0.05% |
-| 10M to 100M | 0.025% |
-| 100M to 1B | 0.005% |
-| Above 1B | 0.0025% |
+| 0 to 100k | 10000% |
+| 100k to 1M | 1000% |
+| 1M to 10M | 50% |
+| 10M to 100M | 20% |
+| 100M to 1B | 10% |
+| Above 1B | 1% |
 
-### Spin Pool (Daily Spin)
+### Daily Pool
 
-- **0.5%** of every game loss goes into the Spin Pool.
-- Each day at **11:15 PM** (local server time), one random player wins the entire pool.
+- **0.1%** of every game win (profit portion) is taxed and split between the hourly and daily pools.
+- Each day at **11:15 PM** (local server time), one random player wins the entire daily pool.
 - Your Spin Multiplier upgrade scales the payout.
+- Losses are tracked for stats, but you are not taxed on losses. The same slabs apply for stats.
 
 View both pools with `/pool`.
 

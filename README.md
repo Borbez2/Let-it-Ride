@@ -73,8 +73,8 @@ Persistent session state (so interactions survive restart) includes:
 - New wallet starts with `1000` coins.
 - Daily base reward is `500` with `+50` per streak day.
 - Bank pays hourly from accrued interest (base `1%` daily + upgrades + item bonuses).
-- Universal pool is funded by win tax and distributed hourly.
-- Loss pool is funded by loss tax and used for daily spin payout.
+- Hourly pool is funded by win tax and distributed hourly.
+- Daily pool is funded by win tax and used for daily spin payout.
 - Upgrades cover interest, cashback, spin weight, and universal-income double chance.
 - Collectibles can add passive bonuses (interest, cashback, mystery luck, EV boosts, mines reveal save).
 
@@ -111,8 +111,8 @@ Admin entrypoint:
 
 ## Scheduled jobs
 
-- Hourly: bank processing + universal pool distribution
-- Daily at 11:15 local server time: daily spin cycle
+- Hourly: bank processing + hourly pool distribution
+- Daily at 11:15 local server time: daily pool payout
 - Every 30s: giveaway expiry check
 - Hourly (top of hour): database backup creation
 

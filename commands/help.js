@@ -15,8 +15,6 @@ const TOTAL_PAGES = PAGE_TITLES.length;
 
 function buildEconomyPage() {
   const taxPct = (CONFIG.economy.pools.universalTaxRate * 100).toFixed(1);
-  const lossPct = (CONFIG.economy.pools.lossTaxRate * 100).toFixed(1);
-
   return {
     title: PAGE_TITLES[0],
     color: 0x2b2d31,
@@ -29,26 +27,26 @@ function buildEconomyPage() {
       },
       {
         name: '📈 How to Earn',
-        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit goes to the **Universal Pool**, which gets split equally to everyone each hour (straight to your bank). When you lose, **${lossPct}%** goes to the **Spin Pool** and one lucky player wins the whole thing each day at 11:15 AM (loss tax now uses the same tiered slab rules as wins).`,
+        value: `> Use **/daily** to claim free coins and build a streak bonus. When you win a game, **${taxPct}%** of your profit is taxed and split between the **Hourly Pool** and the **Daily Pool**. The hourly pool is split equally to everyone each hour (straight to your bank). The daily pool is given to one lucky player each day at 11:15 AM. Losses are tracked for stats, but you are not taxed on losses.`,
         inline: false,
       },
       {
         name: '🏦 Pool Contribution Slabs',
         value: (() => {
           const contSlabs = CONFIG.economy.pools.contributionSlabs || [];
-          const contFinal = CONFIG.economy.pools.contributionFinalScale ?? 0.005;
-          let lines = `> Your **${taxPct}%** win tax always applies, but **how much of it** reaches the pool depends on the size of your win:\n`;
+          const contFinal = CONFIG.economy.pools.contributionFinalScale ?? 0.01;
+          let lines = `> Your **${taxPct}%** win tax always applies, but **how much of it** reaches the pools depends on the size of your win. Early on, small wins contribute much more to keep you motivated!\n`;
           let prev = 0;
           for (let i = 0; i < contSlabs.length; i++) {
             const s = contSlabs[i];
             const pct = (s.scale * 100).toFixed(0);
-            lines += `> • ${store.formatNumber(prev)} – ${store.formatNumber(s.threshold)}: **${pct}%** of tax added to pool\n`;
+            lines += `> • ${store.formatNumber(prev)} – ${store.formatNumber(s.threshold)}: **${pct}%** of tax added to pools\n`;
             prev = s.threshold;
           }
           const finalPct = contFinal * 100;
-          const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
-          lines += `> • ${store.formatNumber(prev)}+: **${finalFmt}%** of tax added to pool\n`;
-          lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab (applies to both win and loss pools).`;
+          const finalFmt = finalPct >= 0.1 ? finalFmt.toFixed(1) : finalPct.toFixed(2);
+          lines += `> • ${store.formatNumber(prev)}+: **${finalFmt}%** of tax added to pools\n`;
+          lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab.`;
           return lines;
         })(),
         inline: false,

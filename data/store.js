@@ -865,13 +865,18 @@ function computeTieredTaxWithSlabs(amount, baseRate) {
   return result;
 }
 
+
+// New win tax: 0.1% of profit, split between hourly and daily pools, with buffed early scaling
 function addToUniversalPool(amount, userId) {
   // Win tax always applies (flat rate)
   const flatTax = Math.floor(amount * POOL_TAX_RATE);
-  // But only a tiered portion actually enters the pool (rest is burned)
+  // Buffed: apply a big multiple to early wins, then reduce for higher amounts
   const slabResult = computeTieredTaxWithSlabs(amount, POOL_TAX_RATE);
   if (slabResult.total > 0) {
-    poolData.universalPool += slabResult.total;
+    // Split the taxed amount equally between both pools
+    const half = Math.floor(slabResult.total / 2);
+    poolData.universalPool += half;
+    poolData.lossPool += slabResult.total - half; // remainder to daily pool
     // Track cumulative contributions per slab for the breakdown page
     const slabStats = getRuntimeState('poolSlabStats', {}) || {};
     for (let i = 0; i < slabResult.slabAmounts.length; i++) {
@@ -889,21 +894,24 @@ function getPoolSlabStats() {
   return getRuntimeState('poolSlabStats', {}) || {};
 }
 
-function addToLossPool(amount) {
-  // Flat loss tax is still charged on every loss (returned for bookkeeping).
-  const tax = Math.floor(amount * LOSS_POOL_RATE);
 
-  // However, the portion that actually enters the daily spin pool is now
-  // tiered identically to win contributions; small losses feed the pool much
-  // more aggressively than huge losses.
-  const slabResult = computeTieredTaxWithSlabs(amount, LOSS_POOL_RATE);
+
+// Virtual loss tax: tracked for stats, not deducted from user balance
+function recordVirtualLossTax(amount, userId) {
+  // Use the same slabs as win tax, but do not deduct from user
+  const slabResult = computeTieredTaxWithSlabs(amount, POOL_TAX_RATE);
   if (slabResult.total > 0) {
-    poolData.lossPool += slabResult.total;
+    // Split the virtual taxed amount equally between both pools for stats
+    const half = Math.floor(slabResult.total / 2);
+    poolData.universalPool += half;
+    poolData.lossPool += slabResult.total - half;
+    // Optionally, track stats for virtual loss tax if needed
+    // (no user balance deduction)
     savePool();
   }
-
-  return tax;
+  return slabResult.total;
 }
+
 
 // Wallet helpers.
 
@@ -2073,7 +2081,7 @@ function countDuplicates(userId) {
 
 module.exports = {
   getPoolData, savePool,
-  addToUniversalPool, addToLossPool, clearHourlyPool, clearDailySpinPool,
+  addToUniversalPool, recordVirtualLossTax, clearHourlyPool, clearDailySpinPool,
   getAllWallets, getWallet, hasWallet, deleteWallet, resetPurse, resetAllPursesAndBanks,
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback, applyLuckCashback,

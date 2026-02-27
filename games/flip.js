@@ -27,10 +27,15 @@ async function handleFlip(interaction) {
 
   if (qty === 1) {
     const flipModifier = store.getWinChanceModifier(userId);
-    const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
+    const winChance = CONFIG.games.flip.winChance * flipModifier;
+    // Debug log for diagnosis
+    console.log(`[FLIP DEBUG] userId=${userId} winChance=${winChance} flipModifier=${flipModifier}`);
+    const won = Math.random() < winChance;
     if (won) {
       const { profit, effects } = store.applyProfitBoost(userId, 'flip', bet);
       const pityResult = store.recordWin(userId, 'flip', profit);
+      // Debug log for win
+      console.log(`[FLIP DEBUG] WIN userId=${userId} profit=${profit} pityResult=${JSON.stringify(pityResult)}`);
       await maybeAnnouncePityTrigger(interaction, userId, pityResult);
       const tax = store.addToUniversalPool(profit, userId);
       store.setBalance(userId, bal + profit - tax);
@@ -45,9 +50,11 @@ async function handleFlip(interaction) {
     }
     store.setBalance(userId, bal - bet);
     const pityResult = store.recordLoss(userId, 'flip', bet);
+    // Debug log for loss
+    console.log(`[FLIP DEBUG] LOSE userId=${userId} bet=${bet} pityResult=${JSON.stringify(pityResult)}`);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet);
-    store.addToLossPool(bet);
+    store.recordVirtualLossTax(bet, userId);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
     const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
     return interaction.reply({ embeds: [{
@@ -66,7 +73,10 @@ async function handleFlip(interaction) {
 
   for (let i = 0; i < qty; i++) {
     const flipModifier = store.getWinChanceModifier(userId);
-    const won = Math.random() < CONFIG.games.flip.winChance * flipModifier;
+    const winChance = CONFIG.games.flip.winChance * flipModifier;
+    // Debug log for diagnosis
+    console.log(`[FLIP DEBUG] [MULTI] userId=${userId} winChance=${winChance} flipModifier=${flipModifier} flip#=${i+1}`);
+    const won = Math.random() < winChance;
     results.push(won ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
     if (won) {
       wins++;
@@ -75,10 +85,14 @@ async function handleFlip(interaction) {
       if (effects && effects.length) {
         multiEffects.push(...effects);
       }
-      store.recordWin(userId, 'flip', profit);
+      const pityResult = store.recordWin(userId, 'flip', profit);
+      // Debug log for win
+      console.log(`[FLIP DEBUG] [MULTI] WIN userId=${userId} profit=${profit} pityResult=${JSON.stringify(pityResult)} flip#=${i+1}`);
     } else {
       totalLossAmount += bet;
       const pityResult = store.recordLoss(userId, 'flip', bet);
+      // Debug log for loss
+      console.log(`[FLIP DEBUG] [MULTI] LOSE userId=${userId} bet=${bet} pityResult=${JSON.stringify(pityResult)} flip#=${i+1}`);
       if (pityResult && pityResult.triggered) lastTriggeredPity = pityResult;
     }
   }
@@ -94,7 +108,7 @@ async function handleFlip(interaction) {
   let cbm = '';
   if (totalLossAmount > 0) {
     const cb = store.applyCashback(userId, totalLossAmount);
-    store.addToLossPool(totalLossAmount);
+    store.recordVirtualLossTax(totalLossAmount, userId);
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
   }
 
