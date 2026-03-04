@@ -71,17 +71,16 @@ Persistent session state (so interactions survive restart) includes:
 ## Economy and gameplay summary
 
 - New wallet starts with `1000` coins.
-- Daily base reward is `500` with `+50` per streak day.
-- Bank pays hourly from accrued interest (base `1%` daily + upgrades + item bonuses).
-- Hourly pool is funded by win tax and distributed hourly.
-- Daily pool is funded by win tax and used for daily spin payout.
+- Daily base reward is `750` with `+75` per streak day.
+- Bank pays hourly from accrued interest (base `2%` + upgrades + item bonuses).
+- Hourly pool is funded by net-worth tax and distributed hourly.
+- Daily pool is funded by net-worth tax and used for daily spin payout.
 - Upgrades cover interest, cashback, spin weight, and universal-income double chance.
 - Collectibles can add passive bonuses (interest, cashback, mystery luck, EV boosts, mines reveal save).
 
 Supported games:
 
 - `/flip` (single or multi)
-- `/dice`
 - `/roulette`
 - `/allin17black`
 - `/blackjack`
@@ -96,12 +95,12 @@ Amount parsing supports `100`, `4.7k`, `1.2m`, `1b`, and `all`.
 Economy / utility:
 
 - `/balance`, `/daily`, `/deposit`, `/invest`, `/withdraw`, `/bank`
-- `/give`, `/leaderboard`, `/pool`, `/upgrades`
+- `/give`, `/leaderboard`, `/pool`
 - `/stats [user|username]`
 
 Collectibles / social:
 
-- `/mysterybox [quantity]`, `/inventory [page]`, `/collection`, `/trade user`
+- `/shop`, `/inventory [page]`, `/collection`, `/trade user`
 - `/giveaway`
 - `/help [topic]`
 
@@ -112,7 +111,7 @@ Admin entrypoint:
 ## Scheduled jobs
 
 - Hourly: bank processing + hourly pool distribution
-- Daily at 11:15 local server time: daily pool payout
+- Daily at 11:15 AM local server time: daily pool payout
 - Every 30s: giveaway expiry check
 - Hourly (top of hour): database backup creation
 

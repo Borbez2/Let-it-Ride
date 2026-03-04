@@ -44,7 +44,7 @@ function buildEconomyPage() {
             prev = s.threshold;
           }
           const finalPct = contFinal * 100;
-          const finalFmt = finalPct >= 0.1 ? finalFmt.toFixed(1) : finalPct.toFixed(2);
+          const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
           lines += `> • ${store.formatNumber(prev)}+: **${finalFmt}%** of tax added to pools\n`;
           lines += `> Use **/pool** and click 📊 Breakdown to see live contribution totals per slab.`;
           return lines;
@@ -129,7 +129,7 @@ function buildModifiersPage() {
       },
       {
         name: '∑ How Bank Interest Works',
-        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 1M; higher balances earn at reduced rates:\n> \n> **Slab 1** (0 to 1M): rate = r\n> **Slab 2** (1M to 10M): rate = r x 0.50\n> **Slab 3** (10M to 100M): rate = r x 0.05\n> **Slab 4** (100M to 1B): rate = r x 0.01\n> **Slab 5** (1B to 1T): rate = r x 0.005\n> **Slab 6** (above 1T): rate = r x 0.001\n> \n> Your rate **r** comes from your base + upgrade levels + collectible bonuses. See the full daily breakdown in `/bank` Breakdown tab.',
+        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 500K; higher balances earn at reduced rates:\n> \n> **Slab 1** (0 to 500K): rate = r\n> **Slab 2** (500K to 2M): rate = r × 0.70\n> **Slab 3** (2M to 10M): rate = r × 0.45\n> **Slab 4** (10M to 50M): rate = r × 0.25\n> **Slab 5** (50M to 250M): rate = r × 0.12\n> **Slab 6** (250M to 1B): rate = r × 0.05\n> **Slab 7** (above 1B): rate = r × 0.02\n> \n> Your rate **r** starts at 2% base + upgrade levels + collectible bonuses. See the full breakdown in `/bank`.',
         inline: false,
       },
     ],

@@ -24,6 +24,12 @@ const effectsCmd = require('./commands/effects');
 const shopCmd = require('./commands/shop');
 const dbBackup = require('./utils/dbBackup');
 const { renderChartToBuffer } = require('./utils/renderChart');
+const {
+  getGraphPalette, formatTimeframe, historyKeyForType,
+  pickSlotSeconds, buildAdaptiveLabels, getGraphCandidateIds,
+  buildSeriesByRange, resolveGraphWindow,
+  LIVE_GRAPH_SLOT_SECONDS, LIVE_GRAPH_MAX_USERS, LIVE_GRAPH_TIMEFRAMES,
+} = require('./utils/graphBuilder');
 
 // Load required environment values from .env.
 const TOKEN = process.env.TOKEN;
@@ -46,11 +52,8 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 let isBotActive = true;
-const LIVE_GRAPH_SLOT_SECONDS = CONFIG.bot.graph.liveSlotSeconds;
-const LIVE_GRAPH_MAX_USERS = CONFIG.bot.graph.maxUsers;
 const LIVE_GRAPH_SESSION_TTL_MS = CONFIG.bot.graph.sessionTtlMs;
 const DEFAULT_GRAPH_TIMEFRAME_SEC = CONFIG.bot.graph.defaultTimeframeSec;
-const LIVE_GRAPH_TIMEFRAMES = CONFIG.bot.graph.timeframes;
 const liveGraphSessions = new Map();
 const PUBLIC_GRAPH_REFRESH_MS = CONFIG.bot.graph.publicRefreshMs;
 const publicGraphState = {
@@ -74,71 +77,46 @@ function withTimeout(promise, timeoutMs = 2000) {
   ]);
 }
 
-function getGraphPalette() {
-  return [
-    '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#8dd17e', '#ff7aa2', '#00bcd4', '#cddc39',
-    '#f06292', '#64b5f6', '#ffd54f', '#4db6ac', '#9575cd', '#ffb74d', '#81c784', '#ba68c8', '#90a4ae', '#ef5350',
-  ];
+function isLikelyDiscordId(id) {
+  return /^\d{17,20}$/.test(String(id || ''));
 }
 
-function formatTimeframe(seconds) {
-  const predefined = LIVE_GRAPH_TIMEFRAMES.find((entry) => entry.seconds === seconds);
-  if (predefined) return predefined.label || predefined.key;
-  if (seconds === null) return 'All';
-  if (seconds % 86400 === 0) return `${Math.floor(seconds / 86400)}d`;
-  if (seconds % 3600 === 0) return `${Math.floor(seconds / 3600)}h`;
-  if (seconds % 60 === 0) return `${Math.floor(seconds / 60)}min`;
-  return `${seconds}s`;
-}
-
-function historyKeyForType(type) {
-  switch (type) {
-    case 'xp': return 'xpHistory';
-    case 'collectibles': return 'collectibleHistory';
-    default: return 'netWorthHistory';
-  }
-}
-
-function roundUpToStep(value, step) {
-  return Math.ceil(value / step) * step;
-}
-
-function pickSlotSeconds(durationMs, maxPoints = 180) {
-  if (durationMs <= 0) return LIVE_GRAPH_SLOT_SECONDS;
-  const raw = Math.ceil((durationMs / 1000) / Math.max(1, maxPoints - 1));
-  return Math.max(LIVE_GRAPH_SLOT_SECONDS, roundUpToStep(raw, LIVE_GRAPH_SLOT_SECONDS));
-}
-
-function buildAdaptiveLabels(slotCount, startTs, slotSeconds, mode = 'relative') {
-  const tickEvery = Math.max(1, Math.floor(slotCount / 8));
-  return Array.from({ length: slotCount }, (_, i) => {
-    if (i !== slotCount - 1 && (i % tickEvery !== 0)) return '';
-    const ts = startTs + (i * slotSeconds * 1000);
-    if (mode === 'clock') {
-      const d = new Date(ts);
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function pruneInvalidWalletIds() {
+  const wallets = store.getAllWallets();
+  let removed = 0;
+  for (const id of Object.keys(wallets)) {
+    if (!isLikelyDiscordId(id)) {
+      store.deleteWallet(id);
+      removed += 1;
     }
-    const age = (slotCount - i - 1) * slotSeconds;
-    if (age === 0) return 'Now';
-    if (age >= 86400) return `-${Math.floor(age / 86400)}d`;
-    if (age >= 3600) return `-${Math.floor(age / 3600)}h`;
-    if (age >= 60) return `-${Math.floor(age / 60)}m`;
-    return `-${age}s`;
-  });
+  }
+  return removed;
 }
 
-function getGraphCandidateIds(wallets, historyKey = 'netWorthHistory') {
-  return Object.entries(wallets)
-    .map(([id, wallet]) => {
-      const history = Array.isArray(wallet?.stats?.[historyKey]) ? wallet.stats[historyKey] : [];
-      const last = history.length ? history[history.length - 1] : null;
-      return { id, points: history.length, lastValue: last?.v || 0 };
-    })
-    .filter((row) => row.points >= 2)
-    .sort((a, b) => b.lastValue - a.lastValue)
-    .slice(0, LIVE_GRAPH_MAX_USERS)
-    .map((row) => row.id);
+async function resolveKnownUsers(ids) {
+  const usersById = new Map();
+  const validIds = [];
+  const unresolvedIds = [];
+  for (const id of ids) {
+    if (!isLikelyDiscordId(id)) {
+      unresolvedIds.push(id);
+      continue;
+    }
+    const cached = client.users.cache.get(id);
+    const user = cached || await client.users.fetch(id).catch(() => null);
+    if (user) {
+      usersById.set(id, user);
+      validIds.push(id);
+    } else {
+      unresolvedIds.push(id);
+    }
+  }
+  return { validIds, usersById, unresolvedIds };
 }
+
+// ── Graph utility functions extracted to utils/graphBuilder.js ──
+// getGraphPalette, formatTimeframe, historyKeyForType, pickSlotSeconds,
+// buildAdaptiveLabels, getGraphCandidateIds, buildSeriesByRange, resolveGraphWindow
 
 async function resolveUsersByIds(ids) {
   const usersById = new Map();
@@ -152,70 +130,6 @@ async function resolveUsersByIds(ids) {
     if (fetched) usersById.set(id, fetched);
   }));
   return usersById;
-}
-
-function buildSeriesByRange(history, startTs, slotCount, slotSeconds = LIVE_GRAPH_SLOT_SECONDS) {
-  const values = Array(slotCount).fill(null);
-
-  // Find the last value before the window to seed forward-fill
-  let seedValue = null;
-  for (let i = 0; i < history.length; i++) {
-    const ts = history[i]?.t || 0;
-    if (ts >= startTs) break;
-    seedValue = history[i]?.v || 0;
-  }
-
-  // Place history points into slots
-  for (let i = history.length - 1; i >= 0; i--) {
-    const point = history[i];
-    const ts = point?.t || 0;
-    if (ts < startTs) break;
-    const slotIndex = Math.floor((ts - startTs) / (slotSeconds * 1000));
-    if (slotIndex < 0 || slotIndex >= slotCount) continue;
-    values[slotIndex] = point?.v || 0;
-  }
-
-  // Forward-fill: carry the last known value through null gaps
-  let carry = seedValue;
-  for (let i = 0; i < slotCount; i++) {
-    if (values[i] !== null) {
-      carry = values[i];
-    } else if (carry !== null) {
-      values[i] = carry;
-    }
-  }
-
-  return values;
-}
-
-
-
-function resolveGraphWindow({ wallets, selectedIds, timeframeSec = DEFAULT_GRAPH_TIMEFRAME_SEC, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
-  const safeEnd = Math.max(0, endTs || Date.now());
-  if (Number.isFinite(startTs) && startTs !== null) {
-    const durationMs = Math.max(0, safeEnd - startTs);
-    const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
-    const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
-    return { startTs, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'clock' };
-  }
-
-  if (timeframeSec === null) {
-    let earliest = safeEnd;
-    for (const id of selectedIds || []) {
-      const history = Array.isArray(wallets[id]?.stats?.netWorthHistory) ? wallets[id].stats.netWorthHistory : [];
-      if (history.length > 0) earliest = Math.min(earliest, history[0].t || safeEnd);
-    }
-    const durationMs = Math.max(1000, safeEnd - earliest);
-    const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
-    const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
-    return { startTs: earliest, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'relative' };
-  }
-
-  const durationMs = Math.max(1000, timeframeSec * 1000);
-  const rangeStart = safeEnd - durationMs;
-  const slotSeconds = pickSlotSeconds(durationMs, maxPoints);
-  const slotCount = Math.max(2, Math.floor(durationMs / (slotSeconds * 1000)) + 1);
-  return { startTs: rangeStart, endTs: safeEnd, slotSeconds, slotCount, labelMode: 'relative' };
 }
 
 async function buildPlayerHistoryGraph({ wallets, selectedIds, timeframeSec, historyKey = 'netWorthHistory', labelPrefix = 'Player', color = '#36a2eb', includeAvatars, startTs = null, endTs = Date.now(), maxPoints = 180 }) {
@@ -394,16 +308,34 @@ async function registerCommands() {
 
 // Distribute hourly bank interest and universal pool shares.
 async function distributeUniversalPool() {
+  const removedInvalid = pruneInvalidWalletIds();
+  if (removedInvalid > 0) {
+    console.log(`Pruned ${removedInvalid} invalid wallet id(s) before hourly distribution.`);
+  }
+
   const wallets = store.getAllWallets();
   const poolData = store.getPoolData();
-  const ids = Object.keys(wallets);
+  const allIds = Object.keys(wallets);
+  const { validIds: ids, usersById, unresolvedIds } = await resolveKnownUsers(allIds);
+
+  if (unresolvedIds.length > 0) {
+    console.log(`Skipped ${unresolvedIds.length} unresolved wallet id(s) for hourly payout.`);
+  }
 
   if (ids.length === 0) return;
 
   const interestRows = [];
+  const taxRows = [];
+  let totalTaxCollected = 0;
   for (const id of ids) {
     const interest = store.processBank(id, { forceFlush: true });
     interestRows.push({ id, interest });
+
+    const taxResult = store.applyNetWorthPoolTax(id);
+    if (taxResult.taxed > 0) {
+      taxRows.push({ id, taxed: taxResult.taxed, netWorth: taxResult.netWorth });
+      totalTaxCollected += taxResult.taxed;
+    }
   }
 
   // Flat pool distribution: everyone gets an equal share.
@@ -441,7 +373,7 @@ async function distributeUniversalPool() {
   if (channel) {
     const rows = [];
     for (const row of interestRows) {
-      const u = await client.users.fetch(row.id).catch(() => null);
+      const u = usersById.get(row.id) || await client.users.fetch(row.id).catch(() => null);
       const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
       rows.push(`${name} ${store.formatNumber(row.interest).padStart(11)}`);
     }
@@ -453,6 +385,13 @@ async function distributeUniversalPool() {
     await channel.send(table).catch((err) => {
       console.error(`Hourly interest message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
     });
+    if (totalTaxCollected > 0) {
+      await channel.send(
+        `Net-worth tax collected from bank this hour: **${store.formatNumber(totalTaxCollected)}** coins (${taxRows.length} players).`
+      ).catch((err) => {
+        console.error(`Hourly tax message send failed for ${HOURLY_PAYOUT_CHANNEL_ID}:`, err);
+      });
+    }
     await channel.send(
       `Universal income paid to bank: **${store.formatNumber(share)}** coins per player this hour (${ids.length} players).`
     ).catch((err) => {
@@ -460,7 +399,7 @@ async function distributeUniversalPool() {
     });
     if (doubledPayouts.length > 0) {
       const lines = await Promise.all(doubledPayouts.map(async (entry) => {
-        const u = await client.users.fetch(entry.id).catch(() => null);
+        const u = usersById.get(entry.id) || await client.users.fetch(entry.id).catch(() => null);
         const name = u ? u.username : 'Unknown';
         return `**${name}** got **${entry.mult}x** universal income (**${store.formatNumber(entry.payout)}** total).`;
       }));
@@ -472,7 +411,7 @@ async function distributeUniversalPool() {
     console.error(`Hourly payout skipped: channel ${HOURLY_PAYOUT_CHANNEL_ID} not accessible.`);
   }
 
-  console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}`);
+  console.log(`Hourly distribution complete. Players: ${ids.length}, universal share: ${share}, tax collected: ${totalTaxCollected}`);
   await postLifeStatistics().catch((err) => {
     console.error('Life stats update failed after hourly distribution:', err);
   });
@@ -486,7 +425,7 @@ async function postLifeStatistics() {
   store.trackLifeStatsHeartbeat(now);
 
   const wallets = store.getAllWallets();
-  const ids = Object.keys(wallets);
+  const ids = Object.keys(wallets).filter((id) => isLikelyDiscordId(id));
   const poolData = store.getPoolData();
   const share = ids.length > 0 ? Math.floor((poolData.universalPool || 0) / ids.length) : 0;
 
@@ -550,12 +489,14 @@ async function postLifeStatistics() {
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
   const lbMedals = ['🥇', '🥈', '🥉'];
   const lbLines = [];
+  let lbPos = 0;
   for (let i = 0; i < lbEntries.length; i++) {
     const u = await client.users.fetch(lbEntries[i].id).catch(() => null);
-    const username = u ? u.username : 'Unknown';
-    const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
-    lbLines.push(`${rank} **${username}**`);
+    if (!u) continue;
+    const rank = lbPos < 3 ? lbMedals[lbPos] : `${lbPos + 1}.`;
+    lbLines.push(`${rank} **${u.username}**`);
     lbLines.push(`Wallet: ${store.formatNumber(lbEntries[i].balance)} | Bank: ${store.formatNumber(lbEntries[i].bank)} | Total: ${store.formatNumber(lbEntries[i].balance + lbEntries[i].bank)}`);
+    lbPos++;
   }
   const leaderboardEmbed = lbLines.length > 0
     ? { title: 'Leaderboard', color: 0x2b2d31, description: lbLines.join('\n') }
@@ -878,11 +819,14 @@ async function buildLeaderboardBoard(title = '**Leaderboard**') {
 
   let board = `${title}\n\`\`\`\nRank Player          Purse       Bank        Total\n---- -------------- ----------- ----------- -----------\n`;
   const medals = ['1st', '2nd', '3rd'];
+  let pos = 0;
   for (let i = 0; i < entries.length; i++) {
     const u = await client.users.fetch(entries[i].id).catch(() => null);
-    const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
-    const rank = (medals[i] || `${i + 1}th`).padEnd(4);
+    if (!u) continue;
+    const name = u.username.substring(0, 14).padEnd(14);
+    const rank = (medals[pos] || `${pos + 1}th`).padEnd(4);
     board += `${rank} ${name} ${store.formatNumber(entries[i].balance).padStart(11)} ${store.formatNumber(entries[i].bank).padStart(11)} ${store.formatNumber(entries[i].balance + entries[i].bank).padStart(11)}\n`;
+    pos++;
   }
   board += '\`\`\`';
   return board;
@@ -890,15 +834,29 @@ async function buildLeaderboardBoard(title = '**Leaderboard**') {
 
 // Run the daily spin payout.
 async function runDailySpin() {
+  pruneInvalidWalletIds();
   const poolData = store.getPoolData();
   if (poolData.lossPool <= 0) return;
   try {
     const channel = await client.channels.fetch(DAILY_EVENTS_CHANNEL_ID).catch(() => null);
     if (!channel) return;
     const wallets = store.getAllWallets();
-    const entries = Object.entries(wallets)
-      .map(([id, d]) => ({ id, total: (d.balance || 0) + (d.bank || 0) }))
-      .filter(e => e.total > 0);
+    const unresolvedByFetch = [];
+    const entries = [];
+    for (const [id, d] of Object.entries(wallets)) {
+      const total = (d.balance || 0) + (d.bank || 0);
+      if (total <= 0) continue;
+      if (!isLikelyDiscordId(id)) continue;
+      const user = client.users.cache.get(id) || await client.users.fetch(id).catch(() => null);
+      if (!user) {
+        unresolvedByFetch.push(id);
+        continue;
+      }
+      entries.push({ id, total, username: user.username });
+    }
+    if (unresolvedByFetch.length > 0) {
+      console.log(`Skipped ${unresolvedByFetch.length} unresolved wallet id(s) for daily spin.`);
+    }
     if (entries.length === 0) return;
 
     const basePrize = poolData.lossPool;
@@ -916,11 +874,9 @@ async function runDailySpin() {
 
     const names = [];
     for (const e of entries) {
-      const u = await client.users.fetch(e.id).catch(() => null);
-      names.push(u ? u.username : 'Unknown');
+      names.push(e.username || 'Unknown');
     }
-    const winnerUser = await client.users.fetch(winner.id).catch(() => null);
-    const winnerName = winnerUser ? winnerUser.username : 'Unknown';
+    const winnerName = winner.username || 'Unknown';
     const winnerMult = store.getSpinWeight(winner.id);
 
     const arrows = ['▶', '▷', '►', '▹'];

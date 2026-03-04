@@ -191,8 +191,7 @@ async function handleButton(interaction, parts) {
     if (baseWin > game.bet) {
       const baseProfit = baseWin - game.bet;
       const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'mines', baseProfit);
-      tax = store.addToUniversalPool(boostedProfit, uid);
-      finalWin = game.bet + boostedProfit - tax;
+      finalWin = game.bet + boostedProfit;
       store.recordWin(uid, 'mines', boostedProfit);
       if (effects && effects.length) {
         // append effects to description later
@@ -206,10 +205,6 @@ async function handleButton(interaction, parts) {
       `${game.revealedCount} tiles at **${game.multiplier.toFixed(2)}x**`,
       `Won **+${store.formatNumber(finalWin - game.bet)}**`,
     ];
-    if (typeof effects !== 'undefined' && effects.length) {
-      detailParts.push(...effects);
-    }
-    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
     detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
     return interaction.update({
       content: '',
@@ -245,8 +240,7 @@ async function handleButton(interaction, parts) {
           const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'mines', baseProfit);
           const pityResult = store.recordWin(uid, 'mines', boostedProfit);
           await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-          const tax = store.addToUniversalPool(boostedProfit, uid);
-          finalWin = game.bet + boostedProfit - tax;
+          finalWin = game.bet + boostedProfit;
           if (effects && effects.length) {
             // could show effects in embed later if desired
           }
@@ -282,7 +276,6 @@ async function handleButton(interaction, parts) {
     const pityResult = store.recordLoss(uid, 'mines', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const cb = store.applyCashback(uid, game.bet);
-    store.addToLossPool(game.bet);
     activeMines.delete(uid);
     persistMinesSessions();
     const gr = gridToString(game, ti);
@@ -320,8 +313,7 @@ async function handleButton(interaction, parts) {
       const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'mines', baseProfit);
       const pityResult = store.recordWin(uid, 'mines', boostedProfit);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-      clearTax = store.addToUniversalPool(boostedProfit, uid);
-      finalWin = game.bet + boostedProfit - clearTax;
+      finalWin = game.bet + boostedProfit;
       if (effects && effects.length) {
         // effects could be added to detailParts below
       }
@@ -330,7 +322,6 @@ async function handleButton(interaction, parts) {
     activeMines.delete(uid);
     persistMinesSessions();
     const detailParts = [`Won **+${store.formatNumber(finalWin - game.bet)}**`];
-    if (clearTax > 0) detailParts.push(`${store.formatNumber(clearTax)} tax → pool`);
     detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
     return interaction.update({
       content: '',

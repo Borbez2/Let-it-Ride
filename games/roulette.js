@@ -80,21 +80,18 @@ async function handleRouletteButton(interaction, parts) {
     const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'roulette', profit);
     const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    const tax = store.addToUniversalPool(boostedProfit, uid);
-    store.setBalance(uid, bal + boostedProfit - tax);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
+    store.setBalance(uid, bal + boostedProfit);
     const effectLine = effects && effects.length ? `\n${effects.join('\n')}` : '';
     await interaction.update({ embeds: [{
       color: 0x57f287,
       title: '🎡 Roulette',
-      description: `Ball: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(boostedProfit - tax)}**${taxLine}${effectLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      description: `Ball: **${num} (${col.toUpperCase()})**\nWon **${store.formatNumber(boostedProfit)}**${effectLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
     }], components: [] });
   } else {
     const pityResult = store.recordLoss(uid, 'roulette', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     store.setBalance(uid, bal - game.bet);
     const cb = store.applyCashback(uid, game.bet);
-    store.addToLossPool(game.bet);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
     await interaction.update({ embeds: [{
       color: 0xed4245,
@@ -170,16 +167,14 @@ async function handleAllIn17Button(interaction, parts) {
     const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'roulette', baseProfit);
     const pityResult = store.recordWin(uid, 'roulette', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    const tax = store.addToUniversalPool(boostedProfit, uid);
-    const payout = purse + boostedProfit - tax;
+    const payout = purse + boostedProfit;
     store.setBalance(uid, payout);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
     const effectLine = effects && effects.length ? `\n${effects.join('\n')}` : '';
     return interaction.update({
       embeds: [{
         color: 0x57f287,
         title: '🎰 ALL IN 17 BLACK',
-        description: `Ball: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\nPurse: ${store.formatNumber(purse)} -> **${store.formatNumber(payout)}**${taxLine}${effectLine}\nBank was not touched.`,
+        description: `Ball: **17 (BLACK)**\n\n🎉🎉🎉 **HIT!!!** 🎉🎉🎉\nPurse: ${store.formatNumber(purse)} -> **${store.formatNumber(payout)}**${effectLine}\nBank was not touched.`,
       }],
       components: [],
     });
@@ -189,7 +184,6 @@ async function handleAllIn17Button(interaction, parts) {
   await maybeAnnouncePityTrigger(interaction, uid, pityResult);
   store.setBalance(uid, 0);
   const cb = store.applyCashback(uid, purse);
-  store.addToLossPool(purse);
   const cbm = cb > 0 ? `\nCashback: +${store.formatNumber(cb)} to purse` : '';
   return interaction.update({
     embeds: [{

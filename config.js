@@ -15,29 +15,31 @@ const CONFIG = {
   economy: {
     startingCoins: 1000,
     daily: {
-      baseReward: 500,
-      streakBonusPerDay: 50,
+      baseReward: 750,        // slightly higher base to hook new players
+      streakBonusPerDay: 75,  // streak bonus also bumped for early engagement
       claimCooldownMs: 24 * 60 * 60 * 1000,
       streakBreakMs: 48 * 60 * 60 * 1000,
     },
     bank: {
-      baseInvestRate: 0,
+      baseInvestRate: 0.02,   // 2% base hourly interest – makes early bank feel rewarding
       interestAccrualMinuteMs: 60 * 1000,
       payoutIntervalMinutes: 60,
       // Tiered interest: interest is calculated in slabs (like tax brackets).
       // baseRate (= getInterestRate) applies fully to the first slab threshold,
       // then scales down progressively for higher balances.
+      // Rebalanced: fast growth at low balances, steep decay at high balances
+      // so maxing out takes significant time.
       tieredInterest: {
         slabs: [
-          { threshold: 1000000,             scale: 1 },       // Slab 1: 0 → 1M, base rate r
-          { threshold: 10000000,            scale: 0.9 },     // Slab 2: 1M → 10M, slight drop
-          { threshold: 100000000,           scale: 0.8 },    // Slab 3: 10M → 100M, modest drop
-          { threshold: 1000000000,          scale: 0.6 },    // Slab 4: 100M → 1B, noticeable drop
-          { threshold: 1000000000000,       scale: 0.4 },  // Slab 5: 1B → 1T, steeper drop
-          { threshold: 1000000000000000,    scale: 0.2 }, // Slab 6: 1T → 1Q, much lower rate
-          // above 1Q will use finalScale
+          { threshold: 500000,       scale: 1 },     // Slab 1: 0 → 500K, full rate
+          { threshold: 2000000,      scale: 0.7 },   // Slab 2: 500K → 2M, strong growth
+          { threshold: 10000000,     scale: 0.45 },  // Slab 3: 2M → 10M, moderate taper
+          { threshold: 50000000,     scale: 0.25 },  // Slab 4: 10M → 50M, noticeable slowdown
+          { threshold: 250000000,    scale: 0.12 },  // Slab 5: 50M → 250M, hard grind
+          { threshold: 1000000000,   scale: 0.05 },  // Slab 6: 250M → 1B, very slow
+          // above 1B will use finalScale
         ],
-        finalScale: 0.1,
+        finalScale: 0.02,   // above 1B: barely any passive growth
       },
     },
     pools: {
@@ -60,6 +62,23 @@ const CONFIG = {
         { threshold: 1000000000,  scale: 0.1 },     // Slab 5: 100M → 1B, 10% rate
       ],
       contributionFinalScale: 0.01,                // Slab 6: above 1B, 1% of base
+      // Hourly wealth tax used to fund both pools from bank balance (not game profit).
+      // Flow: bank interest accrues first, then tax is computed from whole net worth,
+      // deducted from bank, and split between universal and daily spin pools.
+      netWorthTax: {
+        baseRate: 0.0003, // 0.03% hourly base tax before slab scale
+        minNetWorth: 1000,
+        splitToLossPool: 0.5,
+        slabs: [
+          { threshold: 1000000,    scale: 1 },
+          { threshold: 5000000,    scale: 0.8 },
+          { threshold: 25000000,   scale: 0.65 },
+          { threshold: 100000000,  scale: 0.5 },
+          { threshold: 500000000,  scale: 0.38 },
+          { threshold: 2000000000, scale: 0.28 },
+        ],
+        finalScale: 0.2,
+      },
     },
     upgrades: {
       maxLevel: 100,
@@ -73,8 +92,8 @@ const CONFIG = {
       // Tuned so level 100 costs approximately 1 billion coins instead of 1 trillion.
       // baseCost=1000 (level 1 start), growthRate≈1.15: 1000*1.15^99 ≈ 1e9
       costParams: {
-        baseCost: 1000,       // cost of level 1
-        growthRate: 1.15,     // exponential growth; level 100 ≈ 1B
+        baseCost: 500,        // cheap level 1 – lowers entry barrier
+        growthRate: 1.18,     // steeper curve; level 100 ≈ 4.7B, but first 20 levels are cheap
       },
     },
   },
@@ -233,7 +252,7 @@ const CONFIG = {
       godly:       2,
     },
     mysteryBox: {
-      cost: 5000,
+      cost: 3500,    // lowered entry cost – encourages early box opening
       duplicateCompensationByRarity: {
         common:    1600,
         uncommon:  3500,
@@ -322,7 +341,7 @@ const CONFIG = {
 
     // Premium mystery box - no common tier, proportional odds
     premiumMysteryBox: {
-      cost: 500000,
+      cost: 350000,  // slightly more accessible premium boxes
       duplicateCompensationByRarity: {
         uncommon: 3500,
         rare: 12000,

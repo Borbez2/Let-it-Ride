@@ -3,6 +3,22 @@ const { CONFIG } = require('../config');
 const store = require('../data/store');
 const { renderChartToBuffer } = require('../utils/renderChart');
 
+function isLikelyDiscordId(id) {
+  return /^\d{17,20}$/.test(String(id || ''));
+}
+
+function pruneInvalidWalletIds() {
+  const wallets = store.getAllWallets();
+  let removed = 0;
+  for (const id of Object.keys(wallets)) {
+    if (!isLikelyDiscordId(id)) {
+      store.deleteWallet(id);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function buildMonospaceTable(columns, rows) {
   const widths = columns.map((column) => {
     const rowMax = rows.reduce((max, row) => Math.max(max, String(row[column.key] ?? '').length), 0);
@@ -128,24 +144,29 @@ async function buildAllPlayersGraphBuffer(client, wallets, options = {}) {
 // ── Handlers ──
 
 async function handleLeaderboard(interaction, client) {
+  pruneInvalidWalletIds();
   const wallets = store.getAllWallets();
   const entries = Object.entries(wallets)
+    .filter(([id]) => isLikelyDiscordId(id))
     .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
   if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No players yet!' }] });
 
   const medals = ['🥇', '🥈', '🥉'];
   const lines = [];
+  let pos = 0;
   for (let i = 0; i < entries.length; i++) {
     const u = await client.users.fetch(entries[i].id).catch(() => null);
-    const username = u ? u.username : 'Unknown';
-    const rank = i < 3 ? medals[i] : `${i + 1}.`;
+    if (!u) continue;
+    const rank = pos < 3 ? medals[pos] : `${pos + 1}.`;
     const wallet = store.formatNumber(entries[i].balance);
     const bank = store.formatNumber(entries[i].bank);
     const total = store.formatNumber(entries[i].balance + entries[i].bank);
-    lines.push(`${rank} **${username}**`);
+    lines.push(`${rank} **${u.username}**`);
     lines.push(`Wallet: ${wallet} | Bank: ${bank} | Total: ${total}`);
+    pos += 1;
   }
+  if (!lines.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable players found right now.' }] });
 
   const tableEmbed = {
     title: '🏆 Leaderboard',
@@ -164,8 +185,10 @@ async function handleLeaderboard(interaction, client) {
 }
 
 async function handleCollection(interaction, client) {
+  pruneInvalidWalletIds();
   const wallets = store.getAllWallets();
   const entries = Object.entries(wallets)
+    .filter(([id]) => isLikelyDiscordId(id))
     .map(([id, d]) => ({ id, count: (d.inventory || []).length, unique: new Set((d.inventory || []).map(i => i.id)).size }))
     .filter(e => e.count > 0)
     .sort((a, b) => b.unique - a.unique || b.count - a.count).slice(0, 10);
@@ -173,15 +196,19 @@ async function handleCollection(interaction, client) {
 
   const medals = ['🥇', '🥈', '🥉'];
   const rows = [];
+  let pos = 0;
   for (let i = 0; i < entries.length; i++) {
     const u = await client.users.fetch(entries[i].id).catch(() => null);
+    if (!u) continue;
     rows.push({
-      rank: i < 3 ? medals[i] : `${i + 1}`,
-      player: (u ? u.username : 'Unknown').slice(0, 24),
+      rank: pos < 3 ? medals[pos] : `${pos + 1}`,
+      player: u.username.slice(0, 24),
       unique: String(entries[i].unique),
       total: String(entries[i].count),
     });
+    pos += 1;
   }
+  if (!rows.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable collectible holders found right now.' }] });
 
   const columns = [
     { key: 'rank', header: 'Rank' },
@@ -212,23 +239,29 @@ async function handleCollection(interaction, client) {
 }
 
 async function handleXpLeaderboard(interaction, client) {
+  pruneInvalidWalletIds();
   const entries = store.getXpLeaderboard();
   if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No XP earned yet!' }] });
 
   const medals = ['🥇', '🥈', '🥉'];
   const rows = [];
+  let pos = 0;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
+    if (!isLikelyDiscordId(e.userId)) continue;
     const u = await client.users.fetch(e.userId).catch(() => null);
+    if (!u) continue;
     rows.push({
-      rank: i < 3 ? medals[i] : `${i + 1}`,
-      player: (u ? u.username : 'Unknown').slice(0, 24),
+      rank: pos < 3 ? medals[pos] : `${pos + 1}`,
+      player: u.username.slice(0, 24),
       level: String(e.level),
       title: e.title,
       xp: store.formatNumber(e.totalXp),
       games: String(e.gamesPlayed),
     });
+    pos += 1;
   }
+  if (!rows.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable XP players found right now.' }] });
 
   const columns = [
     { key: 'rank', header: 'Rank' },

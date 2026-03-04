@@ -815,11 +815,8 @@ function savePool() {
 
 function getPoolData() { return poolData; }
 
-function computeTieredTax(amount, baseRate) {
-  const cfg = CONFIG.economy.pools;
-  const slabs = cfg.contributionSlabs;
+function computeTieredTax(amount, baseRate, slabs = [], finalScale = 0) {
   if (!slabs || !slabs.length) return Math.floor(amount * baseRate);
-  const finalScale = cfg.contributionFinalScale ?? 0.005;
   let total = 0;
   let remaining = amount;
   let prevThreshold = 0;
@@ -837,10 +834,7 @@ function computeTieredTax(amount, baseRate) {
   return Math.floor(total);
 }
 
-function computeTieredTaxWithSlabs(amount, baseRate) {
-  const cfg = CONFIG.economy.pools;
-  const slabs = cfg.contributionSlabs;
-  const finalScale = cfg.contributionFinalScale ?? 0.005;
+function computeTieredTaxWithSlabs(amount, baseRate, slabs = [], finalScale = 0) {
   const result = { total: 0, slabAmounts: [] };
   let remaining = amount;
   let prevThreshold = 0;
@@ -865,52 +859,72 @@ function computeTieredTaxWithSlabs(amount, baseRate) {
   return result;
 }
 
-
-// New win tax: 0.1% of profit, split between hourly and daily pools, with buffed early scaling
-function addToUniversalPool(amount, userId) {
-  // Win tax always applies (flat rate)
-  const flatTax = Math.floor(amount * POOL_TAX_RATE);
-  // Buffed: apply a big multiple to early wins, then reduce for higher amounts
-  const slabResult = computeTieredTaxWithSlabs(amount, POOL_TAX_RATE);
-  if (slabResult.total > 0) {
-    // Split the taxed amount equally between both pools
-    const half = Math.floor(slabResult.total / 2);
-    poolData.universalPool += half;
-    poolData.lossPool += slabResult.total - half; // remainder to daily pool
-    // Track cumulative contributions per slab for the breakdown page
-    const slabStats = getRuntimeState('poolSlabStats', {}) || {};
-    for (let i = 0; i < slabResult.slabAmounts.length; i++) {
-      const key = `slab_${i}`;
-      slabStats[key] = (slabStats[key] || 0) + slabResult.slabAmounts[i];
-    }
-    slabStats._totalContributed = (slabStats._totalContributed || 0) + slabResult.total;
-    setRuntimeState('poolSlabStats', slabStats);
-    savePool();
-  }
-  return flatTax;
+function getNetWorthPoolTaxConfig() {
+  const poolsCfg = CONFIG.economy.pools || {};
+  const taxCfg = poolsCfg.netWorthTax || {};
+  return {
+    baseRate: taxCfg.baseRate ?? poolsCfg.universalTaxRate ?? 0,
+    minNetWorth: taxCfg.minNetWorth ?? 0,
+    splitToLossPool: taxCfg.splitToLossPool ?? 0.5,
+    slabs: Array.isArray(taxCfg.slabs) ? taxCfg.slabs : [],
+    finalScale: taxCfg.finalScale ?? 0,
+  };
 }
+
+function trackPoolSlabStats(slabAmounts, totalContributed) {
+  const slabStats = getRuntimeState('poolSlabStats', {}) || {};
+  for (let i = 0; i < slabAmounts.length; i++) {
+    const key = `slab_${i}`;
+    slabStats[key] = (slabStats[key] || 0) + (slabAmounts[i] || 0);
+  }
+  slabStats._totalContributed = (slabStats._totalContributed || 0) + (totalContributed || 0);
+  setRuntimeState('poolSlabStats', slabStats);
+}
+
+function applyNetWorthPoolTax(userId) {
+  const w = getWallet(userId);
+  const netWorth = Math.max(0, (w.balance || 0) + (w.bank || 0));
+  const cfg = getNetWorthPoolTaxConfig();
+  if (netWorth < cfg.minNetWorth || cfg.baseRate <= 0) {
+    return { taxed: 0, attemptedTax: 0, netWorth, toUniversal: 0, toLoss: 0 };
+  }
+
+  const slabResult = computeTieredTaxWithSlabs(netWorth, cfg.baseRate, cfg.slabs, cfg.finalScale);
+  const attemptedTax = Math.max(0, slabResult.total || 0);
+  if (attemptedTax <= 0 || (w.bank || 0) <= 0) {
+    return { taxed: 0, attemptedTax, netWorth, toUniversal: 0, toLoss: 0 };
+  }
+
+  const taxed = Math.min(w.bank || 0, attemptedTax);
+  if (taxed <= 0) return { taxed: 0, attemptedTax, netWorth, toUniversal: 0, toLoss: 0 };
+
+  w.bank -= taxed;
+  const lossSplit = Math.max(0, Math.min(1, cfg.splitToLossPool));
+  const toLoss = Math.floor(taxed * lossSplit);
+  const toUniversal = taxed - toLoss;
+  poolData.universalPool += toUniversal;
+  poolData.lossPool += toLoss;
+
+  const ratio = attemptedTax > 0 ? taxed / attemptedTax : 0;
+  const scaledSlabAmounts = slabResult.slabAmounts.map((x) => Math.floor((x || 0) * ratio));
+  trackPoolSlabStats(scaledSlabAmounts, taxed);
+
+  return { taxed, attemptedTax, netWorth, toUniversal, toLoss };
+}
+
+// Legacy hook kept for compatibility with game code paths.
+// Pool funding now comes from hourly net-worth tax deducted from bank.
+// NOTE: No longer called from game files - dead code retained for reference.
+// function addToUniversalPool(amount, userId) { return 0; }
 
 function getPoolSlabStats() {
   return getRuntimeState('poolSlabStats', {}) || {};
 }
 
-
-
-// Virtual loss tax: tracked for stats, not deducted from user balance
-function recordVirtualLossTax(amount, userId) {
-  // Use the same slabs as win tax, but do not deduct from user
-  const slabResult = computeTieredTaxWithSlabs(amount, POOL_TAX_RATE);
-  if (slabResult.total > 0) {
-    // Split the virtual taxed amount equally between both pools for stats
-    const half = Math.floor(slabResult.total / 2);
-    poolData.universalPool += half;
-    poolData.lossPool += slabResult.total - half;
-    // Optionally, track stats for virtual loss tax if needed
-    // (no user balance deduction)
-    savePool();
-  }
-  return slabResult.total;
-}
+// Legacy hook kept for compatibility with game code paths.
+// Losses no longer feed pools directly; hourly bank tax handles pool funding.
+// NOTE: No longer called from game files - dead code retained for reference.
+// function recordVirtualLossTax(amount, userId) { return 0; }
 
 
 // Wallet helpers.
@@ -2081,7 +2095,7 @@ function countDuplicates(userId) {
 
 module.exports = {
   getPoolData, savePool,
-  addToUniversalPool, recordVirtualLossTax, clearHourlyPool, clearDailySpinPool,
+  applyNetWorthPoolTax, clearHourlyPool, clearDailySpinPool,
   getAllWallets, getWallet, hasWallet, deleteWallet, resetPurse, resetAllPursesAndBanks,
   getBalance, setBalance,
   getInterestRate, getCashbackRate, applyCashback, applyLuckCashback,
@@ -2115,7 +2129,6 @@ module.exports = {
   getXpRank,
   getCollectibleLeaderboard,
   getCollectibleRank,
-  getXpLeaderboard,
   getPoolSlabStats,
   maybeTrackXpSnapshot,
   maybeTrackCollectibleSnapshot,

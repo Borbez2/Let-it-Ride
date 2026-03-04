@@ -58,15 +58,15 @@ function renderGameplayPage(username, userId) {
   let winText = `> **Total modifier: ${sign}${(totalBoost * 100).toFixed(1)}%** *(applied multiplicatively to each game's base win chance)*\n`;
   if (luckyPotBoost > 0) {
     const mins = Math.max(0, Math.ceil((potions.lucky.expiresAt - Date.now()) / 60000));
-    winText += `> ☘⚱ Lucky Pot (${luckyStacks} stack${luckyStacks !== 1 ? 's' : ''}, ${mins}m left): **+${(luckyPotBoost * 100).toFixed(1)}%**\n`;
+    winText += `> ⏳ Lucky Pot (${luckyStacks} stack${luckyStacks !== 1 ? 's' : ''}, ${mins}m left): **+${(luckyPotBoost * 100).toFixed(1)}%**\n`;
   }
   if (unluckyPotPenalty > 0) {
     const mins = Math.max(0, Math.ceil((potions.unlucky.expiresAt - Date.now()) / 60000));
-    winText += `> ✕⚱ Unlucky Pot (${mins}m left): **-${(unluckyPotPenalty * 100).toFixed(1)}%**\n`;
+    winText += `> ⏳ Unlucky Pot (${mins}m left): **-${(unluckyPotPenalty * 100).toFixed(1)}%**\n`;
   }
   if (streakBoost > 0) {
     const mins = Math.max(0, Math.ceil(pityStatus.expiresInMs / 60000));
-    winText += `> 🔥 Losing Streak buff (${mins}m left): **+${(streakBoost * 100).toFixed(1)}%**\n`;
+    winText += `> ⏳ Losing Streak buff (${mins}m left): **+${(streakBoost * 100).toFixed(1)}%**\n`;
   }
   if (luckyPotBoost === 0 && unluckyPotPenalty === 0 && streakBoost === 0) {
     winText += `> *No active win chance effects*\n`;
@@ -100,7 +100,7 @@ function renderGameplayPage(username, userId) {
   // Cashback
   const cashTotal = (base.cashbackRate + items.cashbackRate + (xpBonuses.cashbackRate || 0)) * 100;
   let cbText = `> **${cashTotal.toFixed(2)}%** of losses returned as coins\n`;
-  if (base.cashbackRate > 0) cbText += `> Upgrades: **${(base.cashbackRate * 100).toFixed(2)}%**\n`;
+  if (base.cashbackRate > 0) cbText += `> 🔧 Upgrades: **${(base.cashbackRate * 100).toFixed(2)}%**\n`;
   if (items.cashbackRate > 0) cbText += `> 🎒 Items: **+${(items.cashbackRate * 100).toFixed(2)}%**\n`;
   if (xpBonuses.cashbackRate) cbText += `> ⭐ XP Level: **+${(xpBonuses.cashbackRate * 100).toFixed(2)}%**\n`;
   if (cashTotal === 0) cbText += `> *No cashback active*`;
@@ -122,6 +122,7 @@ function renderGameplayPage(username, userId) {
   if (additionalEffects.length > 0) {
     fields.push({ name: '🎒 Item Effects', value: additionalEffects.join('\n'), inline: false });
   }
+  fields.push({ name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false });
 
   return {
     title: `✦ ${username}'s Effects  - Gameplay`,
@@ -141,7 +142,7 @@ function renderPassivePage(username, userId) {
   const xpIntPct = (xpBonuses.interestRate || 0) * 100;
   const totalIntPct = baseIntPct + itemIntPct + xpIntPct;
   let intText = `> **${totalIntPct.toFixed(3)}%/day** applied to your bank balance\n`;
-  intText += `> Upgrades: **${baseIntPct.toFixed(3)}%/day**\n`;
+  intText += `> 🔧 Upgrades: **${baseIntPct.toFixed(3)}%/day**\n`;
   if (itemIntPct > 0) intText += `> 🎒 Items: **+${itemIntPct.toFixed(3)}%/day**\n`;
   if (xpIntPct) intText += `> ⭐ XP Level: **+${xpIntPct.toFixed(3)}%/day**\n`;
   intText += `> *(Tiered slabs: full rate on first 1 M, ×0.5 on 1-10 M, ×0.1 above 10 M)*`;
@@ -149,7 +150,7 @@ function renderPassivePage(username, userId) {
   // Daily Spin Multiplier
   const totalSpin = base.spinWeight + items.spinWeight;
   let spinText = `> **${totalSpin.toFixed(2)}x** spin weight\n`;
-  spinText += `> Upgrades: **${base.spinWeight.toFixed(2)}x** (each upgrade level adds +${CONFIG.economy.upgrades.spinMultPerLevel.toFixed(2)}x)\n`;
+  spinText += `> 🔧 Upgrades: **${base.spinWeight.toFixed(2)}x** (each upgrade level adds +${CONFIG.economy.upgrades.spinMultPerLevel.toFixed(2)}x)\n`;
   if (items.spinWeight > 0) spinText += `> 🎒 Items: **+${items.spinWeight.toFixed(2)}x**\n`;
   spinText += `> *(Your weight relative to other players  - a 2.0x weight doubles your lottery odds vs a 1.0x player.)*`;
 
@@ -159,7 +160,7 @@ function renderPassivePage(username, userId) {
   const xpDoublePct = (xpBonuses.universalDoubleChance || 0) * 100;
   const totalDoublePct = baseDoublePct + itemDoublePct + xpDoublePct;
   let incomeText = `> **${totalDoublePct.toFixed(1)}%** chance each hourly payout is ×2\n`;
-  incomeText += `> Upgrades: **${baseDoublePct.toFixed(1)}%** (each upgrade level adds +${(CONFIG.economy.upgrades.universalIncomePerLevelChance * 100).toFixed(1)}%)\n`;
+  incomeText += `> 🔧 Upgrades: **${baseDoublePct.toFixed(1)}%** (each upgrade level adds +${(CONFIG.economy.upgrades.universalIncomePerLevelChance * 100).toFixed(1)}%)\n`;
   if (itemDoublePct > 0) incomeText += `> 🎒 Items: **+${itemDoublePct.toFixed(1)}%**\n`;
   if (xpDoublePct) incomeText += `> ⭐ XP Level: **+${xpDoublePct.toFixed(1)}%**\n`;
   incomeText += `> *(If triggered, your share of the hourly universal pool is doubled for that payout.)*`;
@@ -171,7 +172,7 @@ function renderPassivePage(username, userId) {
       { name: '∑ Bank Interest', value: intText, inline: false },
       { name: '⟳× Daily Spin Multiplier', value: spinText, inline: false },
       { name: '∀× Hourly Income Double Chance', value: incomeText, inline: false },
-      { name: 'Legend', value: '> Base (upgrades) · 🎒 Collection items · ⭐ XP level · 🔥 Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
     ],
   };
 }
@@ -192,7 +193,10 @@ function renderFlipPage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Coin Flip`,
     color: 0x2b2d31,
-    fields: [{ name: '🪙 Coin Flip', value: text, inline: false }],
+    fields: [
+      { name: '🪙 Coin Flip', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 
@@ -213,7 +217,10 @@ function renderDuelPage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Duel`,
     color: 0x2b2d31,
-    fields: [{ name: '⚔️ Duel', value: text, inline: false }],
+    fields: [
+      { name: '⚔️ Duel', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 
@@ -233,7 +240,10 @@ function renderLetItRidePage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Let It Ride`,
     color: 0x2b2d31,
-    fields: [{ name: '🏇 Let It Ride', value: text, inline: false }],
+    fields: [
+      { name: '🏇 Let It Ride', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 
@@ -252,7 +262,10 @@ function renderBlackjackPage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Blackjack`,
     color: 0x2b2d31,
-    fields: [{ name: '🃏 Blackjack', value: text, inline: false }],
+    fields: [
+      { name: '🃏 Blackjack', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 
@@ -278,7 +291,10 @@ function renderMinesPage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Mines`,
     color: 0x2b2d31,
-    fields: [{ name: '💣 Mines', value: text, inline: false }],
+    fields: [
+      { name: '💣 Mines', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 
@@ -303,7 +319,10 @@ function renderRoulettePage(username, userId) {
   return {
     title: `✦ ${username}'s Effects  - Roulette`,
     color: 0x2b2d31,
-    fields: [{ name: '🎡 Roulette', value: text, inline: false }],
+    fields: [
+      { name: '🎡 Roulette', value: text, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+    ],
   };
 }
 

@@ -119,20 +119,18 @@ async function handleDuelButton(interaction, parts) {
     await maybeAnnouncePityTrigger(interaction, w, pityWinResult);
     const pityLossResult = store.recordLoss(li, 'duel', duel.bet);
     await maybeAnnouncePityTrigger(interaction, li, pityLossResult);
-    const tax = store.addToUniversalPool(boostedProfit, w);
-    store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit - tax);
+    store.setBalance(w, store.getBalance(w) + duel.bet + boostedProfit);
     let effectLine = '';
     if (effects && effects.length) effectLine = `\n${effects.join('\n')}`;
 
     activeDuels.delete(dk);
     persistDuelSessions();
 
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
     return interaction.update({
       embeds: [{
         color: 0x57f287,
         title: '⚔️ Duel Result',
-        description: `**${wn}** beats **${ln}** and wins **${store.formatNumber(boostedProfit - tax)}**!${taxLine}${effectLine}`,
+        description: `**${wn}** beats **${ln}** and wins **${store.formatNumber(boostedProfit)}**!${effectLine}`,
       }],
       components: [],
     });

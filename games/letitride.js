@@ -53,7 +53,6 @@ async function handleLetItRide(interaction) {
     const pityResult = store.recordLoss(userId, 'letitride', bet);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet);
-    store.addToLossPool(bet);
     const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';
     return interaction.reply({ embeds: [{
       color: 0xed4245,
@@ -95,8 +94,7 @@ async function handleRideButton(interaction, parts) {
       const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'letitride', baseProfit);
       const pityResult = store.recordWin(uid, 'letitride', boostedProfit);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-      rideTax = store.addToUniversalPool(boostedProfit, uid);
-      payout = ride.original + boostedProfit - rideTax;
+      payout = ride.original + boostedProfit;
       if (effects && effects.length) {
         // show effects after payout
       }
@@ -104,11 +102,10 @@ async function handleRideButton(interaction, parts) {
     store.setBalance(uid, store.getBalance(uid) + payout);
     activeRides.delete(uid);
     persistLetItRideSessions();
-    const taxLine = rideTax > 0 ? `\n${store.formatNumber(rideTax)} tax to pool` : '';
     return interaction.update({ embeds: [{
       color: 0x57f287,
       title: '🏇 Let It Ride - Cashed Out',
-      description: `**${store.formatNumber(payout)}** coins after ${ride.wins} wins!${taxLine}\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
+      description: `**${store.formatNumber(payout)}** coins after ${ride.wins} wins!\nBalance: **${store.formatNumber(store.getBalance(uid))}**`,
     }], components: [] });
   }
 
@@ -131,7 +128,6 @@ async function handleRideButton(interaction, parts) {
       const pityResult = store.recordLoss(uid, 'letitride', ride.original);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, ride.original);
-      store.addToLossPool(ride.original);
       activeRides.delete(uid);
       persistLetItRideSessions();
       const cbm = cb > 0 ? `\n+${store.formatNumber(cb)} cashback` : '';

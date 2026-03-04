@@ -173,14 +173,11 @@ async function resolveSplitGame(interaction, uid, game) {
   if (netProfit > 0) {
     const pityResult = store.recordWin(uid, 'blackjack', netProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    splitTax = store.addToUniversalPool(netProfit, uid);
-    store.setBalance(uid, store.getBalance(uid) - splitTax);
   }
   if (netLoss > 0) {
     const pityResult = store.recordLoss(uid, 'blackjack', netLoss);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     cashback = store.applyCashback(uid, netLoss);
-    store.addToLossPool(netLoss);
   }
   activeSplitGames.delete(uid);
   persistBlackjackSessions();
@@ -190,7 +187,7 @@ async function resolveSplitGame(interaction, uid, game) {
 
   const detailParts = [`**Net: ${sign}${store.formatNumber(profit)}**`];
   if (cashback > 0) detailParts.push(`Cashback: +${store.formatNumber(cashback)}`);
-  if (splitTax > 0) detailParts.push(`${store.formatNumber(splitTax)} tax → pool`);
+
   detailParts.push(`Balance: **${store.formatNumber(store.getBalance(uid))}**`);
 
   handFields.push({ name: '\u200b', value: '\u200b', inline: false });
@@ -230,27 +227,22 @@ async function resolveStandard(interaction, uid, game, doubled) {
     const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    const tax = store.addToUniversalPool(boostedProfit, uid);
-    store.setBalance(uid, bal + game.bet + boostedProfit - tax);
-    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
-    outcome = `Dealer busts! **+${store.formatNumber(boostedProfit - tax)}**`;
+    store.setBalance(uid, bal + game.bet + boostedProfit);
+    outcome = `Dealer busts! **+${store.formatNumber(boostedProfit)}**`;
     if (effects && effects.length) outcome += '\n' + effects.join('\n');
     color = 0x57f287;
   } else if (pv > dv) {
     const { profit: boostedProfit, effects } = store.applyProfitBoost(uid, 'blackjack', game.bet);
     const pityResult = store.recordWin(uid, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
-    const tax = store.addToUniversalPool(boostedProfit, uid);
-    store.setBalance(uid, bal + game.bet + boostedProfit - tax);
-    if (tax > 0) detailParts.push(`${store.formatNumber(tax)} tax → pool`);
-    outcome = `You win! ${pv} > ${dv} - **+${store.formatNumber(boostedProfit - tax)}**`;
+    store.setBalance(uid, bal + game.bet + boostedProfit);
+    outcome = `You win! ${pv} > ${dv} - **+${store.formatNumber(boostedProfit)}**`;
     if (effects && effects.length) outcome += '\n' + effects.join('\n');
     color = 0x57f287;
   } else if (dv > pv) {
     const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
     await maybeAnnouncePityTrigger(interaction, uid, pityResult);
     const cb = store.applyCashback(uid, game.bet);
-    store.addToLossPool(game.bet);
     if (cb > 0) detailParts.push(`+${store.formatNumber(cb)} cashback`);
     outcome = `Dealer wins ${dv} > ${pv} - **-${store.formatNumber(game.bet)}**`;
     color = 0xed4245;
@@ -341,18 +333,16 @@ async function handleCommand(interaction) {
     const { profit: boostedProfit, effects } = store.applyProfitBoost(userId, 'blackjack', baseProfit);
     const pityResult = store.recordWin(userId, 'blackjack', boostedProfit);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
-    const tax = store.addToUniversalPool(boostedProfit, userId);
-    store.setBalance(userId, bal + boostedProfit - tax);
-    const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax → pool` : '';
+    store.setBalance(userId, bal + boostedProfit);
     const effectLine = effects && effects.length ? `\n${effects.join('\n')}` : '';
     return interaction.reply({
       embeds: [buildResultEmbed({
         title: 'Blackjack!',
         playerCards: ph, pv: 21,
         dealerCards: dh, dv: dvv,
-        outcome: `🎉 Natural Blackjack! **+${store.formatNumber(boostedProfit - tax)}**${effectLine}`,
+        outcome: `🎉 Natural Blackjack! **+${store.formatNumber(boostedProfit)}**${effectLine}`,
         color: 0x57f287,
-        details: [{ name: '\u200b', value: `${taxLine ? store.formatNumber(tax) + ' tax → pool\n' : ''}Balance: **${store.formatNumber(store.getBalance(userId))}**`, inline: false }],
+        details: [{ name: '\u200b', value: `Balance: **${store.formatNumber(store.getBalance(userId))}**`, inline: false }],
       })],
     });
   }
@@ -444,7 +434,6 @@ async function handleButton(interaction, parts) {
       const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
-      store.addToLossPool(game.bet);
       activeGames.delete(uid);
       persistBlackjackSessions();
       const detailParts = [];
@@ -474,7 +463,6 @@ async function handleButton(interaction, parts) {
       const pityResult = store.recordLoss(uid, 'blackjack', game.bet);
       await maybeAnnouncePityTrigger(interaction, uid, pityResult);
       const cb = store.applyCashback(uid, game.bet);
-      store.addToLossPool(game.bet);
       activeGames.delete(uid);
       persistBlackjackSessions();
       const detailParts = [];

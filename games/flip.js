@@ -28,33 +28,24 @@ async function handleFlip(interaction) {
   if (qty === 1) {
     const flipModifier = store.getWinChanceModifier(userId);
     const winChance = CONFIG.games.flip.winChance * flipModifier;
-    // Debug log for diagnosis
-    console.log(`[FLIP DEBUG] userId=${userId} winChance=${winChance} flipModifier=${flipModifier}`);
     const won = Math.random() < winChance;
     if (won) {
       const { profit, effects } = store.applyProfitBoost(userId, 'flip', bet);
       const pityResult = store.recordWin(userId, 'flip', profit);
-      // Debug log for win
-      console.log(`[FLIP DEBUG] WIN userId=${userId} profit=${profit} pityResult=${JSON.stringify(pityResult)}`);
       await maybeAnnouncePityTrigger(interaction, userId, pityResult);
-      const tax = store.addToUniversalPool(profit, userId);
-      store.setBalance(userId, bal + profit - tax);
-      const taxLine = tax > 0 ? `\n${store.formatNumber(tax)} tax to pool` : '';
+      store.setBalance(userId, bal + profit);
       const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
       const effectLines = effects.length ? `\n${effects.join('\n')}` : '';
       return interaction.reply({ embeds: [{
         color: 0x57f287,
         title: '🪙 Coin Flip',
-        description: `**WIN** +**${store.formatNumber(profit - tax)}**${taxLine}${allInLine}${effectLines}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
+        description: `**WIN** +**${store.formatNumber(profit)}**${allInLine}${effectLines}\nBalance: **${store.formatNumber(store.getBalance(userId))}**`,
       }] });
     }
     store.setBalance(userId, bal - bet);
     const pityResult = store.recordLoss(userId, 'flip', bet);
-    // Debug log for loss
-    console.log(`[FLIP DEBUG] LOSE userId=${userId} bet=${bet} pityResult=${JSON.stringify(pityResult)}`);
     await maybeAnnouncePityTrigger(interaction, userId, pityResult);
     const cb = store.applyCashback(userId, bet);
-    store.recordVirtualLossTax(bet, userId);
     const cbm = cb > 0 ? ` (+${store.formatNumber(cb)} back)` : '';
     const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
     return interaction.reply({ embeds: [{
@@ -74,8 +65,6 @@ async function handleFlip(interaction) {
   for (let i = 0; i < qty; i++) {
     const flipModifier = store.getWinChanceModifier(userId);
     const winChance = CONFIG.games.flip.winChance * flipModifier;
-    // Debug log for diagnosis
-    console.log(`[FLIP DEBUG] [MULTI] userId=${userId} winChance=${winChance} flipModifier=${flipModifier} flip#=${i+1}`);
     const won = Math.random() < winChance;
     results.push(won ? CONFIG.games.flip.winMarker : CONFIG.games.flip.lossMarker);
     if (won) {
@@ -86,33 +75,23 @@ async function handleFlip(interaction) {
         multiEffects.push(...effects);
       }
       const pityResult = store.recordWin(userId, 'flip', profit);
-      // Debug log for win
-      console.log(`[FLIP DEBUG] [MULTI] WIN userId=${userId} profit=${profit} pityResult=${JSON.stringify(pityResult)} flip#=${i+1}`);
     } else {
       totalLossAmount += bet;
       const pityResult = store.recordLoss(userId, 'flip', bet);
-      // Debug log for loss
-      console.log(`[FLIP DEBUG] [MULTI] LOSE userId=${userId} bet=${bet} pityResult=${JSON.stringify(pityResult)} flip#=${i+1}`);
       if (pityResult && pityResult.triggered) lastTriggeredPity = pityResult;
     }
   }
 
   const boostedNet = totalBoostedWinnings - totalLossAmount;
-  let totalTax = 0;
-
-  if (totalBoostedWinnings > 0) {
-    totalTax = store.addToUniversalPool(totalBoostedWinnings, userId);
-  }
-  store.setBalance(userId, bal + boostedNet - totalTax);
+  store.setBalance(userId, bal + boostedNet);
 
   let cbm = '';
   if (totalLossAmount > 0) {
     const cb = store.applyCashback(userId, totalLossAmount);
-    store.recordVirtualLossTax(totalLossAmount, userId);
     if (cb > 0) cbm = ` (+${store.formatNumber(cb)} back)`;
   }
 
-  const displayNet = boostedNet - totalTax;
+  const displayNet = boostedNet;
   const allInLine = allIn ? '\n‼️ **ALL IN!**' : '';
 
   if (lastTriggeredPity) {

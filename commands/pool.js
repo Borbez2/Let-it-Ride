@@ -3,14 +3,15 @@ const { CONFIG } = require('../config');
 const store = require('../data/store');
 
 function buildSlabLines() {
-  const contSlabs = CONFIG.economy.pools.contributionSlabs || [];
-  const contFinal = CONFIG.economy.pools.contributionFinalScale ?? 0.005;
+  const netWorthTax = CONFIG.economy.pools.netWorthTax || {};
+  const contSlabs = netWorthTax.slabs || [];
+  const contFinal = netWorthTax.finalScale ?? 0;
   let slabLines = '';
   let prevThreshold = 0;
   for (let i = 0; i < contSlabs.length; i++) {
     const s = contSlabs[i];
     const pct = (s.scale * 100).toFixed(0);
-    slabLines += `> Slab ${i + 1}: ${store.formatNumber(prevThreshold)}–${store.formatNumber(s.threshold)} - **${pct}%** of tax\n`;
+    slabLines += `> Slab ${i + 1}: ${store.formatNumber(prevThreshold)}–${store.formatNumber(s.threshold)} - **${pct}%** of base rate\n`;
     prevThreshold = s.threshold;
   }
   const finalPct = contFinal * 100;
@@ -24,30 +25,33 @@ function buildMainEmbed(userId) {
   const wallets = store.getAllWallets();
   const nextHourly = poolData.lastHourlyPayout + 3600000;
   const minsH = Math.max(0, Math.floor((nextHourly - Date.now()) / 60000));
-  const players = Object.keys(wallets).length;
+  const players = Object.keys(wallets).filter((id) => /^\d{17,20}$/.test(String(id || ''))).length;
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
 
-  const taxMin = CONFIG.economy.pools.universalTaxMinNetWorth || 1000000;
-  const baseRate = CONFIG.economy.pools.universalTaxRate;
-  const basePct = (baseRate * 100).toFixed(0);
+  const netWorthTax = CONFIG.economy.pools.netWorthTax || {};
+  const taxMin = netWorthTax.minNetWorth || 0;
+  const baseRate = netWorthTax.baseRate || 0;
+  const basePct = (baseRate * 100).toFixed(3);
+  const splitToLossPool = Math.max(0, Math.min(1, netWorthTax.splitToLossPool ?? 0.5));
+  const splitToUniversal = 1 - splitToLossPool;
   const { slabLines } = buildSlabLines();
 
   return {
     title: '🏦 Universal Pool',
     color: 0x2b2d31,
-    description: `> ${basePct}% flat win tax (only when net worth > ${store.formatNumber(taxMin)})`,
+    description: `> Hourly bank-funded net-worth tax: **${basePct}% base** (applies at **${store.formatNumber(taxMin)}+** net worth)`,
     fields: [
       { name: 'Pool Balance', value: `**${store.formatNumber(poolData.universalPool)}** coins`, inline: true },
       { name: 'Your Share', value: `~**${store.formatNumber(share)}** coins`, inline: true },
       { name: 'Next Payout', value: `**${minsH}m**`, inline: true },
       {
-        name: 'Contribution Slabs',
-        value: `> You always pay ${basePct}% tax, but only this portion is added to the pool:\n${slabLines}`,
+        name: 'Net-Worth Tax Slabs',
+        value: `> Interest is paid first, then a slabbed % of whole net worth is taxed from bank.\n> Split: **${Math.round(splitToUniversal * 100)}%** to Universal Pool, **${Math.round(splitToLossPool * 100)}%** to Daily Spin Pool.\n${slabLines}`,
         inline: false,
       },
       {
         name: '🎰 Daily Spin Pool',
-        value: `> Total: **${store.formatNumber(poolData.lossPool)}** coins\n> 5% loss tax (tiered contributions mirror win slabs) - spins daily at 11:15pm\n> Winnings multiplied by your Spin Payout Mult upgrade`,
+        value: `> Total: **${store.formatNumber(poolData.lossPool)}** coins\n> Funded by the same hourly bank-funded net-worth tax\n> Spins daily at 11:15pm • Winnings multiplied by your Spin Payout Mult upgrade`,
         inline: false,
       },
     ],
@@ -67,7 +71,7 @@ function buildBreakdownEmbed() {
     const s = contSlabs[i];
     const pct = (s.scale * 100).toFixed(0);
     const contributed = slabStats[`slab_${i}`] || 0;
-    slabLines += `> Slab ${i + 1}: ${store.formatNumber(prevThreshold)}–${store.formatNumber(s.threshold)} (**${pct}%** of tax)\n`;
+    slabLines += `> Slab ${i + 1}: ${store.formatNumber(prevThreshold)}–${store.formatNumber(s.threshold)} (**${pct}%** of base rate)\n`;
     slabLines += `> ↳ Total sent to pool: **${store.formatNumber(Math.round(contributed))}**\n`;
     prevThreshold = s.threshold;
   }
@@ -75,13 +79,13 @@ function buildBreakdownEmbed() {
   const finalPct = contFinal * 100;
   const finalFmt = finalPct >= 0.1 ? finalPct.toFixed(1) : finalPct.toFixed(2);
   const finalContributed = slabStats[`slab_${finalIdx}`] || 0;
-  slabLines += `> Slab ${finalIdx + 1}: ${store.formatNumber(prevThreshold)}+ (**${finalFmt}%** of tax)\n`;
+  slabLines += `> Slab ${finalIdx + 1}: ${store.formatNumber(prevThreshold)}+ (**${finalFmt}%** of base rate)\n`;
   slabLines += `> ↳ Total sent to pool: **${store.formatNumber(Math.round(finalContributed))}**`;
 
   return {
     title: '📊 Pool Contribution Breakdown',
     color: 0x2b2d31,
-    description: `Live stats since last restart — how much each win-size tier has contributed to the pool.`,
+    description: `Live stats since last restart — how much each net-worth slab has contributed via hourly bank tax.`,
     fields: [
       {
         name: 'Per-Slab Contributions',

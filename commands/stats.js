@@ -392,9 +392,9 @@ function renderXpPage(username, userId, wallet) {
 
   const bonuses = xp.xpBonuses;
   const bonusLines = [
-    `> Bank Interest: **+${(bonuses.interestRate * 100).toFixed(2)}%**`,
-    `> Loss Cashback: **+${(bonuses.cashbackRate * 100).toFixed(3)}%**`,
-    `> Income Double Chance: **+${(bonuses.universalDoubleChance * 100).toFixed(1)}%**`,
+    `> ⭐ Bank Interest: **+${(bonuses.interestRate * 100).toFixed(2)}%**`,
+    `> ⭐ Loss Cashback: **+${(bonuses.cashbackRate * 100).toFixed(3)}%**`,
+    `> ⭐ Income Double Chance: **+${(bonuses.universalDoubleChance * 100).toFixed(1)}%**`,
   ].join('\n');
 
   const baseEmbed = {

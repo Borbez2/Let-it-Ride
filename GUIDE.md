@@ -29,10 +29,10 @@ Every player starts with **1,000 coins**. Coins live in two places:
 
 | Method | How it works |
 |--------|-------------|
-| `/daily` | Claim 500 base + 50 per streak day. Must claim within 48h to keep streak. |
-| Winning games | Play any game and win. 0.5% of profit is taxed into the Universal Pool. |
+| `/daily` | Claim 750 base + 75 per streak day. Must claim within 48h to keep streak. |
+| Winning games | Play any game and win. Profits feed the economy through hourly net-worth tax. |
 | Universal Pool payout | Every hour, the pool is split equally among all registered players (deposited to bank). |
-| Daily Spin | Each day at 11:15 PM, 0.5% of all losses go to one lucky winner. |
+| Daily Spin | Each day at 11:15 AM, the spin pool goes to one lucky winner. |
 | Cashback | Lose a game and get a small % back based on your cashback rate. |
 | Trading | Swap collectibles with other players via `/trade`. |
 
@@ -126,10 +126,10 @@ Lose **3+ games in a row** (Flip or Duel only) and you get a win-chance buff:
 
 | Streak | Boost per loss |
 |--------|---------------|
-| 3-7 | +0.5% per loss |
-| 8-12 | +1% per loss |
+| 3-7 | +0.25% per loss |
+| 8-12 | +0.5% per loss |
 
-Example: 7 losses in a row = +2.5% win chance. 12 losses = +7.5%.
+Example: 7 losses in a row = +1.25% win chance. 12 losses = +3.75%.
 
 The buff **lasts 5 minutes** and a higher streak replaces a lower one. Winning resets the streak counter, but any active buff continues until expiry. Stacks with Lucky Pot.
 
@@ -137,7 +137,7 @@ Let It Ride losses do **not** count toward the streak.
 
 ### Bank Interest
 
-Hourly passive income on your bank balance. Rate = base (0%) + upgrade levels + collectible bonuses. Calculated in tiered slabs (see [Bank & Interest](#bank--interest)).
+Hourly passive income on your bank balance. Rate = base (2%) + upgrade levels + collectible bonuses. Calculated in tiered slabs (see [Bank & Interest](#bank--interest)).
 
 ### Cashback
 
@@ -149,7 +149,7 @@ Multiplies your spin pool winnings if you're the daily winner. Upgradeable in `/
 
 ### Universal Income Multiplier
 
-Chance to **double** your hourly pool payout. Each upgrade level adds 10% chance (capped at 20x the base chance).
+Chance to **double** your hourly pool payout. Each upgrade level adds 1% chance (capped at 20x the base chance).
 
 ### Mines Save (Mines Charm)
 
@@ -159,12 +159,12 @@ Chance to survive hitting a mine. Only available through collectible bonuses.
 
 | Effect | Symbol | Per Level |
 |--------|--------|-----------|
-| Bank Interest | ∑ | +1% per level |
-| Cashback | ↩ | +0.05% per level |
+| Bank Interest | ∑ | +0.1% per level |
+| Cashback | ↩ | +0.005% per level |
 | Spin Multiplier | ⟳× | Multiplies spin winnings |
-| Universal Income | ∀× | +10% double chance per level |
+| Universal Income | ∀× | +1% double chance per level |
 
-All upgrades have 10 levels. Costs escalate: 1k, 5k, 10k, 25k, 50k, 100k, 250k, 500k, 750k, 1m.
+All upgrades have 100 levels. Cost formula: `floor(500 × 1.18^level)` – early levels are cheap, late levels require significant wealth.
 
 ---
 
@@ -174,13 +174,13 @@ Interest is calculated hourly using **tiered slabs** (like tax brackets). Your e
 
 | Slab | Balance Range | Effective Rate |
 |------|--------------|---------------|
-| 1 | 0 to 1M | r (full rate) |
-| 2 | 1M to 10M | r x 0.50 |
-| 3 | 10M to 100M | r x 0.05 |
-| 4 | 100M to 1B | r x 0.01 |
-| 5 | 1B to 1T | r x 0.0001 |
-| 6 | 1T to 1Q | r x 0.00005 |
-| 7 | Above 1Q | r x 0.00001 |
+| 1 | 0 to 500K | r (full rate) |
+| 2 | 500K to 2M | r × 0.70 |
+| 3 | 2M to 10M | r × 0.45 |
+| 4 | 10M to 50M | r × 0.25 |
+| 5 | 50M to 250M | r × 0.12 |
+| 6 | 250M to 1B | r × 0.05 |
+| 7 | Above 1B | r × 0.02 |
 
 Use `/bank` to view your current balance, rate, and detailed breakdown.
 
@@ -191,28 +191,27 @@ Use `/bank` to view your current balance, rate, and detailed breakdown.
 
 ### Hourly Pool
 
-- **0.1%** of every game win (profit portion) is taxed and split between the hourly and daily pools.
-- Tax always applies (no minimum net worth threshold).
-- Smaller wins contribute much more to the pools early on, then the rate drops for bigger wins (see slabs below).
+- Pool funding comes from an **hourly net-worth tax** (0.03% base) applied to bank balances.
+- Tax is calculated in tiered slabs: lower balances pay the full rate, higher balances are scaled down.
 - Every **hour**, the hourly pool is split equally among all registered players and deposited to their banks.
 
-Contribution slabs (early wins are heavily buffed):
+Net-worth tax slabs:
 
-| Profit Range | Tax Rate |
+| Balance Range | Scale |
 |-------------|----------|
-| 0 to 100k | 10000% |
-| 100k to 1M | 1000% |
-| 1M to 10M | 50% |
-| 10M to 100M | 20% |
-| 100M to 1B | 10% |
-| Above 1B | 1% |
+| 0 to 1M | 100% |
+| 1M to 5M | 80% |
+| 5M to 25M | 65% |
+| 25M to 100M | 50% |
+| 100M to 500M | 38% |
+| 500M to 2B | 28% |
+| Above 2B | 20% |
 
 ### Daily Pool
 
-- **0.1%** of every game win (profit portion) is taxed and split between the hourly and daily pools.
-- Each day at **11:15 PM** (local server time), one random player wins the entire daily pool.
+- Half of the hourly net-worth tax goes to the daily spin pool.
+- Each day at **11:15 AM** (local server time), one random player wins the entire daily pool.
 - Your Spin Multiplier upgrade scales the payout.
-- Losses are tracked for stats, but you are not taxed on losses. The same slabs apply for stats.
 
 View both pools with `/pool`.
 
@@ -222,7 +221,7 @@ View both pools with `/pool`.
 
 ### Mystery Boxes
 
-Buy mystery boxes through `/shop` for **5,000 coins** each (standard) or **500,000 coins** (premium, no common items).
+Buy mystery boxes through `/shop` for **3,500 coins** each (standard) or **350,000 coins** (premium, no common items).
 On the shop's **Mystery Box** page you can now see how many duplicate items you have and sell all of them directly with a button (or still use `/inventory`).
 
 There are **1,000 collectibles** spread across 9 rarity tiers:
@@ -262,13 +261,15 @@ The table below still describes the set completion bonuses that apply to all rar
 
 | Rarity | ∑ Interest | ↩ Cashback | ⛁⌖ Mines | ∀× Income | ⟳× Spin |
 |--------|-----------|-----------|---------|----------|---------|
-| Common | +0.05% | +0.0125% | +0.05% | +0.1% | +0.5% |
-| Uncommon | +0.1% | +0.025% | +0.1% | +0.2% | +1% |
-| Rare | +0.2% | +0.05% | +0.2% | +0.5% | +2% |
-| Epic | +0.5% | +0.125% | +0.5% | +1% | +5% |
-| Legendary | +1% | +0.25% | +1% | +2% | +10% |
-| Mythic | +2% | +0.5% | +2% | +5% | +25% |
-| Divine | +5% | +1.25% | +5% | +10% | +50% |
+| Common | +0.015% | +0.002% | +0.025% | +0.06% | +0.3% |
+| Uncommon | +0.03% | +0.005% | +0.05% | +0.13% | +0.7% |
+| Rare | +0.06% | +0.01% | +0.1% | +0.3% | +1.3% |
+| Epic | +0.15% | +0.03% | +0.2% | +0.6% | +3% |
+| Legendary | +0.4% | +0.08% | +0.5% | +1.3% | +6.5% |
+| Mythic | +0.9% | +0.18% | +1.2% | +3.2% | +16% |
+| Divine | +1.5% | +0.3% | +2.5% | +6.5% | +32% |
+| Special | +3% | +0.6% | +5% | +15% | +70% |
+| Godly | +6% | +1.2% | +10% | +30% | +150% |
 
 ### Luck-based drop rates
 
@@ -390,7 +391,7 @@ utils/
 - **Interaction routing**: `bot.js` dispatches slash commands, button clicks, select menus, and modals to the appropriate handler module.
 - **Embed color scheme**: Green (`0x57f287`) for wins, Red (`0xed4245`) for losses, Blue (`0x5865f2`) for neutral/in-progress, Dark (`0x2b2d31`) for info/help.
 - **Backup system**: Hourly snapshots stored in `backups/hourly/YYYY-MM-DD/HH-MM-SS/`.
-- **Schedulers**: Hourly pool payout, daily spin at 11:15 PM, periodic life stats reporting, session expiry sweeps.
+- **Schedulers**: Hourly pool payout, daily spin at 11:15 AM, periodic life stats reporting, session expiry sweeps.
 
 ---
 
