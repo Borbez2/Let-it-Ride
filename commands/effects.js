@@ -142,34 +142,61 @@ function renderGameplayPage(username, userId) {
 
   const additionalEffects = bonuses.inventoryEffects || [];
 
-  const fields = [
-    { name: '🎯 Win Chance (Flip·Duel·LIR)', value: winText.trimEnd(), inline: false },
-    { name: '☘ Losing Streak Luck', value: luckText + luckFooter, inline: false },
-    { name: '↩ Cashback', value: cbText.trimEnd(), inline: true },
-    { name: '⛁⌖ Mines Save', value: minesText.trimEnd(), inline: true },
+  const TITLE          = `✦ ${username}'s Effects  - Gameplay`;
+  const LEGEND_FIELD   = { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false };
+  const ITEM_EFF_NAME  = '🎒 Item Effects';
+
+  // Pre-truncate every fixed field to the per-field limit first.
+  const fixedFields = [
+    { name: '🎯 Win Chance (Flip·Duel·LIR)', value: truncateField(winText.trimEnd()),         inline: false },
+    { name: '☘ Losing Streak Luck',           value: truncateField(luckText + luckFooter),     inline: false },
+    { name: '↩ Cashback',                      value: truncateField(cbText.trimEnd()),          inline: true  },
+    { name: '⛁⌖ Mines Save',                  value: truncateField(minesText.trimEnd()),       inline: true  },
   ];
+
+  // Calculate embed chars already consumed by the fixed content.
+  const fixedChars =
+    TITLE.length +
+    fixedFields.reduce((s, f) => s + f.name.length + f.value.length, 0) +
+    LEGEND_FIELD.name.length + LEGEND_FIELD.value.length;
+
+  const fields = [...fixedFields];
+
   if (additionalEffects.length > 0) {
+    // Budget: remaining chars under the 6 000 embed limit, minus the field name and a small safety margin.
+    const valueBudget = Math.min(
+      FIELD_VALUE_LIMIT,
+      Math.max(50, EMBED_TOTAL_LIMIT - fixedChars - ITEM_EFF_NAME.length - 10),
+    );
+
     let itemText = additionalEffects.join('\n');
-    if (itemText.length > FIELD_VALUE_LIMIT) {
-      // Show as many lines as fit, then summarise the rest
+    if (itemText.length > valueBudget) {
+      // Show as many lines as fit within the budget, then summarise the rest.
       const lines = additionalEffects;
-      let built = '';
-      let shown = 0;
+      let built   = '';
+      let shown   = 0;
       for (const line of lines) {
-        const next = built ? built + '\n' + line : line;
-        if (next.length > FIELD_VALUE_LIMIT - 40) break;
+        const next   = built ? built + '\n' + line : line;
+        const suffix = `\n> *… and ${lines.length - shown - 1} more effect${lines.length - shown - 1 !== 1 ? 's' : ''}*`;
+        if (next.length + suffix.length > valueBudget) break;
         built = next;
         shown++;
       }
-      const remaining = lines.length - shown;
-      itemText = built + `\n> *… and ${remaining} more effect${remaining !== 1 ? 's' : ''}*`;
+      if (built) {
+        const remaining = lines.length - shown;
+        itemText = built + `\n> *… and ${remaining} more effect${remaining !== 1 ? 's' : ''}*`;
+      } else {
+        // Even a single line doesn't fit in the budget — just summarise.
+        itemText = `> *${lines.length} item effect${lines.length !== 1 ? 's' : ''} active — see individual game tabs for details*`;
+      }
     }
-    fields.push({ name: '🎒 Item Effects', value: itemText, inline: false });
+    fields.push({ name: ITEM_EFF_NAME, value: itemText, inline: false });
   }
-  fields.push({ name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false });
+
+  fields.push(LEGEND_FIELD);
 
   return clampEmbed({
-    title: `✦ ${username}'s Effects  - Gameplay`,
+    title: TITLE,
     color: 0x2b2d31,
     fields,
   });
