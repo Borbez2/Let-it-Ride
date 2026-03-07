@@ -28,6 +28,35 @@ function buildNavRow(viewerId, targetId, activePage) {
   );
 }
 
+// ─── Discord embed limits ─────────────────────────────────────────────────────
+const FIELD_VALUE_LIMIT = 1024;
+const EMBED_TOTAL_LIMIT = 6000;
+
+/** Truncate a string to fit Discord's field value limit (1024 chars). */
+function truncateField(text, limit = FIELD_VALUE_LIMIT) {
+  if (text.length <= limit) return text;
+  const suffix = '\n> *… truncated*';
+  return text.slice(0, limit - suffix.length) + suffix;
+}
+
+/** Clamp all field values in an embed so the total stays under 6000 chars. */
+function clampEmbed(embed) {
+  // Truncate individual field values first
+  for (const f of embed.fields || []) {
+    f.value = truncateField(f.value);
+  }
+  // Check total and trim last long field if overflowing
+  const total = () =>
+    (embed.title || '').length +
+    (embed.description || '').length +
+    (embed.fields || []).reduce((s, f) => s + f.name.length + f.value.length, 0);
+  while (total() > EMBED_TOTAL_LIMIT && embed.fields.length > 1) {
+    // drop the second-to-last field (keep Legend)
+    embed.fields.splice(-2, 1);
+  }
+  return embed;
+}
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 /** Gather all win-chance modifier components for a user. */
@@ -114,27 +143,43 @@ function renderGameplayPage(username, userId) {
   const additionalEffects = bonuses.inventoryEffects || [];
 
   const fields = [
-    { name: '🎯 Win Chance Modifier (Flip · Duel · Let It Ride)', value: winText.trimEnd(), inline: false },
+    { name: '🎯 Win Chance (Flip·Duel·LIR)', value: winText.trimEnd(), inline: false },
     { name: '☘ Losing Streak Luck', value: luckText + luckFooter, inline: false },
     { name: '↩ Cashback', value: cbText.trimEnd(), inline: true },
     { name: '⛁⌖ Mines Save', value: minesText.trimEnd(), inline: true },
   ];
   if (additionalEffects.length > 0) {
-    fields.push({ name: '🎒 Item Effects', value: additionalEffects.join('\n'), inline: false });
+    let itemText = additionalEffects.join('\n');
+    if (itemText.length > FIELD_VALUE_LIMIT) {
+      // Show as many lines as fit, then summarise the rest
+      const lines = additionalEffects;
+      let built = '';
+      let shown = 0;
+      for (const line of lines) {
+        const next = built ? built + '\n' + line : line;
+        if (next.length > FIELD_VALUE_LIMIT - 40) break;
+        built = next;
+        shown++;
+      }
+      const remaining = lines.length - shown;
+      itemText = built + `\n> *… and ${remaining} more effect${remaining !== 1 ? 's' : ''}*`;
+    }
+    fields.push({ name: '🎒 Item Effects', value: itemText, inline: false });
   }
-  fields.push({ name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false });
+  fields.push({ name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false });
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Gameplay`,
     color: 0x2b2d31,
     fields,
-  };
+  });
 }
 
 function renderPassivePage(username, userId) {
   const bonuses = store.getUserBonuses(userId);
   const base = bonuses.base;
   const items = bonuses.items;
+  const xpBonuses = store.getXpInfo(userId).xpBonuses;
 
   // Bank Interest
   const baseIntPct = base.interestRate * 100;
@@ -165,16 +210,16 @@ function renderPassivePage(username, userId) {
   if (xpDoublePct) incomeText += `> ⭐ XP Level: **+${xpDoublePct.toFixed(1)}%**\n`;
   incomeText += `> *(If triggered, your share of the hourly universal pool is doubled for that payout.)*`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Passive`,
     color: 0x2b2d31,
     fields: [
       { name: '∑ Bank Interest', value: intText, inline: false },
-      { name: '⟳× Daily Spin Multiplier', value: spinText, inline: false },
-      { name: '∀× Hourly Income Double Chance', value: incomeText, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: '⟳× Spin Multiplier', value: spinText, inline: false },
+      { name: '∀× Income Double Chance', value: incomeText, inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderFlipPage(username, userId) {
@@ -190,14 +235,14 @@ function renderFlipPage(username, userId) {
   text += `> Payout on win: **2x** bet (net +1x profit)\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Coin Flip`,
     color: 0x2b2d31,
     fields: [
       { name: '🪙 Coin Flip', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderDuelPage(username, userId) {
@@ -214,14 +259,14 @@ function renderDuelPage(username, userId) {
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of stake returned\n`;
   text += `> *Each player's modifier is computed from their own active effects.*`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Duel`,
     color: 0x2b2d31,
     fields: [
       { name: '⚔️ Duel', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderLetItRidePage(username, userId) {
@@ -237,14 +282,14 @@ function renderLetItRidePage(username, userId) {
   text += `> Each successful ride doubles your pot; a fail loses the original bet\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of original bet returned`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Let It Ride`,
     color: 0x2b2d31,
     fields: [
       { name: '🏇 Let It Ride', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderBlackjackPage(username, userId) {
@@ -259,14 +304,14 @@ function renderBlackjackPage(username, userId) {
   text += `> Win chance modifier: **not applied**  - outcome is card-based\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Blackjack`,
     color: 0x2b2d31,
     fields: [
       { name: '🃏 Blackjack', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderMinesPage(username, userId) {
@@ -288,14 +333,14 @@ function renderMinesPage(username, userId) {
   text += `> Win chance modifier: **not applied**  - tile picks are pure RNG\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Mines`,
     color: 0x2b2d31,
     fields: [
       { name: '💣 Mines', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderRoulettePage(username, userId) {
@@ -316,14 +361,14 @@ function renderRoulettePage(username, userId) {
   text += `> Win chance modifier: **not applied**  - outcome is wheel-based\n`;
   text += `> Cashback on loss: **${(cashbackRate * 100).toFixed(2)}%** of bet returned`;
 
-  return {
+  return clampEmbed({
     title: `✦ ${username}'s Effects  - Roulette`,
     color: 0x2b2d31,
     fields: [
       { name: '🎡 Roulette', value: text, inline: false },
-      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Collection items · ⭐ XP level · ⏳ Temporary effect', inline: false },
+      { name: 'Legend', value: '> 🔧 Upgrades · 🎒 Items · ⭐ XP · ⏳ Temp', inline: false },
     ],
-  };
+  });
 }
 
 function renderPage(username, userId, page) {

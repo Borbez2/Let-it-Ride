@@ -114,22 +114,22 @@ function buildModifiersPage() {
   return {
     title: PAGE_TITLES[2],
     color: 0x2b2d31,
-    description: '> Games do their base math first, then your effects get layered on top. Nothing guarantees a win, it just shifts the odds. See your current values with **/effects**.',
+    description: '> Effects layer on top of base game math. See your current values with **/effects**.',
     fields: [
       {
         name: 'All Effects',
-        value: '> ☘ **Luck** - Win-chance buff that builds from a losing streak (Flip, Duel, Let It Ride). Stacks with Lucky Pot.\n> ∑ **Bank Interest** - Passive hourly payout on your bank balance (tiered rate, see /bank)\n> ↩ **Cashback** - Get back a % of every loss\n> ⟳× **Daily Spin Mult** - Multiplies your spin winnings if you get picked\n> ∀× **Universal Income Mult** - Chance to double your hourly pool payout\n> ⛁⌖ **Mines Save** - Chance to survive hitting a mine\n> \n> **Upgradeable in /shop:** ∑ Interest, ↩ Cashback, ⟳× Spin Mult, ∀× Income Mult\n> **From collectibles:** all of the above plus ☘ Luck and ⛁⌖ Mines Save',
+        value: '> ☘ **Luck** — Win-chance buff from losing streaks (Flip, Duel, LIR). Stacks with Lucky Pot.\n> ∑ **Interest** — Hourly payout on bank (tiered, see /bank)\n> ↩ **Cashback** — % of every loss returned\n> ⟳× **Spin Mult** — Multiplies spin winnings\n> ∀× **Income Mult** — Chance to ×2 hourly payout\n> ⛁⌖ **Mines Save** — Survive hitting a mine\n> \n> **Shop upgrades:** ∑ ↩ ⟳× ∀×  ·  **Collectibles:** all of the above',
         inline: false,
       },
       { name: '\u200b', value: '\u200b', inline: false },
       {
         name: '☘ How Luck Works',
-        value: '> Lose **3 games in a row** (Flip or Duel) to trigger a luck buff. More losses make it stronger:\n> \n> **Streak 3-7:** +0.25% win chance per loss (3 losses = 0.25%, 7 losses = 1.25%)\n> **Streak 8-12:** +0.5% win chance per loss (8 losses = 1.75%, 12 losses = 4.25%)\n> \n> The buff **boosts your win chance** and stacks with Lucky Pot. Lasts **5 minutes**. A higher streak replaces a lower one. Winning resets your streak, but any active buff keeps running until it expires.\n> \n> **Note:** Let It Ride doesn\'t count toward the streak to prevent abuse.',
+        value: '> Lose **3+ in a row** (Flip/Duel) to trigger a luck buff:\n> **3-7 losses:** +0.25%/loss · **8-12:** +0.5%/loss\n> Lasts **5 min**, higher streak replaces lower. Win resets streak but active buff keeps running.\n> *Let It Ride doesn\'t count toward streak.*',
         inline: false,
       },
       {
-        name: '∑ How Bank Interest Works',
-        value: '> Interest is calculated in **tiered slabs** (like tax brackets). Your full rate **r** applies to the first 500K; higher balances earn at reduced rates:\n> \n> **Slab 1** (0 to 500K): rate = r\n> **Slab 2** (500K to 2M): rate = r × 0.70\n> **Slab 3** (2M to 10M): rate = r × 0.45\n> **Slab 4** (10M to 50M): rate = r × 0.25\n> **Slab 5** (50M to 250M): rate = r × 0.12\n> **Slab 6** (250M to 1B): rate = r × 0.05\n> **Slab 7** (above 1B): rate = r × 0.02\n> \n> Your rate **r** starts at 2% base + upgrade levels + collectible bonuses. See the full breakdown in `/bank`.',
+        name: '∑ Bank Interest Slabs',
+        value: '> Full rate **r** on first 500K, then reduced:\n> 500K-2M: ×0.70 · 2M-10M: ×0.45 · 10M-50M: ×0.25\n> 50M-250M: ×0.12 · 250M-1B: ×0.05 · 1B+: ×0.02\n> Rate **r** = 2% base + upgrades + collectibles. Details in `/bank`.',
         inline: false,
       },
     ],
