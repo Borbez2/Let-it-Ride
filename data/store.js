@@ -86,6 +86,10 @@ const COLLECTIBLE_EFFECTS = (() => {
 const DB_PATH = path.join(__dirname, 'gambling.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');     // safe with WAL, ~2x faster writes
+db.pragma('cache_size = -16000');       // 16 MB page cache (default is ~2 MB)
+db.pragma('temp_store = MEMORY');       // temp tables in memory
+db.pragma('mmap_size = 268435456');     // 256 MB memory-mapped I/O
 
 function checkpointWal(mode = 'PASSIVE') {
   const normalized = String(mode || 'PASSIVE').toUpperCase();
@@ -278,6 +282,8 @@ function getItemEffects(userId) {
 }
 
 function ensureWalletStatsShape(w) {
+  // Fast path: skip re-checking if already shaped this session
+  if (w._statsShaped) return;
   if (!w.stats) w.stats = DEFAULT_STATS();
   for (const g of GAME_KEYS) {
     if (!w.stats[g]) w.stats[g] = { wins: 0, losses: 0 };
@@ -340,6 +346,7 @@ function ensureWalletStatsShape(w) {
   // XP & collectible history
   if (!Array.isArray(w.stats.xpHistory)) w.stats.xpHistory = [];
   if (!Array.isArray(w.stats.collectibleHistory)) w.stats.collectibleHistory = [];
+  w._statsShaped = true;
 }
 
 // Refresh luck: check if the single buff has expired.
@@ -966,7 +973,29 @@ function saveWallets() {
   upsertAll();
 }
 
+// Save exactly two wallets in a single transaction (for trades, duels, etc.).
+function saveTwoWallets(userId1, userId2) {
+  const batch = db.transaction(() => {
+    saveWallet(userId1);
+    saveWallet(userId2);
+  });
+  batch();
+}
+
 function getAllWallets() { return wallets; }
+
+// Cached player count – avoids O(n) key scan on every /pool or /balance call.
+let _playerCountCache = 0;
+let _playerCountCacheTs = 0;
+const PLAYER_COUNT_CACHE_MS = 30_000; // refresh at most every 30s
+
+function getPlayerCount() {
+  const now = Date.now();
+  if (now - _playerCountCacheTs < PLAYER_COUNT_CACHE_MS) return _playerCountCache;
+  _playerCountCache = Object.keys(wallets).filter(id => /^\d{17,20}$/.test(id)).length;
+  _playerCountCacheTs = now;
+  return _playerCountCache;
+}
 
 function getWallet(userId) {
   if (!wallets[userId]) {
@@ -2132,4 +2161,6 @@ module.exports = {
   getPoolSlabStats,
   maybeTrackXpSnapshot,
   maybeTrackCollectibleSnapshot,
+  saveTwoWallets,
+  getPlayerCount,
 };

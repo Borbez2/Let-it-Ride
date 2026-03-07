@@ -485,7 +485,7 @@ async function handleShopButton(interaction, parts) {
 
     w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
     store.applyMysteryBoxStats(uid, items);
-    store.saveWallets();
+    store.saveWallet(uid);
 
     let resultMsg;
     if (quantity === 1) {
@@ -569,7 +569,7 @@ async function handleShopButton(interaction, parts) {
 
     w.stats.mysteryBox.spent = (w.stats.mysteryBox.spent || 0) + totalCost;
     store.applyMysteryBoxStats(uid, items);
-    store.saveWallets();
+    store.saveWallet(uid);
 
     let resultMsg;
     if (quantity === 1) {
@@ -635,7 +635,7 @@ async function handleUpgradeButton(interaction, parts) {
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.interest[lvl];
     if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
-    w.interestLevel = lvl + 1; store.saveWallets();
+    w.interestLevel = lvl + 1; store.saveWallet(uid);
     const { embed, components } = renderShopPage(uid, 'upgrades', `Interest → Lv ${w.interestLevel}`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -644,7 +644,7 @@ async function handleUpgradeButton(interaction, parts) {
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.cashback[lvl];
     if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
-    w.cashbackLevel = lvl + 1; store.saveWallets();
+    w.cashbackLevel = lvl + 1; store.saveWallet(uid);
     const { embed, components } = renderShopPage(uid, 'upgrades', `Cashback → Lv ${w.cashbackLevel}`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -653,7 +653,7 @@ async function handleUpgradeButton(interaction, parts) {
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.spinMult[lvl];
     if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
-    w.spinMultLevel = lvl + 1; store.saveWallets();
+    w.spinMultLevel = lvl + 1; store.saveWallet(uid);
     const { embed, components } = renderShopPage(uid, 'upgrades', `Spin Payout Mult → Lv ${w.spinMultLevel} (${(1 + w.spinMultLevel * CONFIG.economy.upgrades.spinMultPerLevel).toFixed(2)}x)`);
     return interaction.update({ content: '', embeds: [embed], components });
   }
@@ -662,7 +662,7 @@ async function handleUpgradeButton(interaction, parts) {
     if (lvl >= CONFIG.economy.upgrades.maxLevel) return interaction.reply({ content: "Maxed!", ephemeral: true });
     const cost = CONFIG.economy.upgrades.costs.universalIncome[lvl];
     if (!deductWithBankFallback(w, cost)) return interaction.reply({ content: `Need ${store.formatNumber(cost)} (wallet + bank)`, ephemeral: true });
-    w.universalIncomeMultLevel = lvl + 1; store.saveWallets();
+    w.universalIncomeMultLevel = lvl + 1; store.saveWallet(uid);
     const newChancePct = ((w.universalIncomeMultLevel * CONFIG.economy.upgrades.universalIncomePerLevelChance) * 100).toFixed(0);
     const { embed, components } = renderShopPage(uid, 'upgrades', `Income Double → Lv ${w.universalIncomeMultLevel} (${newChancePct}% chance)`);
     return interaction.update({ content: '', embeds: [embed], components });

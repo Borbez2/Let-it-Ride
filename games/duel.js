@@ -5,10 +5,17 @@ const { maybeAnnouncePityTrigger } = require('./shared');
 
 const activeDuels = new Map();
 
+let _duelPersistTimer = null;
+const _DUEL_PERSIST_DELAY_MS = 2000;
+
 function persistDuelSessions() {
-  store.setRuntimeState('session:duel', {
-    activeDuels: Object.fromEntries(activeDuels),
-  });
+  if (_duelPersistTimer) return;
+  _duelPersistTimer = setTimeout(() => {
+    _duelPersistTimer = null;
+    store.setRuntimeState('session:duel', {
+      activeDuels: Object.fromEntries(activeDuels),
+    });
+  }, _DUEL_PERSIST_DELAY_MS);
 }
 
 function restoreDuelSessions() {

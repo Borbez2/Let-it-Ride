@@ -24,12 +24,19 @@ async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   }).catch(() => null);
 }
 
-/* ── Session persistence ────────────────────────────────── */
+/* ── Session persistence (debounced) ────────────────────── */
+
+let _minesPersistTimer = null;
+const _MINES_PERSIST_DELAY_MS = 2000;
 
 function persistMinesSessions() {
-  store.setRuntimeState('session:mines', {
-    activeMines: Object.fromEntries(activeMines),
-  });
+  if (_minesPersistTimer) return;
+  _minesPersistTimer = setTimeout(() => {
+    _minesPersistTimer = null;
+    store.setRuntimeState('session:mines', {
+      activeMines: Object.fromEntries(activeMines),
+    });
+  }, _MINES_PERSIST_DELAY_MS);
 }
 
 function restoreMinesSessions() {

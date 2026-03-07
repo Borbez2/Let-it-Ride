@@ -59,7 +59,7 @@ async function handleDeposit(interaction) {
   const w = store.getWallet(userId);
   w.balance -= amount; w.bank += amount;
   if (!w.lastBankPayout) w.lastBankPayout = Date.now();
-  store.saveWallets();
+  store.saveWallet(userId);
   const rate = store.getInterestRate(userId);
   return interaction.reply({ embeds: [{
     color: 0x57f287,
@@ -85,7 +85,7 @@ async function handleWithdraw(interaction) {
   store.processBank(userId);
   w = store.getWallet(userId);
   if (amount > w.bank) return interaction.reply({ embeds: [{ color: 0xed4245, description: `Insufficient bank funds. You have **${store.formatNumber(w.bank)}** in your bank.` }] });
-  w.bank -= amount; w.balance += amount; store.saveWallets();
+  w.bank -= amount; w.balance += amount; store.saveWallet(userId);
   return interaction.reply({ embeds: [{
     color: 0x57f287,
     title: '🏦 Withdrawal',

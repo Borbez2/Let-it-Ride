@@ -5,10 +5,17 @@ const { maybeAnnouncePityTrigger } = require('./shared');
 
 const activeRides = new Map();
 
+let _lirPersistTimer = null;
+const _LIR_PERSIST_DELAY_MS = 2000;
+
 function persistLetItRideSessions() {
-  store.setRuntimeState('session:letitride', {
-    activeRides: Object.fromEntries(activeRides),
-  });
+  if (_lirPersistTimer) return;
+  _lirPersistTimer = setTimeout(() => {
+    _lirPersistTimer = null;
+    store.setRuntimeState('session:letitride', {
+      activeRides: Object.fromEntries(activeRides),
+    });
+  }, _LIR_PERSIST_DELAY_MS);
 }
 
 function restoreLetItRideSessions() {

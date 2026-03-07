@@ -499,7 +499,7 @@ async function handleAdminButton(interaction, ADMIN_IDS, STATS_RESET_ADMIN_IDS, 
     wallet.cashbackLevel = 0;
     wallet.spinMultLevel = 0;
     wallet.universalIncomeMultLevel = 0;
-    store.saveWallets();
+    store.saveWallet(session.selectedUserId);
     return interaction.update(renderUsersPage(adminId, `✅ Upgrades reset for ${session.selectedUserName}`));
   }
   if (action === 'resetstats') {

@@ -6,10 +6,17 @@ const { maybeAnnouncePityTrigger } = require('./shared');
 const activeGames = new Map();
 const REDS = CONFIG.games.roulette.redNumbers;
 
+let _roulettePersistTimer = null;
+const _ROULETTE_PERSIST_DELAY_MS = 2000;
+
 function persistRouletteSessions() {
-  store.setRuntimeState('session:roulette', {
-    activeGames: Object.fromEntries(activeGames),
-  });
+  if (_roulettePersistTimer) return;
+  _roulettePersistTimer = setTimeout(() => {
+    _roulettePersistTimer = null;
+    store.setRuntimeState('session:roulette', {
+      activeGames: Object.fromEntries(activeGames),
+    });
+  }, _ROULETTE_PERSIST_DELAY_MS);
 }
 
 function restoreRouletteSessions() {

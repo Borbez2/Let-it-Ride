@@ -22,10 +22,9 @@ function buildSlabLines() {
 
 function buildMainEmbed(userId) {
   const poolData = store.getPoolData();
-  const wallets = store.getAllWallets();
   const nextHourly = poolData.lastHourlyPayout + 3600000;
   const minsH = Math.max(0, Math.floor((nextHourly - Date.now()) / 60000));
-  const players = Object.keys(wallets).filter((id) => /^\d{17,20}$/.test(String(id || ''))).length;
+  const players = store.getPlayerCount();
   const share = players > 0 ? Math.floor(poolData.universalPool / players) : 0;
 
   const netWorthTax = CONFIG.economy.pools.netWorthTax || {};

@@ -22,13 +22,21 @@ async function maybeAnnouncePityTrigger(interaction, userId, pityResult) {
   }).catch(() => null);
 }
 
-/* ── Session persistence ────────────────────────────────── */
+/* ── Session persistence (debounced) ────────────────────── */
+
+let _bjPersistTimer = null;
+const _BJ_PERSIST_DELAY_MS = 2000; // coalesce writes within 2s window
 
 function persistBlackjackSessions() {
-  store.setRuntimeState('session:blackjack', {
-    activeGames: Object.fromEntries(activeGames),
-    activeSplitGames: Object.fromEntries(activeSplitGames),
-  });
+  // Debounce: schedule a single write instead of writing on every button click.
+  if (_bjPersistTimer) return;
+  _bjPersistTimer = setTimeout(() => {
+    _bjPersistTimer = null;
+    store.setRuntimeState('session:blackjack', {
+      activeGames: Object.fromEntries(activeGames),
+      activeSplitGames: Object.fromEntries(activeSplitGames),
+    });
+  }, _BJ_PERSIST_DELAY_MS);
 }
 
 function restoreBlackjackSessions() {

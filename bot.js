@@ -97,20 +97,38 @@ async function resolveKnownUsers(ids) {
   const usersById = new Map();
   const validIds = [];
   const unresolvedIds = [];
+
+  // Separate valid Discord IDs from invalid ones first (no I/O)
+  const discordIds = [];
   for (const id of ids) {
     if (!isLikelyDiscordId(id)) {
       unresolvedIds.push(id);
-      continue;
-    }
-    const cached = client.users.cache.get(id);
-    const user = cached || await client.users.fetch(id).catch(() => null);
-    if (user) {
-      usersById.set(id, user);
-      validIds.push(id);
     } else {
-      unresolvedIds.push(id);
+      discordIds.push(id);
     }
   }
+
+  // Batch-fetch all users in parallel (cache hits are instant, API calls are concurrent)
+  const BATCH_SIZE = 50; // avoid overwhelming the Discord API
+  for (let i = 0; i < discordIds.length; i += BATCH_SIZE) {
+    const batch = discordIds.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(id => {
+        const cached = client.users.cache.get(id);
+        if (cached) return Promise.resolve(cached);
+        return withTimeout(client.users.fetch(id), 2000).catch(() => null);
+      })
+    );
+    for (let j = 0; j < batch.length; j++) {
+      if (results[j]) {
+        usersById.set(batch[j], results[j]);
+        validIds.push(batch[j]);
+      } else {
+        unresolvedIds.push(batch[j]);
+      }
+    }
+  }
+
   return { validIds, usersById, unresolvedIds };
 }
 
@@ -371,11 +389,21 @@ async function distributeUniversalPool() {
     return null;
   });
   if (channel) {
+    // Cap the interest table to top 25 earners to avoid massive messages
+    const sortedInterestRows = [...interestRows].sort((a, b) => b.interest - a.interest).slice(0, 25);
+    // Batch-resolve usernames in parallel
+    const rowUserResults = await Promise.all(
+      sortedInterestRows.map(row => {
+        const cached = usersById.get(row.id);
+        if (cached) return Promise.resolve(cached);
+        return client.users.fetch(row.id).catch(() => null);
+      })
+    );
     const rows = [];
-    for (const row of interestRows) {
-      const u = usersById.get(row.id) || await client.users.fetch(row.id).catch(() => null);
+    for (let i = 0; i < sortedInterestRows.length; i++) {
+      const u = rowUserResults[i];
       const name = (u ? u.username : 'Unknown').substring(0, 14).padEnd(14);
-      rows.push(`${name} ${store.formatNumber(row.interest).padStart(11)}`);
+      rows.push(`${name} ${store.formatNumber(sortedInterestRows[i].interest).padStart(11)}`);
     }
 
     let table = '**Hourly Bank Interest (paid to bank)**\n```\nPlayer          Interest\n-------------- -----------\n';
@@ -490,8 +518,12 @@ async function postLifeStatistics() {
   const lbMedals = ['🥇', '🥈', '🥉'];
   const lbLines = [];
   let lbPos = 0;
+  // Batch-fetch all leaderboard users in parallel
+  const lbUserResults = await Promise.all(
+    lbEntries.map(e => client.users.fetch(e.id).catch(() => null))
+  );
   for (let i = 0; i < lbEntries.length; i++) {
-    const u = await client.users.fetch(lbEntries[i].id).catch(() => null);
+    const u = lbUserResults[i];
     if (!u) continue;
     const rank = lbPos < 3 ? lbMedals[lbPos] : `${lbPos + 1}.`;
     lbLines.push(`${rank} **${u.username}**`);
@@ -505,9 +537,13 @@ async function postLifeStatistics() {
   // xp leaderboard & graph
   const xpEntries = store.getXpLeaderboard();
   const xpLines = [];
+  // Batch-fetch XP leaderboard users in parallel
+  const xpUserResults = await Promise.all(
+    xpEntries.map(e => client.users.fetch(e.userId).catch(() => null))
+  );
   for (let i = 0; i < xpEntries.length; i++) {
     const e = xpEntries[i];
-    const u = await client.users.fetch(e.userId).catch(() => null);
+    const u = xpUserResults[i];
     const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
     const name = u ? u.username : 'Unknown';
     xpLines.push(`${rank} **${name}**`);
@@ -542,9 +578,13 @@ async function postLifeStatistics() {
   // collectibles leaderboard & graph
   const collectEntries = store.getCollectibleLeaderboard().slice(0, 10);
   const collectLines = [];
+  // Batch-fetch collectible leaderboard users in parallel
+  const collectUserResults = await Promise.all(
+    collectEntries.map(e => client.users.fetch(e.userId).catch(() => null))
+  );
   for (let i = 0; i < collectEntries.length; i++) {
     const e = collectEntries[i];
-    const u = await client.users.fetch(e.userId).catch(() => null);
+    const u = collectUserResults[i];
     const rank = i < 3 ? lbMedals[i] : `${i + 1}.`;
     const name = u ? u.username : 'Unknown';
     collectLines.push(`${rank} **${name}**`);
@@ -820,8 +860,12 @@ async function buildLeaderboardBoard(title = '**Leaderboard**') {
   let board = `${title}\n\`\`\`\nRank Player          Purse       Bank        Total\n---- -------------- ----------- ----------- -----------\n`;
   const medals = ['1st', '2nd', '3rd'];
   let pos = 0;
+  // Batch-fetch all leaderboard users in parallel
+  const lbUsers = await Promise.all(
+    entries.map(e => client.users.fetch(e.id).catch(() => null))
+  );
   for (let i = 0; i < entries.length; i++) {
-    const u = await client.users.fetch(entries[i].id).catch(() => null);
+    const u = lbUsers[i];
     if (!u) continue;
     const name = u.username.substring(0, 14).padEnd(14);
     const rank = (medals[pos] || `${pos + 1}th`).padEnd(4);
@@ -841,18 +885,33 @@ async function runDailySpin() {
     const channel = await client.channels.fetch(DAILY_EVENTS_CHANNEL_ID).catch(() => null);
     if (!channel) return;
     const wallets = store.getAllWallets();
-    const unresolvedByFetch = [];
-    const entries = [];
+    // Pre-filter eligible IDs (no I/O)
+    const eligibleIds = [];
     for (const [id, d] of Object.entries(wallets)) {
       const total = (d.balance || 0) + (d.bank || 0);
-      if (total <= 0) continue;
-      if (!isLikelyDiscordId(id)) continue;
-      const user = client.users.cache.get(id) || await client.users.fetch(id).catch(() => null);
-      if (!user) {
-        unresolvedByFetch.push(id);
-        continue;
+      if (total <= 0 || !isLikelyDiscordId(id)) continue;
+      eligibleIds.push(id);
+    }
+    // Batch-resolve users in parallel
+    const BATCH_SIZE = 50;
+    const entries = [];
+    const unresolvedByFetch = [];
+    for (let i = 0; i < eligibleIds.length; i += BATCH_SIZE) {
+      const batch = eligibleIds.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(id => {
+          const cached = client.users.cache.get(id);
+          if (cached) return Promise.resolve(cached);
+          return client.users.fetch(id).catch(() => null);
+        })
+      );
+      for (let j = 0; j < batch.length; j++) {
+        if (results[j]) {
+          entries.push({ id: batch[j], total: (wallets[batch[j]].balance || 0) + (wallets[batch[j]].bank || 0), username: results[j].username });
+        } else {
+          unresolvedByFetch.push(batch[j]);
+        }
       }
-      entries.push({ id, total, username: user.username });
     }
     if (unresolvedByFetch.length > 0) {
       console.log(`Skipped ${unresolvedByFetch.length} unresolved wallet id(s) for daily spin.`);

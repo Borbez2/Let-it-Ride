@@ -100,9 +100,13 @@ async function buildAllPlayersGraphBuffer(client, wallets, options = {}) {
   const labels = buildRelativeLabels(slotCount, slotSeconds);
 
   const datasets = [];
+  // Batch-fetch all users in parallel instead of sequential awaits
+  const userResults = await Promise.all(
+    candidates.map(entry => client.users.fetch(entry.id).catch(() => null))
+  );
   for (let i = 0; i < candidates.length; i++) {
     const entry = candidates[i];
-    const user = await client.users.fetch(entry.id).catch(() => null);
+    const user = userResults[i];
     const label = (user?.username || `User ${entry.id.slice(-4)}`).slice(0, 16);
     const data = seriesForRange(entry.history, earliest, slotCount, slotSeconds);
     const points = data.filter((v) => v !== null).length;
@@ -144,19 +148,24 @@ async function buildAllPlayersGraphBuffer(client, wallets, options = {}) {
 // ── Handlers ──
 
 async function handleLeaderboard(interaction, client) {
+  await interaction.deferReply();
   pruneInvalidWalletIds();
   const wallets = store.getAllWallets();
   const entries = Object.entries(wallets)
     .filter(([id]) => isLikelyDiscordId(id))
     .map(([id, d]) => ({ id, balance: d.balance || 0, bank: d.bank || 0 }))
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank)).slice(0, 10);
-  if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No players yet!' }] });
+  if (!entries.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'No players yet!' }] });
 
   const medals = ['🥇', '🥈', '🥉'];
   const lines = [];
   let pos = 0;
+  // Batch-fetch users in parallel
+  const userResults = await Promise.all(
+    entries.map(e => client.users.fetch(e.id).catch(() => null))
+  );
   for (let i = 0; i < entries.length; i++) {
-    const u = await client.users.fetch(entries[i].id).catch(() => null);
+    const u = userResults[i];
     if (!u) continue;
     const rank = pos < 3 ? medals[pos] : `${pos + 1}.`;
     const wallet = store.formatNumber(entries[i].balance);
@@ -166,7 +175,7 @@ async function handleLeaderboard(interaction, client) {
     lines.push(`Wallet: ${wallet} | Bank: ${bank} | Total: ${total}`);
     pos += 1;
   }
-  if (!lines.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable players found right now.' }] });
+  if (!lines.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable players found right now.' }] });
 
   const tableEmbed = {
     title: '🏆 Leaderboard',
@@ -181,10 +190,11 @@ async function handleLeaderboard(interaction, client) {
     replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'networth.png' })];
   }
 
-  return interaction.reply(replyPayload);
+  return interaction.editReply(replyPayload);
 }
 
 async function handleCollection(interaction, client) {
+  await interaction.deferReply();
   pruneInvalidWalletIds();
   const wallets = store.getAllWallets();
   const entries = Object.entries(wallets)
@@ -192,13 +202,17 @@ async function handleCollection(interaction, client) {
     .map(([id, d]) => ({ id, count: (d.inventory || []).length, unique: new Set((d.inventory || []).map(i => i.id)).size }))
     .filter(e => e.count > 0)
     .sort((a, b) => b.unique - a.unique || b.count - a.count).slice(0, 10);
-  if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'Nobody has collectibles yet!' }] });
+  if (!entries.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'Nobody has collectibles yet!' }] });
 
   const medals = ['🥇', '🥈', '🥉'];
   const rows = [];
   let pos = 0;
+  // Batch-fetch users in parallel
+  const userResults = await Promise.all(
+    entries.map(e => client.users.fetch(e.id).catch(() => null))
+  );
   for (let i = 0; i < entries.length; i++) {
-    const u = await client.users.fetch(entries[i].id).catch(() => null);
+    const u = userResults[i];
     if (!u) continue;
     rows.push({
       rank: pos < 3 ? medals[pos] : `${pos + 1}`,
@@ -208,7 +222,7 @@ async function handleCollection(interaction, client) {
     });
     pos += 1;
   }
-  if (!rows.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable collectible holders found right now.' }] });
+  if (!rows.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable collectible holders found right now.' }] });
 
   const columns = [
     { key: 'rank', header: 'Rank' },
@@ -235,21 +249,26 @@ async function handleCollection(interaction, client) {
     replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'collection.png' })];
   }
 
-  return interaction.reply(replyPayload);
+  return interaction.editReply(replyPayload);
 }
 
 async function handleXpLeaderboard(interaction, client) {
+  await interaction.deferReply();
   pruneInvalidWalletIds();
   const entries = store.getXpLeaderboard();
-  if (!entries.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No XP earned yet!' }] });
+  if (!entries.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'No XP earned yet!' }] });
 
   const medals = ['🥇', '🥈', '🥉'];
   const rows = [];
   let pos = 0;
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (!isLikelyDiscordId(e.userId)) continue;
-    const u = await client.users.fetch(e.userId).catch(() => null);
+  // Batch-fetch users in parallel
+  const validEntries = entries.filter(e => isLikelyDiscordId(e.userId));
+  const userResults = await Promise.all(
+    validEntries.map(e => client.users.fetch(e.userId).catch(() => null))
+  );
+  for (let i = 0; i < validEntries.length; i++) {
+    const e = validEntries[i];
+    const u = userResults[i];
     if (!u) continue;
     rows.push({
       rank: pos < 3 ? medals[pos] : `${pos + 1}`,
@@ -261,7 +280,7 @@ async function handleXpLeaderboard(interaction, client) {
     });
     pos += 1;
   }
-  if (!rows.length) return interaction.reply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable XP players found right now.' }] });
+  if (!rows.length) return interaction.editReply({ embeds: [{ color: 0x2b2d31, description: 'No resolvable XP players found right now.' }] });
 
   const columns = [
     { key: 'rank', header: 'Rank' },
@@ -289,7 +308,7 @@ async function handleXpLeaderboard(interaction, client) {
     replyPayload.files = [new AttachmentBuilder(graphBuffer, { name: 'xp.png' })];
   }
 
-  return interaction.reply(replyPayload);
+  return interaction.editReply(replyPayload);
 }
 
 module.exports = { handleLeaderboard, handleCollection, handleXpLeaderboard };

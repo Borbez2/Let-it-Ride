@@ -4,10 +4,17 @@ const store = require('../data/store');
 
 const activeTrades = new Map();
 
+let _tradePersistTimer = null;
+const _TRADE_PERSIST_DELAY_MS = 2000;
+
 function persistTradeSessions() {
-  store.setRuntimeState('session:trades', {
-    activeTrades: Object.fromEntries(activeTrades),
-  });
+  if (_tradePersistTimer) return;
+  _tradePersistTimer = setTimeout(() => {
+    _tradePersistTimer = null;
+    store.setRuntimeState('session:trades', {
+      activeTrades: Object.fromEntries(activeTrades),
+    });
+  }, _TRADE_PERSIST_DELAY_MS);
 }
 
 function restoreTradeSessions() {
@@ -286,7 +293,7 @@ async function handleTradeButton(interaction, parts) {
         store.maybeTrackCollectibleSnapshot(tw, Date.now(), 'trade');
       }
 
-      store.saveWallets(); activeTrades.delete(tradeKey); persistTradeSessions();
+      store.saveTwoWallets(trade.initiatorId, trade.targetId); activeTrades.delete(tradeKey); persistTradeSessions();
       const initGave = [
         trade.initiatorOffer.coins ? `💰 ${store.formatNumber(trade.initiatorOffer.coins)} coins` : null,
         ...initItemsToGive.map(i => `${i.emoji} ${i.name}`),
